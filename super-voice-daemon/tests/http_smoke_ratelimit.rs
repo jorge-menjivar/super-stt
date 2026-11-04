@@ -7,10 +7,9 @@
 //! the quota for a client turns into a `429` response rather than being
 //! silently dropped or mis-mapped.
 //!
-//! The daemon under `cargo test` is a debug build, so it uses
-//! `ResourceManager::development()` (`max_requests_per_minute: 300`); the
-//! check is `count > limit`, so the 301st request in the rolling minute is
-//! the first to be rejected. All requests here share one `client_id`
+//! The daemon's quota is `limits::MAX_REQUESTS_PER_MINUTE` (600) in every
+//! build; the check is `count > limit`, so the 601st request in the rolling
+//! minute is the first to be rejected. All requests here share one `client_id`
 //! (`uid:pid` of the test process) and connection registration is idempotent
 //! per client, so the flood trips the *rate* limit, not the connection limit.
 //!
@@ -32,10 +31,8 @@ use std::path::PathBuf;
 use super_stt_shared::daemon::http_client;
 use tokio::net::UnixStream;
 
-/// `ResourceLimits::development().max_requests_per_minute` — the build the
-/// test daemon runs. Kept in sync with
-/// `super-voice-daemon/src/resource_management/mod.rs`.
-const DEV_PER_MINUTE: usize = 300;
+/// The daemon's quota, the same in the debug build under test as in a release.
+const DEV_PER_MINUTE: usize = super_voice_daemon::limits::MAX_REQUESTS_PER_MINUTE as usize;
 
 async fn start_daemon() -> (TestDaemon, PathBuf) {
     let daemon = common::daemon("ratelimit").start().await;

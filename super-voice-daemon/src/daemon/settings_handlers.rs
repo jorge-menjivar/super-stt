@@ -15,7 +15,7 @@ impl SuperSTTDaemon {
     /// `docs/protocol/endpoints/v1/write_method/test.md`, so a client can tell
     /// the user what to expect; kept ASCII so a pass means the common case
     /// works rather than exercising high-keysym paths a backend may not map.
-    const WRITE_METHOD_TEST_TEXT: &str = "Super STT input test 123";
+    const WRITE_METHOD_TEST_TEXT: &str = "Super Voice input test 123";
 
     /// Mutate the config under the write lock, then persist it. Centralizes the
     /// lock → mutate → persist sequence so a settings handler can't hand-roll it

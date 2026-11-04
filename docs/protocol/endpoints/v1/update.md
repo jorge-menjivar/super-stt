@@ -24,7 +24,7 @@ semver are always ignored.
 ```http
 GET /update HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -41,8 +41,8 @@ Content-Type: application/json
   "last_check_error": null,
   "beta_optin_effective": true,
   "installer_asset": {
-    "name": "super-stt-install-x86_64-unknown-linux-gnu",
-    "url": "https://github.com/jorge-menjivar/super-stt/releases/download/v0.2.3-beta.1/super-stt-install-x86_64-unknown-linux-gnu",
+    "name": "super-voice-install-x86_64-unknown-linux-gnu",
+    "url": "https://github.com/jorge-menjivar/super-stt/releases/download/v0.2.3-beta.1/super-voice-install-x86_64-unknown-linux-gnu",
     "size": 8388608,
     "sha256": "a3f2c8b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1"
   }
@@ -57,7 +57,7 @@ Content-Type: application/json
 | `checked_at`              | string? | RFC 3339 UTC of the last completed check attempt; `null` before the first.                                                                                                         |
 | `last_check_error`       | string? | Human-readable failure of the last attempt, `null` on success. A failed check keeps the previous successful result's `latest_version`/`installer_asset` only while `beta_optin_effective` is unchanged from that success; if the effective opt-in changed since (e.g. the `update_beta_optin` setting flipped), the stale candidate is cleared instead of reported alongside the new opt-in. |
 | `beta_optin_effective`   | bool    | Resolved from the [`update_beta_optin`](./settings/update_beta_optin.md) setting (`auto` → `true` iff `current_version` is a prerelease). Before the first completed check it reports the setting as currently configured; from the first completed check onward it reports the channel the candidate fields were resolved under, so the two are always consistent. |
-| `installer_asset`        | object? | The `super-stt-install-<target-triple>` asset of the candidate release for this host's architecture; `null` when there is no update, the release lacks the asset, the arch is unsupported, or the release's `SHA256SUMS` asset is unavailable or doesn't list the binary. Clients download this URL to apply the update. |
+| `installer_asset`        | object? | The `super-voice-install-<target-triple>` asset of the candidate release for this host's architecture; `null` when there is no update, the release lacks the asset, the arch is unsupported, or the release's `SHA256SUMS` asset is unavailable or doesn't list the binary. Clients download this URL to apply the update. |
 
 `installer_asset` fields:
 

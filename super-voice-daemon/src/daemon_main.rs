@@ -75,10 +75,17 @@ pub async fn run() -> Result<()> {
         }
     };
 
+    // The daemon that holds the socket is the one whose crash note this is:
+    // read the last run's, then arm the hook that writes the next. See
+    // `crate::crash`.
+    let crash_note = crate::crash::note_path();
+    let crashed = crate::crash::take_note(&crash_note);
+    crate::crash::install_panic_hook(crash_note);
+
     // Load saved configuration
     let config = DaemonConfig::load();
 
-    info!("Starting Super STT Daemon");
+    info!("Starting the Super Voice daemon");
     info!("Model: {}", config.transcription.preferred_model);
     info!("Default device: {}", config.device.preferred_device);
     info!("Audio theme: {}", config.audio.theme);
@@ -87,7 +94,12 @@ pub async fn run() -> Result<()> {
 
     info!("Daemon initialized successfully");
 
-    // Defensive: stop any `super-stt-backend-*` --user units left behind by
+    if let Some(note) = crashed {
+        warn!("The last run crashed: {}", note.trim());
+        daemon.announce_crash_restart().await;
+    }
+
+    // Defensive: stop any `super-voice-backend-*` --user units left behind by
     // a previous daemon that exited ungracefully (SIGKILL / panic / a
     // skipped `Drop`). The transient unit's name embeds the spawning
     // daemon's PID, so a restarted daemon can't reach it via the regular
@@ -119,6 +131,11 @@ pub async fn run() -> Result<()> {
     // first guarantees the supervisor sees every shutdown signal.
     let mut shutdown_rx = daemon.shutdown_tx.subscribe();
 
+    // Held until the process exits. `serve` drops its copy once the socket is
+    // gone, while the backends are still stopping below; a new daemon must not
+    // start, and spawn a backend under the same instance name, before they are
+    // down. See `InstanceLock`.
+    let _held = instance.clone();
     let listener_handle = match spawn_http_listener(&daemon, instance).await {
         Ok(h) => h,
         Err(e) => {

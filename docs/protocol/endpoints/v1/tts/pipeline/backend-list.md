@@ -7,12 +7,12 @@ The slot itself is [`/tts/pipeline/{stage}`](./stage.md) one level up — `GET`
 reports the backend filling the position, `POST` chooses it. This is the menu
 that `POST` accepts, the same relationship [`/model/list`](./model-list.md) has
 with [`/model`](./model.md) and
-[`/device/list`](./device.md#get-pipelinestagemodelmodeldevicelist) with
-[`/device`](./device.md#get-pipelinestagemodelmodeldevice).
+[`/device/list`](./device.md#get-ttspipelinestagemodelmodeldevicelist) with
+[`/device`](./device.md#get-ttspipelinestagemodelmodeldevice).
 
 **Fill a stage's backend picker from this, not from
 [`GET /backend/list`](../../backends.md).** A backend serving nothing this stage
-can run is refused by [`POST /tts/pipeline/{stage}`](./stage.md#post-pipelinestage),
+can run is refused by [`POST /tts/pipeline/{stage}`](./stage.md#post-ttspipelinestage),
 so offering one hands the user an error to discover by choosing it. The daemon
 already applies this rule when it accepts or rejects a selection; a client
 filtering on its own is reimplementing it, and the two can drift.
@@ -33,8 +33,8 @@ notice.
 
 ```http
 GET /tts/pipeline/1/backend/list HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 ## Response (200)

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Mock subprocess backend for `tests/subprocess_mock.rs`. Serves the `/v1`
-//! contract over `SUPER_TTS_BACKEND_SOCKET` with canned responses — loads no
+//! contract over `SUPER_VOICE_BACKEND_SOCKET` with canned responses — loads no
 //! model and needs no GPU or network. Built only with the `test-fixtures`
 //! feature.
 
@@ -25,7 +25,7 @@ struct AppState {
 
 #[tokio::main]
 async fn main() {
-    let socket = std::env::var("SUPER_TTS_BACKEND_SOCKET").expect("SUPER_TTS_BACKEND_SOCKET");
+    let socket = std::env::var("SUPER_VOICE_BACKEND_SOCKET").expect("SUPER_VOICE_BACKEND_SOCKET");
     let state = Arc::new(AppState {
         loaded: AtomicBool::new(false),
         prepared: AtomicBool::new(false),
@@ -130,8 +130,8 @@ async fn prepare(State(s): State<Arc<AppState>>, body: String) -> impl IntoRespo
 /// Write [`PREPARED_MARKER`] into the cache directory.
 fn record_prepare() {
     let (Ok(dir), Ok(cache)) = (
-        std::env::var("SUPER_TTS_BACKEND_DIR"),
-        std::env::var("SUPER_TTS_BACKEND_CACHE_DIR"),
+        std::env::var("SUPER_VOICE_BACKEND_DIR"),
+        std::env::var("SUPER_VOICE_BACKEND_CACHE_DIR"),
     ) else {
         return;
     };

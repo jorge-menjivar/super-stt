@@ -16,9 +16,9 @@ separate endpoints, as they are for the device and the language:
 
 | | is set | may be set |
 |---|---|---|
-| device   | [`/device`](./device.md#get-pipelinestagemodelmodeldevice)     | [`/device/list`](./device.md#get-pipelinestagemodelmodeldevicelist)     |
-| language | [`/language`](./language.md)                                   | [`/language/list`](./language.md#get-pipelinestagemodelmodellanguagelist) |
-| voice    | `/tts/voice`                                                       | [`/tts/voice/list`](#get-pipelinestagemodelmodelvoicelist)                  |
+| device   | [`/device`](./device.md#get-ttspipelinestagemodelmodeldevice)     | [`/device/list`](./device.md#get-ttspipelinestagemodelmodeldevicelist)     |
+| language | [`/language`](./language.md)                                   | [`/language/list`](./language.md#get-ttspipelinestagemodelmodellanguagelist) |
+| voice    | `/tts/voice`                                                       | [`/tts/voice/list`](#get-ttspipelinestagemodelmodelvoicelist)                  |
 
 ```
 /tts/pipeline/1/model/qwen3-tts-0.6b-custom-voice/voice
@@ -106,7 +106,7 @@ Stores the voice. A voice the model cannot resolve is refused rather than
 stored — a shape its `voice_kinds` does not include, or a preset id it does not
 declare — because the alternative is a setting that looks accepted and then
 fails on every utterance that follows. Offer what
-[`/tts/voice/list`](#get-pipelinestagemodelmodelvoicelist) returns, plus a free-text
+[`/tts/voice/list`](#get-ttspipelinestagemodelmodelvoicelist) returns, plus a free-text
 `desc:<text>` when `kinds` includes `described`.
 
 An empty string is `400 invalid_request`: clearing is `DELETE`, which is a
@@ -148,7 +148,7 @@ Described voices are not here — free text has no set to enumerate. `kinds` on
 the block above is what says a model takes them.
 
 An empty list with no `described` kind means the model has no voices to choose
-yet: record one on [`POST /tts/voice`](../voice.md#post-voice) first.
+yet: record one on [`POST /tts/voice`](../voice.md#post-ttsvoice) first.
 
 ## Auth
 

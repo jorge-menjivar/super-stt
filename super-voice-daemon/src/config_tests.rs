@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
 
-/// A config as a release before the move to RON stored it, read the way the
-/// import reads it. Fails the test if it would have been reset.
-fn from_toml(content: &str) -> DaemonConfig {
-    let (config, was_reset) = DaemonConfig::parse_toml(content);
-    assert!(!was_reset, "the TOML config must parse, not reset");
-    config
-}
-
 /// A config as this daemon stores it. Fails the test if it would have been
 /// reset.
 fn from_ron(content: &str) -> DaemonConfig {
@@ -27,28 +19,34 @@ fn round_trip(config: &DaemonConfig) -> DaemonConfig {
     from_ron(&written(config))
 }
 
-/// A config carrying only the required sections loads; every optional section
-/// falls back to its default.
+/// A config naming only some sections loads, and every other section, and
+/// every field left out of a named one, is its default. A setting added in a
+/// later release is a field an earlier file does not have.
 #[test]
-fn config_without_optional_sections_deserializes() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-tiny"
-write_mode = false
-preview_typing_enabled = false
-recording_stop_mode = "silence_and_manual"
-write_method = "auto"
-"#;
-    let config = from_toml(toml_str);
+fn a_config_with_only_some_sections_loads_the_rest_as_defaults() {
+    let config = from_ron(
+        r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    transcription: (preferred_model: "whisper-tiny"),
+)"#,
+    );
     assert_eq!(config.transcription.preferred_model, "whisper-tiny");
+    assert!(config.transcription.active_backend.is_none());
+    assert_eq!(config.notification_method, NotificationMethod::Auto);
     assert!(!config.post_processor.is_active());
+    assert!(config.backends.options.is_empty());
+    assert!(config.backends.context_override.is_empty());
+    assert!(config.update.check_enabled);
+    assert!(config.contexts.items.is_empty());
+    assert!(config.active_context().is_none());
+    assert!(config.http.tcp.enabled);
+    assert!(config.http.tcp.admits_any_origin());
+    assert_eq!(
+        config.http.tcp.bind_addr(),
+        DaemonConfig::default().http.tcp.bind_addr(),
+        "a config without the section listens exactly where a fresh one does"
+    );
 }
 
 #[test]
@@ -118,61 +116,6 @@ fn backend_options_set_clear_and_round_trip() {
     assert!(parsed.backends.options.is_empty());
 }
 
-#[test]
-fn config_without_backends_section_deserializes() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-1"
-write_mode = false
-"#;
-    let config = from_toml(toml_str);
-    assert!(config.backends.options.is_empty());
-}
-
-/// A pre-existing TOML config carrying a stale provider/source string
-/// (e.g. `PascalCase` variant names from a prior build) must keep loading
-/// — falling back to the type's `Default` rather than failing the whole
-/// `[transcription]` section. The user's other settings have to survive.
-#[test]
-fn config_with_legacy_provider_string_falls_back() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "silent"
-volume = 75
-
-[transcription]
-preferred_model = "whisper-tiny"
-preferred_provider = "LocalWhisper"
-preferred_source = "BadValue"
-write_mode = false
-preview_typing_enabled = true
-recording_stop_mode = "silence_and_manual"
-write_method = "auto"
-
-[online]
-allow_online_models = true
-"#;
-    let config = from_toml(toml_str);
-    // The source is a free-form string, so any value is accepted. The legacy
-    // provider key is ignored.
-    assert_eq!(config.transcription.preferred_source, "BadValue");
-    // Other fields must survive the field-level fallback.
-    assert_eq!(config.transcription.preferred_model, "whisper-tiny");
-    assert!(config.transcription.preview_typing_enabled);
-    assert_eq!(config.audio.theme, AudioTheme::Silent);
-    assert_eq!(config.audio.volume, 75);
-}
-
 /// `transcription.active_backend` defaults to `None` (no backend selected
 /// at install time → daemon idle).
 #[test]
@@ -199,26 +142,6 @@ fn active_backend_round_trips_through_the_file() {
         parsed.transcription.active_backend.as_deref(),
         Some("mistral")
     );
-}
-
-/// A pre-existing config that predates the `active_backend` field must
-/// still deserialize cleanly (the field is `Option`-with-default).
-#[test]
-fn config_without_active_backend_field_deserializes() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-tiny"
-write_mode = false
-"#;
-    let config = from_toml(toml_str);
-    assert!(config.transcription.active_backend.is_none());
 }
 
 #[test]
@@ -316,112 +239,6 @@ fn a_persisted_device_preference_normalizes_and_a_bogus_one_falls_back_to_cpu() 
     assert_eq!(cfg.device.preferred_device, "cpu");
 }
 
-/// The committed v0.1.3 `daemon.toml` fixture (customized, not defaults). The
-/// canonical copy lives in the on-disk corpus so the release gate and these
-/// detailed assertions test the same bytes.
-fn v0_1_3_daemon_fixture() -> String {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../fixtures/configs/v0.1.3/daemon.toml");
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-}
-
-#[test]
-fn v0_1_3_full_daemon_config_loads_and_migrates() {
-    let (cfg, was_reset) = DaemonConfig::parse_toml(&v0_1_3_daemon_fixture());
-    assert!(!was_reset, "a valid v0.1.3 config must load, not reset");
-
-    // `preferred_device` normalizes rather than surviving verbatim: v0.1.3
-    // wrote the pre-vocabulary "cuda", which now loads as "gpu" (see
-    // `a_persisted_device_preference_normalizes_and_a_bogus_one_falls_back_to_cpu`).
-    assert_eq!(cfg.device.preferred_device, "gpu");
-    assert_eq!(cfg.audio.volume, 80);
-    assert!(cfg.transcription.write_mode);
-    assert!(!cfg.transcription.preview_typing_enabled);
-    // v0.1.3 also wrote `[online] allow_online_models`; the gate is gone and
-    // the section is simply ignored, which the clean load above already
-    // proves.
-
-    // Settings-enum fields migrate to default: v0.1.3 persisted them in the old
-    // PascalCase form (`Gentle`/`ManualOnly`/`Ydotool`), which the snake_case
-    // wire/config form no longer recognizes, so `deserialize_or_default` degrades
-    // each to its default rather than failing the whole load. (The whole config
-    // still loads cleanly — `was_reset` is false above.)
-    assert_eq!(cfg.audio.theme, AudioTheme::default());
-    assert_eq!(
-        cfg.transcription.recording_stop_mode,
-        RecordingStopMode::default()
-    );
-    assert_eq!(cfg.transcription.write_method, WriteMethod::default());
-
-    // `preferred_model` widened from STTModel enum to String: the old value is
-    // retained verbatim (daemon model loader has its own fallback downstream).
-    assert_eq!(cfg.transcription.preferred_model, "WhisperLargeV3Turbo");
-
-    // New fields materialize at their defaults.
-    assert_eq!(cfg.transcription.preferred_source, "");
-    assert_eq!(cfg.backends_dir, None);
-    assert_eq!(cfg.transcription.active_backend, None);
-    assert_eq!(cfg.primary_language, None);
-    assert!(cfg.backends.options.is_empty());
-    assert!(cfg.backends.models.is_empty());
-    assert!(
-        cfg.update.check_enabled,
-        "new [update] section defaults on old configs"
-    );
-}
-
-#[test]
-fn v0_1_3_every_preferred_model_variant_loads() {
-    // Every STTModel serde name v0.1.3 could have written to `preferred_model`.
-    const V0_1_3_MODELS: &[&str] = &[
-        "WhisperTiny",
-        "WhisperTinyEn",
-        "WhisperBase",
-        "WhisperBaseEn",
-        "WhisperSmall",
-        "WhisperSmallEn",
-        "WhisperMedium",
-        "WhisperMediumEn",
-        "WhisperLarge",
-        "WhisperLargeV2",
-        "WhisperLargeV3",
-        "WhisperLargeV3Turbo",
-        "WhisperDistilMediumEn",
-        "WhisperDistilLargeV2",
-        "WhisperDistilLargeV3",
-        "VoxtralSmall",
-        "VoxtralMini",
-        "OpenAIWhisper1",
-        "OpenAIGpt4oTranscribe",
-        "OpenAIGpt4oMiniTranscribe",
-        "MistralVoxtralMiniTranscribeV2",
-        "DeepgramNova3",
-    ];
-    for model in V0_1_3_MODELS {
-        let toml_str = format!(
-            "[device]\npreferred_device = \"cpu\"\n\
-             [audio]\ntheme = \"Classic\"\nvolume = 100\n\
-             [transcription]\npreferred_model = \"{model}\"\nwrite_mode = false\n"
-        );
-        let (cfg, was_reset) = DaemonConfig::parse_toml(&toml_str);
-        assert!(!was_reset, "v0.1.3 model {model} must load, not reset");
-        assert_eq!(cfg.transcription.preferred_model, *model);
-    }
-}
-
-#[test]
-fn v0_1_3_config_reserializes_to_stable_canonical() {
-    // The import writes a migrated config in canonical form; that must itself
-    // be a valid, stable current config (backends empty → no HashMap ordering
-    // nondeterminism).
-    let (cfg, _) = DaemonConfig::parse_toml(&v0_1_3_daemon_fixture());
-    let s1 = written(&cfg);
-    let (cfg2, was_reset) = DaemonConfig::parse_or_reset(&s1);
-    assert!(!was_reset, "canonical rewrite must re-parse cleanly");
-    let s2 = written(&cfg2);
-    assert_eq!(s1, s2, "canonical form must be idempotent");
-}
-
 /// The invariant behind the unload path (`disable_transcription`): unloading
 /// switches the stage off and keeps everything else — the model, its source,
 /// the backend — and that state must survive a save/reload.
@@ -456,48 +273,6 @@ fn an_unload_persists_as_switched_off_with_the_selection_kept() {
         Some("openai-whisper"),
         "unload keeps the active backend selected"
     );
-}
-
-/// A `daemon.toml` written before stage 1 had an `enabled` flag still loads
-/// its model.
-///
-/// The one thing the field's `true` serde default is for. Reading a missing key
-/// as `false` would idle every daemon on upgrade — no error, just a model that
-/// stopped coming up — because such a config loaded `preferred_model` on sight.
-#[test]
-fn a_config_predating_the_enabled_flag_still_loads_its_model() {
-    let with_a_model = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-tiny"
-preferred_source = "github.com/super-stt/openai"
-active_backend = "openai"
-"#;
-    let (parsed, was_reset) = DaemonConfig::parse_toml(with_a_model);
-    assert!(!was_reset, "an older config must re-parse cleanly");
-    assert!(
-        parsed.transcription.enabled,
-        "an absent flag reads as on, or the upgrade silently idles the daemon"
-    );
-    assert!(
-        parsed.transcription.is_active(),
-        "a config with a model and no flag was running that model"
-    );
-
-    // And one that named no model stays idle, which is the answer the default
-    // gave before the field existed — so the migration default is never wrong.
-    let without_a_model = with_a_model
-        .replace("preferred_model = \"whisper-tiny\"\n", "")
-        .replace("preferred_source = \"github.com/super-stt/openai\"\n", "");
-    let (idle, was_reset) = DaemonConfig::parse_toml(&without_a_model);
-    assert!(!was_reset);
-    assert!(!idle.transcription.is_active());
 }
 
 /// Both stages decide "should this be running?" the same way: switched on, and
@@ -535,121 +310,20 @@ fn all_published_daemon_configs_load_cleanly() {
         if !version_dir.is_dir() {
             continue; // skip README.md and any other non-version files
         }
-        // Releases before the move to RON wrote `daemon.toml`, which the
-        // daemon imports; later ones write `daemon.ron`.
-        let parsers: [(&str, fn(&str) -> (DaemonConfig, bool)); 2] = [
-            ("daemon.toml", DaemonConfig::parse_toml),
-            ("daemon.ron", DaemonConfig::parse_or_reset),
-        ];
-        for (file, parse) in parsers {
-            let fixture = version_dir.join(file);
-            if !fixture.exists() {
-                continue;
-            }
-            let content = std::fs::read_to_string(&fixture)
-                .unwrap_or_else(|e| panic!("read {}: {e}", fixture.display()));
-            let (_, was_reset) = parse(&content);
-            assert!(
-                !was_reset,
-                "daemon fixture {} must load cleanly (no reset)",
-                fixture.display()
-            );
-            checked += 1;
-        }
+        let fixture = version_dir.join("daemon.ron");
+        let content = std::fs::read_to_string(&fixture)
+            .unwrap_or_else(|e| panic!("read {}: {e}", fixture.display()));
+        let (_, was_reset) = DaemonConfig::parse_or_reset(&content);
+        assert!(
+            !was_reset,
+            "daemon fixture {} must load cleanly (no reset)",
+            fixture.display()
+        );
+        checked += 1;
     }
-    assert!(
-        checked >= 4,
-        "expected >= 4 daemon fixtures (v0.1.0-v0.1.3), found {checked}"
-    );
-}
-
-/// The first load after the upgrade brings `daemon.toml` across, then
-/// removes it.
-#[test]
-fn an_upgrade_imports_daemon_toml_once_and_removes_it() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let ron_path = dir.path().join("daemon.ron");
-    let toml_path = dir.path().join("daemon.toml");
-    std::fs::write(&toml_path, v0_1_3_daemon_fixture()).expect("write daemon.toml");
-
-    DaemonConfig::import_toml(&ron_path);
-
-    let imported = from_ron(&std::fs::read_to_string(&ron_path).expect("daemon.ron written"));
-    assert_eq!(imported.audio.volume, 80);
-    assert!(imported.transcription.write_mode);
-    assert_eq!(
-        imported.transcription.preferred_model,
-        "WhisperLargeV3Turbo"
-    );
-    assert_eq!(
-        imported.device.preferred_device, "gpu",
-        "repaired on the way in, as a load repairs it"
-    );
-    assert!(!toml_path.exists(), "daemon.toml is removed");
-
-    // Once `daemon.ron` exists, a `daemon.toml` is not read again, so a change
-    // made since the import stays.
-    let mut changed = imported;
-    changed.audio.volume = 30;
-    super_engine_daemon::config::save(&ron_path, &changed).expect("save");
-    std::fs::write(&toml_path, v0_1_3_daemon_fixture()).expect("write daemon.toml");
-    DaemonConfig::import_toml(&ron_path);
-    let kept = from_ron(&std::fs::read_to_string(&ron_path).expect("read daemon.ron"));
-    assert_eq!(kept.audio.volume, 30);
-}
-
-/// A `daemon.toml` that does not parse imports as defaults, as the releases
-/// that wrote it reset it, so the next load does not try it again.
-#[test]
-fn an_unreadable_daemon_toml_imports_as_defaults() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let ron_path = dir.path().join("daemon.ron");
-    std::fs::write(
-        dir.path().join("daemon.toml"),
-        "this is not ::: valid toml [",
-    )
-    .expect("write daemon.toml");
-
-    DaemonConfig::import_toml(&ron_path);
-
-    let imported = from_ron(&std::fs::read_to_string(&ron_path).expect("daemon.ron written"));
-    assert_eq!(written(&imported), written(&DaemonConfig::default()));
-    assert!(!dir.path().join("daemon.toml").exists());
-}
-
-/// A `daemon.toml` stays until `daemon.ron` is written, so an import that
-/// cannot write is tried again on the next start rather than lost.
-#[test]
-fn a_failed_import_keeps_daemon_toml() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let dir = tempfile::tempdir().expect("tempdir");
-    let ron_path = dir.path().join("daemon.ron");
-    let toml_path = dir.path().join("daemon.toml");
-    std::fs::write(&toml_path, v0_1_3_daemon_fixture()).expect("write daemon.toml");
-    let read_only = std::fs::Permissions::from_mode(0o500);
-    std::fs::set_permissions(dir.path(), read_only).expect("make the dir read-only");
-
-    DaemonConfig::import_toml(&ron_path);
-
-    let writable = std::fs::Permissions::from_mode(0o700);
-    std::fs::set_permissions(dir.path(), writable).expect("make the dir writable");
-    assert!(!ron_path.exists());
-    assert_eq!(
-        std::fs::read_to_string(&toml_path).expect("daemon.toml kept"),
-        v0_1_3_daemon_fixture()
-    );
-}
-
-/// With no `daemon.toml` there is nothing to import, and nothing is written.
-#[test]
-fn a_fresh_install_imports_nothing() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let ron_path = dir.path().join("daemon.ron");
-
-    DaemonConfig::import_toml(&ron_path);
-
-    assert!(!ron_path.exists());
+    // Super Voice started fresh and has no release yet; each one adds the
+    // `daemon.ron` it writes. Until the first, there is nothing to check.
+    eprintln!("checked {checked} published daemon configs");
 }
 
 /// A config written while the daemon still kept `preferred_provider` loads,
@@ -691,40 +365,6 @@ fn daemon_config_reads_notification_method() {
     assert_eq!(cfg.notification_method, NotificationMethod::Desktop);
 }
 
-/// A choice stored under the name a v0.2.x release wrote keeps its meaning,
-/// and the import stores it under the current name.
-#[test]
-fn daemon_config_keeps_methods_stored_under_their_former_names() {
-    let toml = r#"
-notification_method = "dbus"
-
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper"
-write_method = "wayland_protocol"
-"#;
-    let (cfg, was_reset) = DaemonConfig::parse_toml(toml);
-    assert!(!was_reset);
-    assert_eq!(cfg.transcription.write_method, WriteMethod::BuiltIn);
-    assert_eq!(cfg.notification_method, NotificationMethod::Desktop);
-
-    let stored = written(&cfg);
-    assert!(stored.contains(r#"write_method: "built_in""#), "{stored}");
-    assert!(
-        stored.contains(r#"notification_method: "desktop""#),
-        "{stored}"
-    );
-    let back = from_ron(&stored);
-    assert_eq!(back.transcription.write_method, WriteMethod::BuiltIn);
-    assert_eq!(back.notification_method, NotificationMethod::Desktop);
-}
-
 /// Config-load resilience: an unknown stored value degrades to the default
 /// instead of failing the whole parse. (The wire setter, by contrast, rejects
 /// it — see the endpoint doc.)
@@ -745,24 +385,6 @@ fn daemon_bad_notification_method_falls_back_preserving_rest() {
     assert_eq!(cfg.transcription.write_method, WriteMethod::Ydotool);
 }
 
-/// An absent field is the default.
-#[test]
-fn daemon_missing_notification_method_is_auto() {
-    let toml = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper"
-"#;
-    let cfg = from_toml(toml);
-    assert_eq!(cfg.notification_method, NotificationMethod::Auto);
-}
-
 #[test]
 fn default_update_config() {
     let config = DaemonConfig::default();
@@ -771,29 +393,6 @@ fn default_update_config() {
         config.update.beta_optin,
         super_stt_shared::models::update_beta_optin::UpdateBetaOptIn::Auto
     );
-}
-
-#[test]
-fn config_without_update_section_gets_defaults() {
-    // Mirror the literal-TOML shape of `config_without_optional_sections_deserializes`
-    // above: a full config WITHOUT an [update] section.
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-tiny"
-write_mode = false
-preview_typing_enabled = false
-recording_stop_mode = "silence_and_manual"
-write_method = "auto"
-"#;
-    let cfg = from_toml(toml_str);
-    assert!(cfg.update.check_enabled);
 }
 
 #[test]
@@ -847,36 +446,6 @@ fn rename_active_backend_preserves_the_model_preference() {
         Some("app.super-stt.voxtral")
     );
     assert_eq!(c.transcription.preferred_model, "voxtral-mini");
-}
-
-/// The `[http]` section is optional: a `daemon.toml` written before it existed
-/// loads, and gets the same listener a fresh install gets. Upgrading a config
-/// is not a way to end up with a daemon that behaves differently from a new one.
-#[test]
-fn config_without_http_section_gets_the_default_listener() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-tiny"
-write_mode = false
-preview_typing_enabled = false
-recording_stop_mode = "silence_and_manual"
-write_method = "auto"
-"#;
-    let config = from_toml(toml_str);
-    assert!(config.http.tcp.enabled);
-    assert!(config.http.tcp.admits_any_origin());
-    assert_eq!(
-        config.http.tcp.bind_addr(),
-        DaemonConfig::default().http.tcp.bind_addr(),
-        "an upgraded config listens exactly where a fresh one does"
-    );
 }
 
 /// The serde defaults and `Default::default()` must agree on every field. They
@@ -1190,30 +759,6 @@ fn a_pin_to_a_deleted_context_does_not_fall_back_to_the_active_one() {
         Some("medical"),
         "the pin is kept, so restoring the context restores it"
     );
-}
-
-/// A `daemon.toml` written before contexts existed still loads, with none.
-#[test]
-fn config_without_a_contexts_section_deserializes() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-tiny"
-write_mode = false
-preview_typing_enabled = false
-recording_stop_mode = "silence_and_manual"
-"#;
-    let config = from_toml(toml_str);
-    assert!(config.contexts.items.is_empty());
-    assert!(config.contexts.active.is_none());
-    assert!(config.active_context().is_none());
-    assert!(config.backends.context_override.is_empty());
 }
 
 /// The listener's default port is the one `SUPER_VOICE` names. The two are

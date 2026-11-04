@@ -17,7 +17,7 @@ name to a backend.
 
 Two list endpoints sit beside it: the per-model list, which is the narrow and
 accurate answer once a model is chosen, and
-[`/tts/pipeline/{stage}/device/list`](#get-pipelinestagedevicelist), the
+[`/tts/pipeline/{stage}/device/list`](#get-ttspipelinestagedevicelist), the
 backend-wide union for a client filling a picker before one is. The
 [auth](../pipeline.md#auth) is the family's.
 
@@ -30,15 +30,15 @@ backend-wide union for a client filling a picker before one is. The
 
 The device `model` runs on. `model` is resolved against the backend selected
 for this stage — the same resolution an omitted `source` gets on
-[`POST /tts/pipeline/{stage}/model`](./model.md#post-pipelinestagemodel) — so the
+[`POST /tts/pipeline/{stage}/model`](./model.md#post-ttspipelinestagemodel) — so the
 stage must have a backend selected, or this answers `400 invalid_backend`.
 
 **Request:**
 
 ```http
 GET /tts/pipeline/1/model/kokoro-82m/device HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -83,8 +83,8 @@ live on different devices.
 
 ```http
 POST /tts/pipeline/1/model/kokoro-82m/device HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 { "device": "gpu" }
@@ -135,7 +135,7 @@ wants to offer only what will work narrows its picker to `available_devices`.
 ## `GET /tts/pipeline/{stage}/model/{model}/device/list`
 
 The devices this install can offer `model` on this host — the
-`available_devices` of the model's [device](#get-pipelinestagemodelmodeldevice),
+`available_devices` of the model's [device](#get-ttspipelinestagemodelmodeldevice),
 on its own, for a client that only wants to fill a picker. `model` resolves the
 same way, and the same errors apply.
 
@@ -143,8 +143,8 @@ same way, and the same errors apply.
 
 ```http
 GET /tts/pipeline/1/model/kokoro-82m/device/list HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -175,8 +175,8 @@ union and narrowing it. Always in `cpu`, `gpu` order.
 
 ```http
 GET /tts/pipeline/1/device/list HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

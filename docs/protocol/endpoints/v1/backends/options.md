@@ -1,11 +1,13 @@
 # `/backend/{backend_id}/option/list`
 
 Read, set, and reset a backend's **options** — the non-sensitive
-configuration values (a base-URL override, a timeout, and so on) a backend
+configuration values (a base-URL override, a speaking-style preset, a timeout,
+and so on) a backend
 declares as `[[options]]` in its
 [`backend.toml`](../../../backend/config.md). The daemon stores option
 overrides as plaintext in its config and injects each as an
-`x-stt-option-<name>` request header on every `/v1` request (see
+`x-stt-option-<name>` request header (`x-tts-option-<name>` for a synthesis
+model) on every `/v1` request (see
 [contract.md](../../../backend/contract.md#request-headers)).
 
 A write takes effect on the backend's **next request**, not its next model
@@ -15,7 +17,7 @@ is checked per outbound connection, so that too is swapped in place.
 
 `{backend_id}` is the backend's id — its `source` as `GET /backend/list` reports it (e.g. `github.com/super-stt/openai`),
 **URL-percent-encoded** in the path — the same identifier used by
-[`DELETE /backend/{backend_id}`](../backend/list.md#delete-backendsbackend_id):
+[`DELETE /backend/{backend_id}`](../backends.md#delete-backendbackend_id):
 
 ```
 /backend/github.com%2Fsuper-stt%2Fopenai/option/base_url
@@ -52,9 +54,9 @@ List the backend's declared options with their effective values.
 **Request:**
 
 ```http
-GET /backend/github.com%2Fsuper-stt%2Fopenai/option HTTP/1.1
+GET /backend/github.com%2Fsuper-stt%2Fopenai/option/list HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -104,7 +106,7 @@ Authorization: Bearer stt_…64hex…
 | `…[].required` | boolean          | Whether the backend needs it to operate.                      |
 | `…[].value`    | any              | Effective value: the override if set, else `default`.          |
 
-## `GET /backend/{backend_id}/option/list/{name}`
+## `GET /backend/{backend_id}/option/{name}`
 
 Read one option's effective value.
 
@@ -113,7 +115,7 @@ Read one option's effective value.
 ```http
 GET /backend/github.com%2Fsuper-stt%2Fopenai/option/base_url HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -127,7 +129,7 @@ Authorization: Bearer stt_…64hex…
 }
 ```
 
-## `POST /backend/{backend_id}/option/list/{name}`
+## `POST /backend/{backend_id}/option/{name}`
 
 Set the option override. Every stage currently running a model from that
 backend is handed the new value immediately and uses it from its next request —
@@ -146,7 +148,8 @@ running backend kept the old value. No stage is left with nothing loaded.
 be read from is refused with `400 invalid_value`, and nothing is stored.
 
 Every option value is checked against what a request header can carry, because
-that is how it is delivered: the daemon injects it as `x-stt-option-<name>` on
+that is how it is delivered: the daemon injects it as `x-stt-option-<name>` (or
+`x-tts-option-<name>`) on
 every `/v1` call. A value longer than 4000 characters, or carrying a control
 character, is refused with `400 invalid_value` and nothing is stored. Refusing
 the write is the only point at which the user learns — a stored value that
@@ -159,7 +162,7 @@ setting they typed.
 ```http
 POST /backend/github.com%2Fsuper-stt%2Fopenai/option/base_url HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 { "value": "https://gateway.example.com" }
@@ -185,7 +188,7 @@ posting `192.168.0.179:8080/v1` stores and returns
 [config.md](../../../backend/config.md#base_url-and-egress) for the full rule.
 Every other option is stored exactly as posted.
 
-## `DELETE /backend/{backend_id}/option/list/{name}`
+## `DELETE /backend/{backend_id}/option/{name}`
 
 Remove the override, resetting the option to its manifest **default**.
 Idempotent: resetting an option that has no override succeeds. The returned
@@ -196,7 +199,7 @@ Idempotent: resetting an option that has no override succeeds. The returned
 ```http
 DELETE /backend/github.com%2Fsuper-stt%2Fopenai/option/base_url HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

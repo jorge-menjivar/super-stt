@@ -14,8 +14,7 @@ window.
 
 `built_in` was called `wayland_protocol` before macOS support; the name now
 describes what the user is choosing rather than one platform's mechanism for
-it. This endpoint does not accept the old token. A `daemon.toml` that stores
-it still loads as `built_in`, and the daemon rewrites it under the new name.
+it. Neither this endpoint nor the config file accepts the old token.
 
 A specific method is used as given: when it is unavailable the request that
 needs it fails rather than falling back. Only `auto` walks the chain. Asking
@@ -40,7 +39,7 @@ to learn which backend it resolves to — use
 ```http
 POST /settings/write_method HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 {
@@ -79,7 +78,7 @@ Content-Type: application/json
 ```http
 GET /settings/write_method HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

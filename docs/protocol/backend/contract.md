@@ -1,9 +1,10 @@
 # Backend Protocol
 
-A **backend** is an out-of-tree speech-to-text implementation that the
-daemon loads at runtime instead of compiling in. This document defines the
-daemon↔backend contract that every backend implements, regardless of how it
-is packaged.
+A **backend** is an out-of-tree speech-to-text or text-to-speech
+implementation that the daemon loads at runtime instead of compiling in. This
+document defines the daemon↔backend contract that every backend implements,
+regardless of how it is packaged. One backend may serve both features: each
+model's [`role`](./config.md#model-roles) says which one it is for.
 
 The contract is HTTP-shaped and identical for all backends. Only the
 *transport* differs: a backend ships either as a WASM component the daemon
@@ -26,22 +27,26 @@ This document is the companion to:
 
 A model is identified by the `(name, source)` pair — the same
 pair external clients use on
-[`/stt/pipeline/1/model`](../endpoints/v1/pipeline/model.md):
+[`/stt/pipeline/1/model`](../endpoints/v1/pipeline/model.md) and
+[`/tts/pipeline/1/model`](../endpoints/v1/tts/pipeline/model.md):
 
 | Field      | Type   | Notes                                                                       |
 |------------|--------|-----------------------------------------------------------------------------|
-| `name`     | string | Wire model name, e.g. `whisper-tiny`, `voxtral-mini`, `nova-3`.             |
+| `name`     | string | Wire model name, e.g. `whisper-tiny`, `voxtral-mini`, `kokoro-82m`, `xtts-v2`, `nova-3`. |
 | `source`   | string | The **backend repository** that provides the model — a canonical repo id declared in the backend's configuration. |
 
 `source` names *which backend* a model comes from. Two backends may both
-implement `whisper-tiny`; they coexist and are
+implement `whisper-tiny`, or both `kokoro-82m`; they coexist and are
 disambiguated by `source`. The daemon derives a model's `source` from the
 `[backend].source` field of the configuration that declares it — see
 [config.md](./config.md).
 
 > `source` supersedes the older `builtin | custom | online` discriminator.
-> [pipeline.md](../endpoints/v1/pipeline.md) and
-> [pipeline/model-list.md](../endpoints/v1/pipeline/model-list.md) are reconciled with this definition.
+> [pipeline.md](../endpoints/v1/pipeline.md),
+> [pipeline/model-list.md](../endpoints/v1/pipeline/model-list.md),
+> [tts/pipeline/model.md](../endpoints/v1/tts/pipeline/model.md) and
+> [tts/pipeline/model-list.md](../endpoints/v1/tts/pipeline/model-list.md) are
+> reconciled with this definition.
 
 > `[backend].id` is a separate identifier that names a backend's install
 > directory. It is not part of model identity.
@@ -66,35 +71,56 @@ changes.
 
 Every backend exposes these routes under the `/v1` prefix. Payloads follow
 the envelope convention from [transport.md](../transport.md): responses carry
-a top-level `status` field of `"success"` or `"error"`.
+a top-level `status` field of `"success"` or `"error"`. These are the
+backend's own routes, and they carry no `/stt` or `/tts` prefix. Only the
+daemon's client-facing routes do.
 
-| Method | Route            | Purpose                                            |
-|--------|------------------|----------------------------------------------------|
-| POST   | `/v1/load`       | Load a model variant; drives readiness to `ready`. |
-| POST   | `/v1/prepare`    | Build what a first load needs before the weights arrive. **Only models declaring [`prepare_files`](./config.md#models)** (`contract = "v4"`). |
-| GET    | `/v1/status`     | Readiness state and load progress.                 |
-| GET    | `/v1/ping`       | Liveness.                                          |
-| POST   | `/v1/transcribe` | Transcribe audio; one-shot or streaming.           |
-| POST   | `/v1/process`    | Rewrite a finished transcript. **Post-processors only** (`contract = "v2"`). |
-| POST   | `/v1/cancel`     | Cancel an in-flight transcription.                 |
+| Method | Route                | Served for                        | Purpose                                            |
+|--------|----------------------|-----------------------------------|----------------------------------------------------|
+| POST   | `/v1/load`           | every model                       | Load a model variant; drives readiness to `ready`. |
+| POST   | `/v1/prepare`        | models declaring `prepare_files`‡ | Build what a first load needs before the weights arrive. |
+| GET    | `/v1/status`         | every model                       | Readiness state and load progress.                 |
+| GET    | `/v1/ping`           | every model                       | Liveness.                                          |
+| POST   | `/v1/cancel`         | `transcription`, `synthesis`      | Cancel an in-flight transcription or synthesis.    |
+| POST   | `/v1/transcribe`     | `transcription`                   | Transcribe audio; one-shot or streaming.           |
+| POST   | `/v1/process`        | `post_processor`                  | Rewrite a finished transcript.                     |
+| POST   | `/v1/synthesize`     | `synthesis`                       | Synthesize speech; streams framed audio.           |
+| POST   | `/v1/voices`         | `synthesis`, cloned voices†       | Register a cloned voice's reference audio.         |
+| DELETE | `/v1/voices/{voice}` | `synthesis`, cloned voices†       | Release a registered cloned voice.                 |
+
+† Only for models declaring `cloned` in
+[`voice_kinds`](./config.md#voices). A backend whose models are all preset or
+described never receives these calls and need not implement them.
+
+‡ Only for models declaring [`prepare_files`](./config.md#models). A backend
+whose models declare none never receives it and need not implement it.
+
+The routes for each role are described under
+[Speech to text](#speech-to-text) and [Text to speech](#text-to-speech) below.
+The rest of this section is shared by every role.
 
 ### Contract generations and the `/v1` prefix
 
 The manifest's [`contract`](./config.md#contract-generations) names a
 *generation* of this agreement — which fields a `backend.toml` may declare
-and which routes exist to be served. Each generation extends the last: `v2` is
-`v1` plus `[[models]].role` and `POST /v1/process`.
+and which routes exist to be served. Each generation extends the one before
+it. `v1` is the only generation so far, and it is everything on this page.
 
 A generation does not oblige a backend to serve all of it. What a backend must
-implement follows from the models it declares — a `v2` backend serving only
-`post_processor` models implements `POST /v1/process` and never
-`POST /v1/transcribe`.
+implement follows from the models it declares, not from the generation it
+names:
+
+1. A backend serving only `post_processor` models implements
+   `POST /v1/process` and never `POST /v1/transcribe`.
+2. A backend whose models are all preset or described serves
+   `POST /v1/synthesize` and never `POST /v1/voices`, and is no less a `v1`
+   backend for it.
 
 The `/v1` in the route paths is not that number. It is a path segment inside
-the agreement, and an additive generation leaves it alone: a `v2` backend
-serves `/v1/process` next to `/v1/transcribe`, and renames nothing. The prefix
-would move only for a generation that changed the shape of an existing route,
-which none has.
+the agreement, and an extending generation leaves it alone: a future `v2`
+backend would serve whatever `v2` adds *next to* the `/v1` routes, renaming
+nothing. The prefix would move only for a generation that changed the shape of
+a route that already exists, which none has.
 
 ### Request headers
 
@@ -102,19 +128,23 @@ On every `/v1` request the daemon injects context as request headers; a
 backend reads what it needs and ignores the rest. The daemon owns these
 headers — external clients cannot set them.
 
-| Header                | Carries                                                  |
-|-----------------------|----------------------------------------------------------|
-| `x-stt-model`         | The active model name, e.g. `whisper-1`.                 |
-| `x-stt-secret-<name>` | One declared secret, e.g. `x-stt-secret-OPENAI_API_KEY`. |
-| `x-stt-option-<name>` | One declared option, e.g. `x-stt-option-base_url`.       |
-| `x-stt-prompt`        | The user's dictation prompt, as a JSON string.           |
-| `x-stt-vocabulary`    | The user's vocabulary terms, as a JSON array of strings. |
+The prefix follows the feature of the model the request is for: `x-stt-` for a
+`transcription` or `post_processor` model, `x-tts-` for a `synthesis` model.
 
-- `x-stt-model` names the model to transcribe with. The daemon also calls
-  [`POST /v1/load`](#post-v1load) with the model before routing, but a
-  stateless backend (re-instantiated per request — see [wasm.md](./wasm.md))
-  reads `x-stt-model` on each request instead of remembering the load; a
-  stateful backend may rely on `load` and ignore the header.
+| Header                                        | Carries                                                  |
+|-----------------------------------------------|----------------------------------------------------------|
+| `x-stt-model` / `x-tts-model`                 | The active model name, e.g. `whisper-1` or `kokoro-82m`. |
+| `x-stt-secret-<name>` / `x-tts-secret-<name>` | One declared secret, e.g. `x-stt-secret-OPENAI_API_KEY`. |
+| `x-stt-option-<name>` / `x-tts-option-<name>` | One declared option, e.g. `x-stt-option-base_url`.       |
+| `x-stt-prompt`                                | Speech to text only. The user's dictation prompt, as a JSON string. |
+| `x-stt-vocabulary`                            | Speech to text only. The user's vocabulary terms, as a JSON array of strings. |
+
+- `x-stt-model` and `x-tts-model` name the model to transcribe or synthesize
+  with. The daemon also calls [`POST /v1/load`](#post-v1load) with the model
+  before routing, but a stateless backend (re-instantiated per request — see
+  [wasm.md](./wasm.md)) reads the model header on each request instead of
+  remembering the load; a stateful backend may rely on `load` and ignore the
+  header.
 - Secrets and options come from the backend's [configuration](./config.md),
   with values set by the user in the settings UI. The header for a secret or
   option the user has not set is omitted.
@@ -123,19 +153,26 @@ headers — external clients cannot set them.
   an option header gets a single line, always, and the daemon has already said
   no to the user rather than handing the backend something its transport will
   reject.
-- `x-stt-option-base_url` is the one option header the daemon normalizes. It
-  carries a canonical `scheme://host[:port][/path]`: lowercase scheme, no
-  userinfo, no trailing slash, no query or fragment, and a port only when the
-  user set one. A backend can split it at the first `/` after the scheme and
-  needs no further parsing. Every other option is passed through exactly as the
-  user set it. See [config.md — `base_url` and egress](./config.md#base_url-and-egress).
-- **Secret values are sensitive.** The daemon stores them encrypted and
-  redacts the `x-stt-secret-*` headers from logs. A backend uses a secret only
-  to authenticate its own outbound calls — it must never echo one in a
-  response or forward the injected header upstream. An OpenAI backend reads
-  `x-stt-secret-OPENAI_API_KEY` and sets its own `Authorization: Bearer`
-  header on the request to `api.openai.com`.
+- The `base_url` option header (`x-stt-option-base_url` or
+  `x-tts-option-base_url`) is the one the daemon normalizes. It carries a
+  canonical `scheme://host[:port][/path]`:
+  lowercase scheme, no userinfo, no trailing slash, no query or fragment, and a
+  port only when the user set one. A backend can split it at the first `/`
+  after the scheme and needs no further parsing. Every other option is passed
+  through exactly as the user set it. See
+  [config.md — `base_url` and egress](./config.md#base_url-and-egress).
+- **Secret values are sensitive.** The daemon stores them in a file only the
+  user can read (see [Security model](#security-model)) and redacts the
+  `x-stt-secret-*` and `x-tts-secret-*` headers from logs. A backend uses a
+  secret only to authenticate its own outbound calls — it must never echo one
+  in a response or forward the injected header upstream. An OpenAI backend
+  reads `x-stt-secret-OPENAI_API_KEY` (or `x-tts-secret-OPENAI_API_KEY` for a
+  speech model) and sets its own `Authorization: Bearer` header on the request
+  to `api.openai.com`.
 - Option values are not sensitive and are stored as plaintext.
+
+The dictation context is speech to text's alone:
+
 - `x-stt-prompt` and `x-stt-vocabulary` carry the
   [dictation context](../endpoints/v1/context.md) the user has in force for this
   backend: what they are dictating, so the model can hear it. They are sent
@@ -181,8 +218,8 @@ A backend serves exactly one model at a time. Switching models is a fresh
 **Every backend must implement `/v1/load`.** A backend with nothing to load —
 e.g. a cloud backend that holds no local weights — treats it as a no-op: it
 acknowledges with `202` and reports `ready` from `GET /v1/status` immediately.
-The daemon always calls `load` before routing transcription, so the route
-must exist even when it does no work.
+The daemon always calls `load` before routing transcription or synthesis, so
+the route must exist even when it does no work.
 
 **Request:**
 
@@ -200,7 +237,7 @@ Content-Type: application/json
 | Field      | Type   | Required | Notes                                                          |
 |------------|--------|----------|----------------------------------------------------------------|
 | `name`     | string | yes      | A model `name` the backend declares in its configuration.           |
-| `device`   | string | no       | The resolved accelerator for this load: `cpu`, `cuda`, `rocm`, `metal`, or `vulkan`. This is the accelerator the installed asset actually targets, not the user's `cpu`/`gpu` preference — the daemon resolves that preference against the asset it selected, so a build carrying more than one runtime is told which one to use. The same resolution is what external clients see as `resolved_accel` on a model's [device](../endpoints/v1/pipeline/device.md#get-pipelinestagemodelmodeldevice). **Absent** when the daemon has no record of which accelerator the installed build targets — an install performed from a local directory, for instance — in which case the backend selects for itself. The backend may still fall back; the actual device is reported by `GET /v1/status`. |
+| `device`   | string | no       | The resolved accelerator for this load: `cpu`, `cuda`, `rocm`, `metal`, or `vulkan`. This is the accelerator the installed asset actually targets, not the user's `cpu`/`gpu` preference — the daemon resolves that preference against the asset it selected, so a build carrying more than one runtime is told which one to use. The same resolution is what external clients see as `resolved_accel` on a model's device, at [`/stt/pipeline/{stage}/model/{model}/device`](../endpoints/v1/pipeline/device.md#get-sttpipelinestagemodelmodeldevice) or [`/tts/pipeline/{stage}/model/{model}/device`](../endpoints/v1/tts/pipeline/device.md#get-ttspipelinestagemodelmodeldevice). **Absent** when the daemon has no record of which accelerator the installed build targets — an install performed from a local directory, for instance — in which case the backend selects for itself. The backend may still fall back; the actual device is reported by `GET /v1/status`. |
 | `provider` | string | no       | Present only when the model declares [`provider`](./config.md#models) in its configuration, echoed back verbatim. Carries no meaning to the daemon. |
 
 > **Compatibility.** `provider` was part of model identity before it became
@@ -236,10 +273,10 @@ weight values. The daemon overlaps that build with the download of the
 weights, and the load that follows is an ordinary one.
 
 The daemon sends it only for a model that declares
-[`prepare_files`](./config.md#models) (`contract = "v4"`), and only once those
-files are on disk. The weights are still downloading, so the prepare may read
-only the files `prepare_files` lists. Declaring the field is the promise that
-the backend serves this route for that model.
+[`prepare_files`](./config.md#models), and only once those files are on disk.
+The weights are still downloading, so the prepare may read only the files
+`prepare_files` lists. Declaring the field is the promise that the backend
+serves this route for that model.
 
 The request body is the same as [`POST /v1/load`](#post-v1load)'s. The call
 returns `202` at once and the prepare runs in the background;
@@ -370,7 +407,8 @@ without movement if the backend has reported `progress`, then fails the
 load with the backend's recent output. A backend that exits mid-load fails
 the load at the daemon's next poll, with the same output.
 
-The daemon routes transcription to a backend only while `state` is `ready`.
+The daemon routes transcription or synthesis to a backend only while `state`
+is `ready`.
 
 ### `GET /v1/ping`
 
@@ -386,6 +424,31 @@ Content-Type: application/json
 
 { "status": "success", "message": "pong" }
 ```
+
+### `POST /v1/cancel`
+
+Cancel the in-flight transcription or synthesis, if any. The corresponding
+response terminates:
+
+1. A `/v1/transcribe` response ends, a streaming one with an `event: error` or
+   by closing.
+2. A `/v1/synthesize` response ends with an `error` frame if the body has
+   already started, or by closing.
+
+Returns `409 nothing_in_progress` when nothing is running.
+
+**Response (200):**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{ "status": "success", "message": "Cancelled" }
+```
+
+## Speech to text
+
+The routes a `transcription` or `post_processor` model serves.
 
 ### `POST /v1/transcribe`
 
@@ -457,8 +520,8 @@ Once a streaming response has started, late errors arrive as an in-stream
 
 Rewrite a finished transcript — filler removal, punctuation, capitalization,
 formatting. This is the **post-processor** route: it is served by models the
-backend declares with [`role = "post_processor"`](./config.md#models), and the
-daemon drives such a model over this route instead of `/v1/transcribe`.
+backend declares with [`role = "post_processor"`](./config.md#model-roles), and
+the daemon drives such a model over this route instead of `/v1/transcribe`.
 
 The daemon never sends audio here and never sends transcripts to a
 transcription-role model, so a backend that provides no post-processor need not
@@ -516,30 +579,14 @@ therefore fail loudly rather than return something degraded: the fallback is
 the user's original text, which is never worse. See
 [`/stt/pipeline`](../endpoints/v1/pipeline.md).
 
-### `POST /v1/cancel`
-
-Cancel the in-flight transcription, if any. The corresponding
-`/v1/transcribe` response terminates (a streaming one with an `event: error`
-or by closing). Returns `409 nothing_in_progress` when no transcription is
-running.
-
-**Response (200):**
-
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{ "status": "success", "message": "Cancelled" }
-```
-
-## Realtime transcription
+### Realtime transcription
 
 Realtime models use a WebSocket endpoint rather than batch `POST /v1/transcribe`.
 A model is realtime when `[[models]] realtime = true` is set in its backend
 configuration (see [config.md](./config.md#models)). The batch route is for
 non-realtime models only.
 
-### Consumer-facing endpoint
+#### Consumer-facing endpoint
 
 ```
 GET /v1/stt/transcribe/realtime
@@ -555,7 +602,7 @@ below is interpreted by the backend guest, not by the daemon.
 (the `transcribe` scope). The token must appear in the HTTP
 upgrade request's `Authorization: Bearer <token>` header.
 
-### Frame protocol
+#### Frame protocol
 
 The daemon is a pure relay: it shuttles WebSocket frames between the consumer
 and the backend guest without inspecting or rewriting the payload.
@@ -569,7 +616,7 @@ and the backend guest without inspecting or rewriting the payload.
 | Server → client | text | `{"type":"done","transcription":"…"}` — final transcript; the backend then closes. |
 | Server → client | text | `{"type":"error","message":"…"}` — fatal error; the backend then closes. |
 
-### Session lifecycle
+#### Session lifecycle
 
 - The daemon holds the active model for the session's entire duration; a
   model switch initiated while a session is open waits until the session ends.
@@ -577,6 +624,203 @@ and the backend guest without inspecting or rewriting the payload.
   close on the next relay write.
 - An idle session (no consumer frame arriving for 60 seconds) is aborted by
   the daemon, releasing the model hold.
+
+## Text to speech
+
+The routes a `synthesis` model serves.
+
+### `POST /v1/synthesize`
+
+Turn text into audio. This is the only route that produces sound, and the only
+one whose response is not JSON.
+
+The daemon has already done the text work by the time this arrives: markup is
+normalized away, `auto` is resolved to a concrete language, and long input is
+split on sentence boundaries to the model's `max_input_chars`. A backend
+receives **one prosodic unit** it can synthesize as written.
+
+**Request:**
+
+```jsonc
+{
+  "text":         "The kettle is boiling.",  // required, non-empty
+  "voice":        "af_heart",                // optional; a voice this model declares
+  "language":     "en",                      // optional; never the string "auto"
+  "speed":        1.0,                       // optional rate multiplier
+  "instructions": "Read this calmly."        // optional delivery guidance
+}
+```
+
+| Field          | Type   | Required | Notes                                                                                  |
+|----------------|--------|----------|----------------------------------------------------------------------------------------|
+| `text`         | string | yes      | One prosodic unit, already normalized.                                                 |
+| `voice`        | string | no       | A voice id from the model's manifest. Omitted → use `default_voice`.                   |
+| `language`     | string | no       | Resolved BCP-47 tag. **Never `auto`** — the daemon owns detection, because it owns the text. |
+| `speed`        | number | no       | Rate multiplier, roughly 0.5–2.0. A backend that cannot vary rate **ignores it**; do not resample to fake it, the daemon does not either. |
+| `instructions` | string | no       | Free-text delivery guidance for models that accept it. Ignore it otherwise.            |
+
+Optional fields are **omitted**, not sent as `null`, so a backend can
+distinguish "unset" without special-casing.
+
+**Response (200):** a stream of length-prefixed binary frames.
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/vnd.super-tts.frames
+x-tts-sample-rate: 24000
+x-tts-channels: 1
+x-tts-format: s16le
+```
+
+The three `x-tts-*` headers describe every audio frame in the body and are
+required. `x-tts-format` is `s16le` or `f32le`; `x-tts-channels` is `1` or `2`;
+`x-tts-sample-rate` is in Hz. The daemon resamples and channel-maps to whatever
+the output device wants, so emit whatever your model produces natively.
+
+Each frame is:
+
+```
+[u8 kind][u32 length, little-endian][payload…]
+```
+
+| `kind` | Name    | Payload                                                                 |
+|--------|---------|-------------------------------------------------------------------------|
+| `0x01` | `audio` | PCM samples in the declared format. Any length; frames need not align to sample boundaries. |
+| `0x02` | `mark`  | JSON: `{ "start_ms"?, "end_ms"?, "start_char"?, "end_char"? }` — aligns a span of audio to a span of the request text. All fields optional. |
+| `0x03` | `done`  | Empty. **Terminates the stream**; required.                             |
+| `0x04` | `error` | JSON: `{ "message": "…" }`. Terminates the stream.                      |
+
+Emit `audio` frames as they are produced rather than buffering the whole
+utterance — the daemon starts playing as soon as it has enough to cover the
+device's prebuffer, so streaming is what makes speech start quickly.
+
+A stream **must** end with `done` or `error`. A body that ends without one is
+rejected as truncated, because there is no other way to distinguish "the
+backend finished" from "the connection dropped mid-utterance".
+
+**Limits.** A single frame is capped at **1 MiB** and the cumulative audio of
+one response at **32 MiB**. Exceeding either aborts the response. These bound
+what a backend can make the daemon hold; they are not a quality limit — 32 MiB
+is over five minutes of 24 kHz mono `s16le`, and the daemon chunks long text
+into several requests anyway.
+
+**Errors:**
+
+| HTTP | `message`              | Meaning                                                 |
+|------|------------------------|---------------------------------------------------------|
+| 400  | `invalid_text`         | `text` is missing or empty.                             |
+| 400  | `unsupported_language` | `language` is not in the model's `supported_languages`.  |
+| 400  | `unknown_voice`        | `voice` is not a voice this model declares.             |
+| 409  | `not_ready`            | No model is loaded; check `GET /v1/status`.             |
+| 500  | `inference_failed`     | The backend failed during inference.                    |
+
+Errors before the first frame use the JSON envelope with these codes. Once the
+framed response has started, a late failure is an in-band `error` frame instead
+— the status line has already been sent.
+
+### `POST /v1/voices`
+
+Register a cloned voice's reference audio, so later syntheses can name it by id
+alone. Only reached for a model declaring `cloned` in
+[`voice_kinds`](./config.md#voices).
+
+**Called once per voice per load, not per synthesis.** Deriving a speaker
+embedding — or encoding reference codes — is real work, and the daemon issues
+one `/v1/synthesize` per sentence, so a per-request push would repeat it for
+every sentence of a paragraph. The backend derives what it needs once, keys it
+by `voice`, and holds it for the life of the loaded model. Nothing has to
+survive a restart: the daemon re-registers after every load.
+
+**Request:**
+
+```jsonc
+{
+  "voice":       "voice:2f8a2d0e-9c31-4e77-b0aa-1c6b2f0a51d4", // required
+  "transcript":  "The quick brown fox…",                       // optional
+  "sample_rate": 24000,
+  "channels":    1,
+  "format":      "s16le",
+  "audio":       "<base64 PCM>"                                // required
+}
+```
+
+| Field         | Type   | Required | Notes                                                                                     |
+|---------------|--------|----------|-------------------------------------------------------------------------------------------|
+| `voice`       | string | yes      | The full wire id, prefix included. **The same string a later `/v1/synthesize` sends as `voice`** — key the cache by it and no mapping is needed. |
+| `transcript`  | string | no       | What the clip says. Present when the voice was stored with one; **guaranteed** present when the model declares `clone_needs_transcript`, because the daemon refuses to register a transcript-less clip against such a model. |
+| `sample_rate` | number | yes      | Always `24000` today; read it rather than assuming.                                        |
+| `channels`    | number | yes      | Always `1` today.                                                                          |
+| `format`      | string | yes      | Sample format in the `x-tts-format` vocabulary; always `s16le` today.                      |
+| `audio`       | string | yes      | Base64 of the raw PCM, already downmixed, resampled, and trimmed to the model's `clone_ref_seconds`. |
+
+The audio is base64 inside JSON rather than a raw body so this route parses
+like every other one on the contract — it happens once per voice, where the
+third of encoding overhead costs nothing and a second parsing path would cost a
+backend author real work.
+
+The clip has already been trimmed to `clone_ref_seconds`; a backend does not
+need to enforce its own bound, though refusing audio it genuinely cannot use is
+always allowed.
+
+**Response (200 or 201):**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{ "status": "success" }
+```
+
+Any other status is a failure, and its `message` or `detail` reaches the user
+as the reason speaking in that voice did not work.
+
+### `DELETE /v1/voices/{voice}`
+
+Release a registered cloned voice — sent when the user deletes one while the
+model holding it is still loaded. `{voice}` is the percent-encoded wire id, so
+the `voice:` prefix travels as one path segment whatever a router does with a
+raw colon.
+
+`404` is treated as success: the daemon's goal is that the backend not be
+holding the voice, and a backend that never registered it already satisfies
+that.
+
+**Response (200):**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{ "status": "success" }
+```
+
+### Realtime sessions (reserved)
+
+A synthesis model is realtime when `[[models]] realtime = true` is set in its
+backend configuration (see [config.md](./config.md#models)). Such a model is
+served over the realtime WIT's `ws.connect` / `ws-server.handle` halves rather
+than the batch `POST /v1/synthesize` route.
+
+**The transport is implemented; the payload contract is not yet defined.** The
+daemon can load a realtime component, link it, and pump WebSocket frames
+between a consumer and the guest — it is a pure relay and never inspects the
+payload. What it does not yet have is a consumer-facing endpoint for synthesis
+sessions, or a specification of what such a session says over the wire.
+
+This is deliberate. The realtime halves are kept because online providers exist
+that stream synthesized audio over a WebSocket, and re-adding a transport is
+harder than keeping one. But writing down a frame protocol before there is a
+provider to match it would fix a contract on guesswork, and a backend author
+would then implement against something no daemon actually speaks.
+
+Until it is specified:
+
+- `realtime = true` synthesis models are loadable but not reachable by a
+  client.
+- Use `POST /v1/synthesize` for everything.
+- Clients that want to stream *text in* as it is generated already have
+  [`GET /v1/tts/speak/stream`](../endpoints/v1/tts/speak/stream.md) — that is a
+  daemon-side WebSocket and does not involve this backend-side one.
 
 ## Lifecycle
 
@@ -586,12 +830,13 @@ Discovery is covered in [config.md](./config.md).
 
 When a model is selected the daemon:
 
-1. **Terminates the currently active backend before starting the new one.**
-   A switch never runs two model-loaded *transcription* backends at once, so
-   GPU memory is never doubled. A selected
-   [post-processor](../endpoints/v1/pipeline.md) is a separate instance
-   with its own lifecycle, and is not disturbed by a transcription-model
-   switch — the daemon runs at most one of each.
+1. **Terminates the stage's currently active backend before starting the new
+   one.** A switch never runs two model-loaded backends for the same stage at
+   once, so GPU memory is never doubled. Each stage is a separate instance with
+   its own lifecycle: a selected
+   [post-processor](../endpoints/v1/pipeline.md) and the
+   [text-to-speech model](../endpoints/v1/tts/pipeline.md) are not disturbed by
+   a transcription-model switch, and the daemon runs at most one of each.
 2. Ensures the model's files are present, downloading them into the
    backend's directory per the configuration. Local backends are
    network-isolated, so the daemon — not the backend — performs every
@@ -604,8 +849,8 @@ When a model is selected the daemon:
    since exited is started again.
 4. Calls `POST /v1/load` and polls `GET /v1/status` until `state` is
    `ready`.
-5. Routes transcription only after `ready`. A `/v1/transcribe` arriving
-   before then is gated with `409 not_ready`.
+5. Routes transcription or synthesis only after `ready`. A `/v1/transcribe` or
+   `/v1/synthesize` arriving before then is gated with `409 not_ready`.
 
 ```mermaid
 sequenceDiagram
@@ -633,7 +878,7 @@ sequenceDiagram
         B-->>D: { state: "loading", progress }
     end
     B-->>D: { state: "ready" }
-    Note over D,B: transcription is routed only after ready
+    Note over D,B: transcription or synthesis is routed only after ready
 ```
 
 ## Security model
@@ -657,8 +902,8 @@ reach:
   WASM backend has no ambient filesystem access.
 - **Secrets and options.** A backend declares the API keys (secrets) and
   configuration (options) it needs; the user sets them in the settings UI.
-  The daemon stores secrets in a file only the user can read and options in its config,
-  and injects both as request headers on every `/v1` request (see
+  The daemon stores secrets in a file only the user can read and options in its
+  config, and injects both as request headers on every `/v1` request (see
   [request headers](#request-headers)). Backends never read them from
   disk. Over the external client API, secret values are **write-only**: a
   client sets or clears a secret but the daemon never returns a stored value

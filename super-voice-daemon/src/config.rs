@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use super_stt_shared::models::contexts::DictationContext;
 use super_stt_shared::models::notification_method::NotificationMethod;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
@@ -19,7 +19,10 @@ pub struct DaemonConfig {
     /// How a failure is surfaced to the user, a recording's or an
     /// utterance's. An unparseable stored value degrades to the default
     /// rather than failing the whole config load.
-    #[serde(default, deserialize_with = "deserialize_notification_method")]
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
     pub notification_method: NotificationMethod,
     /// The global default language every model starts from: a BCP-47 tag,
     /// the reserved `"auto"`, or `None` (no preference; models use their
@@ -151,61 +154,12 @@ fn default_volume() -> u8 {
     100
 }
 
-/// The `enabled` a config predating the field is read with. See
-/// [`TranscriptionConfig::enabled`] for why it is `true` rather than the
-/// struct's own default.
-fn default_migrated_enabled() -> bool {
-    true
-}
-
-/// Read `write_method`, keeping a choice stored under its former name.
-///
-/// Releases through v0.2.4 wrote [`WriteMethod::BuiltIn`] as
-/// `wayland_protocol`. Read as `auto`, a user who picked it would lose the
-/// pin: `auto` falls through to the portal or ydotool where the pin failed
-/// instead.
-fn deserialize_write_method<'de, D: Deserializer<'de>>(d: D) -> Result<WriteMethod, D::Error> {
-    deserialize_renamed(d, "wayland_protocol", WriteMethod::BuiltIn)
-}
-
-/// Read `notification_method`, keeping a choice stored under its former name.
-///
-/// Releases through v0.2.4 wrote [`NotificationMethod::Desktop`] as `dbus`.
-/// Read as `auto`, a user who picked it would get the notice typed into the
-/// focused window whenever a notification cannot be shown, which is what
-/// that choice rules out.
-fn deserialize_notification_method<'de, D: Deserializer<'de>>(
-    d: D,
-) -> Result<NotificationMethod, D::Error> {
-    deserialize_renamed(d, "dbus", NotificationMethod::Desktop)
-}
-
-/// A settings enum whose stored value may be `former`, a token an earlier
-/// release wrote for `variant`.
-///
-/// Only the config file reads the old token. The wire keeps one token per
-/// variant, and [`DaemonConfig::load`] rewrites the file under the new one.
-/// Any other value goes through `deserialize_or_default`.
-fn deserialize_renamed<'de, D, T>(d: D, former: &str, variant: T) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Default + serde::de::DeserializeOwned,
-{
-    let raw = serde_json::Value::deserialize(d)?;
-    if raw.as_str() == Some(former) {
-        return Ok(variant);
-    }
-    super_stt_shared::utils::serde_helpers::deserialize_or_default(raw)
-        .map_err(serde::de::Error::custom)
-}
-
 /// The transcript post-processor: a second model, selected independently of
 /// the transcription model, that rewrites each final transcript before the
 /// daemon types or returns it.
 ///
 /// Contract: `docs/protocol/endpoints/v1/pipeline.md` (stage 2). Every field is
-/// defaulted, so a `daemon.toml` written before the section existed loads with
-/// post-processing off.
+/// defaulted, so a config without the section loads with post-processing off.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct PostProcessorConfig {
     /// Whether final transcripts are run through the selected post-processor.
@@ -309,14 +263,8 @@ pub struct TranscriptionConfig {
     /// [`PostProcessorConfig::enabled`] has always worked, and which stage 1
     /// lacked until the stages were made to behave alike.
     ///
-    /// Defaults to `true` when the key is absent, which is the only thing that
-    /// default is for: a `daemon.toml` written before this field existed loaded
-    /// its `preferred_model` on sight, so reading a missing key as `false`
-    /// would silently idle every upgraded daemon. A config with no model
-    /// selected is inert either way — see [`TranscriptionConfig::is_active`] —
-    /// so there is no case where the migration default is wrong. A *new* config
-    /// starts `false`, because nothing is selected yet.
-    #[serde(default = "default_migrated_enabled")]
+    /// Starts `false`, because nothing is selected yet.
+    #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub preferred_model: String,
@@ -331,7 +279,10 @@ pub struct TranscriptionConfig {
         deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub recording_stop_mode: RecordingStopMode,
-    #[serde(default, deserialize_with = "deserialize_write_method")]
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
     pub write_method: WriteMethod,
     /// Relative install dir (subdir of [`DaemonConfig::backends_dir`]) of the selected active
     /// backend, or `None` when idle. Metadata (name/source/models) is read from
@@ -505,56 +456,11 @@ impl DaemonConfig {
 
     /// Load configuration from disk. See `super_engine_daemon::config::load`.
     ///
-    /// The first load after an upgrade imports the `daemon.toml` the earlier
-    /// release wrote. See [`Self::import_toml`].
+    /// Super Voice started fresh: the files Super STT and Super TTS wrote are
+    /// left where they are and never read.
     #[must_use]
     pub fn load() -> Self {
-        let path = Self::get_config_path();
-        Self::import_toml(&path);
-        super_engine_daemon::config::load(&path)
-    }
-
-    /// Write the `daemon.toml` beside `path` to `path`, when there is no
-    /// config at `path` yet, then remove it. Releases before the move to RON
-    /// stored the config as TOML.
-    ///
-    /// The TOML file is removed only once `path` is written, so a failed write
-    /// leaves it for the next start to try again.
-    fn import_toml(path: &Path) {
-        if path.exists() {
-            return;
-        }
-        let toml_path = path.with_file_name("daemon.toml");
-        let Ok(content) = std::fs::read_to_string(&toml_path) else {
-            return;
-        };
-        let (config, _) = Self::parse_toml(&content);
-        if let Err(e) = super_engine_daemon::config::save(path, &config) {
-            log::error!("Failed to import {}: {e}", toml_path.display());
-            return;
-        }
-        log::info!("Imported {} into {}", toml_path.display(), path.display());
-        if let Err(e) = std::fs::remove_file(&toml_path) {
-            log::warn!("Failed to remove {}: {e}", toml_path.display());
-        }
-    }
-
-    /// Parse a `daemon.toml`, falling back to defaults when it does not parse,
-    /// as the releases that wrote it did. Repairs stale values the same way a
-    /// RON load does.
-    fn parse_toml(content: &str) -> (Self, bool) {
-        use super_engine_daemon::config::ConfigFile;
-
-        match toml::from_str::<Self>(content) {
-            Ok(mut config) => {
-                config.normalize();
-                (config, false)
-            }
-            Err(e) => {
-                log::warn!("Failed to parse daemon.toml: {e}. Importing defaults.");
-                (Self::default(), true)
-            }
-        }
+        super_engine_daemon::config::load(&Self::get_config_path())
     }
 
     /// Save configuration to disk, atomically. Blocking (it `fsync`s); on the

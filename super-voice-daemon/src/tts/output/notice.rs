@@ -176,7 +176,7 @@ mod tests {
     fn no_summary_repeats_the_app_name() {
         for f in every_failure() {
             assert!(
-                !f.summary.contains("Super TTS"),
+                !f.summary.contains("Super Voice"),
                 "summary repeats the app name: {:?}",
                 f.summary
             );

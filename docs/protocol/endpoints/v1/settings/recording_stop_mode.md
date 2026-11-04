@@ -26,7 +26,7 @@ default set here.
 ```http
 POST /settings/recording_stop_mode HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 {
@@ -68,7 +68,7 @@ the write is not silently coerced to the default.
 ```http
 GET /settings/recording_stop_mode HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

@@ -86,8 +86,7 @@ mod tests {
             "none",
             "disabled",
             "Auto",
-            // `Desktop`'s former token. Only the daemon's config loader
-            // still reads it, so a choice stored before the rename survives.
+            // `Desktop`'s former token.
             "dbus",
         ] {
             assert!(

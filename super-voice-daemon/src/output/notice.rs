@@ -18,21 +18,21 @@
 //! daemon-authored string per failure and never carries backend text.
 
 /// No model is loaded, so the cycle cannot produce text. Caught before capture.
-pub(crate) const NO_MODEL_LOADED: &str = "[Super STT: no model loaded]";
+pub(crate) const NO_MODEL_LOADED: &str = "[Super Voice: no model loaded]";
 
 /// The recorder could not be spawned; capture never began.
-pub(crate) const COULD_NOT_START_RECORDING: &str = "[Super STT: could not start recording]";
+pub(crate) const COULD_NOT_START_RECORDING: &str = "[Super Voice: could not start recording]";
 
 /// Capture began but failed partway through.
-pub(crate) const RECORDING_FAILED: &str = "[Super STT: recording failed]";
+pub(crate) const RECORDING_FAILED: &str = "[Super Voice: recording failed]";
 
 /// Audio was captured but the model failed to transcribe it.
-pub(crate) const TRANSCRIPTION_FAILED: &str = "[Super STT: transcription failed]";
+pub(crate) const TRANSCRIPTION_FAILED: &str = "[Super Voice: transcription failed]";
 
 /// The keyboard could not be set up. Never actually typed — the keyboard is
 /// what failed — but every [`Failure`] carries a typed form, and this one is
 /// held to the same catalogue and invariants as the rest.
-pub(crate) const KEYBOARD_UNAVAILABLE: &str = "[Super STT: cannot type]";
+pub(crate) const KEYBOARD_UNAVAILABLE: &str = "[Super Voice: cannot type]";
 
 #[cfg(test)]
 pub(crate) const ALL: &[&str] = &[
@@ -267,12 +267,12 @@ mod tests {
     fn no_summary_repeats_the_app_name() {
         for f in every_failure() {
             assert!(
-                !f.summary.contains("Super STT"),
+                !f.summary.contains("Super Voice"),
                 "summary repeats the app name: {:?}",
                 f.summary
             );
             assert!(
-                f.typed.starts_with("[Super STT: "),
+                f.typed.starts_with("[Super Voice: "),
                 "a typed notice must stay bracketed and attributed: {:?}",
                 f.typed
             );

@@ -5,13 +5,13 @@ stage's role**. This is what fills a model picker.
 
 Each entry is a `[name, source]` pair, where `source` is the repo id of the
 backend serving it (see [`docs/protocol/backend/`](../../../../backend/)). That is
-the pair [`POST /tts/pipeline/{stage}/model`](./model.md#post-pipelinestagemodel)
+the pair [`POST /tts/pipeline/{stage}/model`](./model.md#post-ttspipelinestagemodel)
 accepts.
 
 ## Scoped twice, and both halves matter
 
 **To the stage's backend.** Only the backend
-[filling this stage](./stage.md#post-pipelinestage) is consulted. A model from
+[filling this stage](./stage.md#post-ttspipelinestage) is consulted. A model from
 another backend cannot load here without also changing the stage's backend, so
 offering it in this list hands the user a pick that does something other than
 what the list implied. Empty when the stage has no backend selected — which is
@@ -50,8 +50,8 @@ roles for itself.
 
 ```http
 GET /tts/pipeline/1/model/list HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

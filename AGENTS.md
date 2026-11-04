@@ -2,11 +2,12 @@
 
 ## Project Structure & Module Organization
 - Workspace root (`Cargo.toml`) with members:
-  - `super-stt`: speech-to-text daemon (ML, audio, D-Bus, model mgmt).
-  - `super-stt-app`: desktop UI (COSMIC/iced).
-  - `super-stt-shared`: shared models, protocol, utils.
+  - `super-voice-daemon`: the one daemon, for speech to text and text to speech (ML, audio, D-Bus, model mgmt). Text to speech is its `tts` module.
+  - `super-voice-consent`, `super-voice-registry-types`, `super-voice-indexer`: the consent dialog, the backend manifest spec, the registry indexer.
+  - `super-stt-app`, `super-tts-app`: each feature's desktop UI (COSMIC/iced), until they merge.
+  - `super-stt-cli`, `super-tts-cli`, `super-stt-shared`, `super-tts-shared`: each feature's CLI and client library.
 - Tests/tooling: Python scripts at repo root (e.g., `test_download_progress.py`).
-- Assets: app `i18n/`, `resources/`. The COSMIC panel applet is shared with Super TTS and lives in super-libre/super-cosmic-applet, which publishes its own releases; the installer installs the newest one.
+- Assets: app `i18n/`, `resources/`. The COSMIC panel applet lives in super-libre/super-cosmic-applet, which publishes its own releases; the installer installs the newest one.
 
 ## Build, Test, and Development Commands
 - Build release: `just build-release` (or `cargo build --release`).

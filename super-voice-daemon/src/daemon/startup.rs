@@ -53,11 +53,7 @@ impl DaemonComponents {
 
         let download_manager = Arc::new(DownloadStateManager::new());
 
-        let resource_manager = if cfg!(debug_assertions) {
-            Arc::new(ResourceManager::development())
-        } else {
-            Arc::new(ResourceManager::production())
-        };
+        let resource_manager = Arc::new(crate::limits::resource_manager());
 
         // D-Bus is optional; absence is non-fatal.
         #[cfg(target_os = "linux")]
@@ -92,7 +88,7 @@ impl SuperSTTDaemon {
     ///
     /// Returns an error if the secrets file exists and cannot be read.
     pub async fn new() -> Result<Self> {
-        info!("Initializing Super STT Daemon...");
+        info!("Initializing the Super Voice daemon...");
 
         // Before anything else that could fail: a daemon that cannot read the
         // file must not start, or its first write would replace a file it

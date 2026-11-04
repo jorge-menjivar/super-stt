@@ -9,9 +9,9 @@ written by older releases — it must load, migrate, or reset, never crash.
 version wrote. Do not reformat existing files — they represent real on-disk
 user configs.
 
-Releases before the move to RON wrote `daemon.toml`. The daemon imports one
-into `daemon.ron` on the first load after the upgrade and then removes it. The
-tests read those fixtures the way the import does.
+Super Voice started fresh: it reads none of the files Super STT and Super TTS
+wrote, so their fixtures are gone. The first Super Voice release adds the first
+directory here.
 
 The COSMIC applet's configs moved with the applet to
 [super-cosmic-applet](https://github.com/super-libre/super-cosmic-applet),

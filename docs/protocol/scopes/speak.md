@@ -30,7 +30,7 @@ An app that shows the user what it is saying usually wants
 [`playback_events`](./playback_events.md) alongside this one.
 
 All traffic is HTTP/1.1 over the Unix domain socket at
-`$XDG_RUNTIME_DIR/tts/super-tts-http.sock`. See [transport.md](../transport.md)
+`<runtime dir>/voice/super-voice-http.sock`. See [transport.md](../transport.md)
 for the wire-level details (HTTP framing, SSE mechanics, example client code).
 
 ## Endpoint reference

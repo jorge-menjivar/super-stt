@@ -1,6 +1,6 @@
 # Transport & Connection Lifecycle
 
-This document describes how a client talks to the super-stt daemon at
+This document describes how a client talks to the daemon at
 the wire level: where the daemon listens, what HTTP shape every request
 and response take, and how broadcast events are delivered over Server-
 Sent Events.
@@ -33,7 +33,7 @@ provides:
 | Linux    | `$XDG_RUNTIME_DIR`, i.e. `/run/user/<uid>`                | `echo "$XDG_RUNTIME_DIR"`          |
 | macOS    | the Darwin per-user temp dir, `/var/folders/<xx>/<hash>/T` | `getconf DARWIN_USER_TEMP_DIR`     |
 
-`/tmp/stt` is the fallback on both if the directory above is unusable. The
+`/tmp/voice` is the fallback on both if the directory above is unusable. The
 daemon reads the macOS one from `confstr(_CS_DARWIN_USER_TEMP_DIR)` rather
 than `$TMPDIR`, so that a daemon started from a shell with `TMPDIR`
 overridden — or by launchd, which supplies a different environment — still
@@ -71,7 +71,7 @@ HTTP response. Standard HTTP semantics:
 ```http
 POST /stt/transcribe HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: application/json
 Content-Length: 178
 
@@ -165,7 +165,7 @@ client disconnects or the daemon shuts down.
 ```http
 GET /events?topics=recording_state,frequency_bands,daemon_status_changed,download_progress HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…
+Authorization: Bearer …
 Accept: text/event-stream
 ```
 
@@ -220,7 +220,8 @@ The `topics` query parameter is comma-separated. Repeating it
 ### Audio fan-out is on the same stream
 
 The audio fan-out — recording state, frequency bands, partial /
-final STT — is just additional topics on the same SSE stream. There
+final STT, speaking state, playback progress — is just additional topics on
+the same SSE stream. There
 is no separate UDP socket. Raw PCM is not exposed; the daemon
 computes the frequency bands and broadcasts only those. See
 [`/events`](./endpoints/v1/events.md) for the audio-specific topic
@@ -332,7 +333,7 @@ endpoints.
 ### Port 7300
 
 `7300`–`7309` is the block reserved for the Super family, one port per
-daemon: `7300` Super STT, `7301` Super TTS, the rest unused for now.
+daemon: `7300` is Super Voice's, the rest unused for now.
 
 The port is fixed rather than OS-chosen because it is half of a browser
 client's origin: one that moved on every restart would invalidate the
@@ -353,7 +354,7 @@ The minimal recipe for a fresh client of any scope:
    ```python
    import requests_unixsocket
    s = requests_unixsocket.Session()
-   r = s.post("http+unix://%2Frun%2Fuser%2F1000%2Fstt%2Fsuper-voice-http.sock/auth/request",
+   r = s.post("http+unix://%2Frun%2Fuser%2F1000%2Fvoice%2Fsuper-voice-http.sock/auth/request",
               json={"app_name": "My App", "scopes": ["transcribe", "status"], "version": "0.1"})
    token = r.json()["session_token"]
    ```
@@ -361,7 +362,7 @@ The minimal recipe for a fresh client of any scope:
    // Node
    const http = require('http');
    const req = http.request({
-     socketPath: '/run/user/1000/stt/super-voice-http.sock',
+     socketPath: '/run/user/1000/voice/super-voice-http.sock',
      method: 'POST',
      path: '/auth/request',
      headers: {'Content-Type': 'application/json'}
@@ -374,8 +375,8 @@ The minimal recipe for a fresh client of any scope:
 3. For commands, send `Authorization: Bearer <token>` on every request:
    ```bash
    curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-http.sock" \
-        -X POST http://voice.local/transcribe \
-        -H "Authorization: Bearer $STT_TOKEN" \
+        -X POST http://voice.local/stt/transcribe \
+        -H "Authorization: Bearer $TOKEN" \
         -H 'Content-Type: application/json' \
         -d '{"data":{"wait":true,"stream_realtime":true}}'
    ```
@@ -386,7 +387,7 @@ The minimal recipe for a fresh client of any scope:
    curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-http.sock" \
         -N \
         "http://voice.local/events?topics=recording_state,daemon_status_changed,download_progress" \
-        -H "Authorization: Bearer $STT_TOKEN"
+        -H "Authorization: Bearer $TOKEN"
    ```
 
 5. On any 401 with `message: "invalid_session"`, run the auth flow

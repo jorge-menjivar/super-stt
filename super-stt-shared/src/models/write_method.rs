@@ -117,8 +117,7 @@ mod tests {
             "wayland",
             "xdg-desktop-portal",
             "wayland-protocol",
-            // `BuiltIn`'s former name. Only the daemon's config loader still
-            // reads it, so a choice stored before the rename survives.
+            // `BuiltIn`'s former name.
             "wayland_protocol",
         ] {
             assert!(

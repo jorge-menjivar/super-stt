@@ -25,14 +25,14 @@ once in the family overview.
 ## `GET /tts/pipeline/{stage}`
 
 One stage, as `stage` — the same object
-[`GET /tts/pipeline`](../pipeline.md#get-pipeline)'s array carries.
+[`GET /tts/pipeline`](../pipeline.md#get-ttspipeline)'s array carries.
 
 **Request:**
 
 ```http
 GET /tts/pipeline/1 HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -57,7 +57,7 @@ An empty stage reports `source: null`, `name: null`, `enabled: false` rather
 than omitting the keys — the daemon is then idle, with nothing to speak with.
 
 The model is not here — read it at
-[`GET /tts/pipeline/{stage}/model`](./model.md#get-pipelinestagemodel). A settings
+[`GET /tts/pipeline/{stage}/model`](./model.md#get-ttspipelinestagemodel). A settings
 card that shows "Kokoro, kokoro-82m, on the GPU" is two reads, and they are
 separate because the model read can be answering mid-download while the backend
 selection has been settled since the user clicked.
@@ -84,8 +84,8 @@ backends this refuses.
 
 ```http
 POST /tts/pipeline/1 HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 { "source": "github.com/jorge-menjivar/super-tts-kokoro" }
@@ -137,7 +137,7 @@ along with the backend. For stage 1 that returns the daemon to fully idle — [`
 answers `409 model_not_loaded` until a backend and a model are chosen again.
 
 Keeping the selection and only stopping the model is
-[`DELETE /tts/pipeline/{stage}/model`](./model.md#delete-pipelinestagemodel)
+[`DELETE /tts/pipeline/{stage}/model`](./model.md#delete-ttspipelinestagemodel)
 instead, which is what a Stop button should call: the user gets their memory
 back without losing the choice they made.
 
@@ -145,8 +145,8 @@ back without losing the choice they made.
 
 ```http
 DELETE /tts/pipeline/1 HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

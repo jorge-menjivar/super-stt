@@ -51,7 +51,7 @@ Content-Type: application/json
 
 {
   "status":        "success",
-  "session_token": "stt_…64hex…",
+  "session_token": "…64hex…",
   "scopes":        ["settings", "status", "daemon_status"],
   "expires_at":    "2026-06-04T12:34:56Z"
 }

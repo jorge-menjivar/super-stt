@@ -18,8 +18,8 @@ separate endpoints, as they are for the device:
 
 | | is set | may be set |
 |---|---|---|
-| device   | [`/device`](./device.md#get-pipelinestagemodelmodeldevice) | [`/device/list`](./device.md#get-pipelinestagemodelmodeldevicelist) |
-| language | `/language`                                                | [`/language/list`](#get-pipelinestagemodelmodellanguagelist)        |
+| device   | [`/device`](./device.md#get-ttspipelinestagemodelmodeldevice) | [`/device/list`](./device.md#get-ttspipelinestagemodelmodeldevicelist) |
+| language | `/language`                                                | [`/language/list`](#get-ttspipelinestagemodelmodellanguagelist)        |
 
 `{model}` is the model name as
 [`GET /tts/pipeline/{stage}/model/list`](./model-list.md) spells it; names contain
@@ -63,8 +63,8 @@ resolved to.
 
 ```http
 GET /tts/pipeline/1/model/kokoro-82m/language HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -94,7 +94,7 @@ For a non-multilingual model: `"multilingual": false`, `"effective": null`,
 `"override": null`, `"primary": "en"`, `"source": "default"`.
 
 The tags this model accepts are **not** here — they are
-[`GET .../language/list`](#get-pipelinestagemodelmodellanguagelist), the way a
+[`GET .../language/list`](#get-ttspipelinestagemodelmodellanguagelist), the way a
 model's device list is not part of its device. This endpoint answers what is
 set; that one answers what may be set, and only one of them changes when the
 user picks a language.
@@ -108,8 +108,8 @@ What `POST` will accept for this model: the tags it serves, plus the reserved
 
 ```http
 GET /tts/pipeline/1/model/kokoro-82m/language/list HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -128,7 +128,7 @@ the wrong language or not at all.
 
 **Empty for a monolingual model**, which has nothing to choose however many
 tags its manifest lists — the same shape
-[`/device/list`](./device.md#get-pipelinestagemodelmodeldevicelist) answers
+[`/device/list`](./device.md#get-ttspipelinestagemodelmodeldevicelist) answers
 with for a model that runs remotely. A client hides the control on an empty
 list rather than special-casing a status.
 
@@ -140,8 +140,8 @@ Pin the model to one language, overriding the global setting.
 
 ```http
 POST /tts/pipeline/1/model/kokoro-82m/language HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 { "language": "es-419" }
@@ -149,7 +149,7 @@ Content-Type: application/json
 
 | Field      | Type   | Required | Notes                                                              |
 |------------|--------|----------|--------------------------------------------------------------------|
-| `language` | string | yes      | One of the tags [`/language/list`](#get-pipelinestagemodelmodellanguagelist) offers. To clear, `DELETE`. |
+| `language` | string | yes      | One of the tags [`/language/list`](#get-ttspipelinestagemodelmodellanguagelist) offers. To clear, `DELETE`. |
 
 **Response (200):** the resolution block (as `GET`), with `source` now
 `override`.
@@ -165,8 +165,8 @@ Clear the override (back to Automatic).
 
 ```http
 DELETE /tts/pipeline/1/model/kokoro-82m/language HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):** the resolution block (as `GET`), with `source` now `global`
@@ -176,7 +176,7 @@ or `default`.
 
 | HTTP | `error_code`           | Meaning                                                                                                      |
 |------|------------------------|--------------------------------------------------------------------------------------------------------------|
-| 400  | `unsupported_language` | `language` is not one [`/language/list`](#get-pipelinestagemodelmodellanguagelist) offers — a tag the model does not serve, or any tag at all for a monolingual model |
+| 400  | `unsupported_language` | `language` is not one [`/language/list`](#get-ttspipelinestagemodelmodellanguagelist) offers — a tag the model does not serve, or any tag at all for a monolingual model |
 | 400  | `invalid_backend`      | No backend is selected for this stage, so there is nothing to resolve `{model}` against                      |
 | 401  | `invalid_session`      | Token unknown / expired / `exe_changed`                                                                      |
 | 403  | `scope_denied`         | Token lacks the `settings` scope                                                                             |

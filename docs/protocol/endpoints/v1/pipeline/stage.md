@@ -36,7 +36,7 @@ Content-Type: application/json
 ```
 
 The model is not here — read it at
-[`GET /stt/pipeline/{stage}/model`](./model.md#get-pipelinestagemodel).
+[`GET /stt/pipeline/{stage}/model`](./model.md#get-sttpipelinestagemodel).
 
 ## `POST /stt/pipeline/{stage}`
 
@@ -52,7 +52,7 @@ that rather than from `GET /backend/list`, or it offers backends this refuses.
 ```http
 POST /stt/pipeline/2 HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 { "source": "github.com/jorge-menjivar/super-stt-textclean" }

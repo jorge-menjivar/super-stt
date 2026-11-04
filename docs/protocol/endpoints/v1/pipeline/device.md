@@ -28,7 +28,7 @@ for this stage — the same resolution an omitted `source` gets on
 ```http
 GET /stt/pipeline/1/model/whisper-large-v3/device HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -49,7 +49,7 @@ Content-Type: application/json
 |---------------------|----------|-----------------------------------------------------------------------------------------|
 | `device`            | string   | The device the model loads on, `"cpu"` or `"gpu"` — its own, or the daemon's default when it has none of its own. `"none"` for an online model, which runs remotely and has no local device. |
 | `resolved_accel`    | string?  | What that preference resolved to: `"cuda"`, `"rocm"`, `"metal"`, `"vulkan"` or `"cpu"` while the model is loaded in this stage — always what actually loaded, so a `"gpu"` choice that fell back reads `"cpu"` here. When the model is not loaded: `"cpu"` for a `"cpu"` preference (nothing to resolve), `null` for `"gpu"` (nothing has resolved yet). `null` for an online model. |
-| `available_devices` | string[] | The devices this install can offer the model on this host: the model's `supported_devices`, narrowed to the accelerators its installed asset actually provides (`installed_accel` on [`GET /backend/list`](../backend/list.md)) and to what the host has. A CUDA-only backend on a host without an NVIDIA GPU installed its CPU asset, and is not offered a GPU here. Empty for an online model. |
+| `available_devices` | string[] | The devices this install can offer the model on this host: the model's `supported_devices`, narrowed to the accelerators its installed asset actually provides (`installed_accel` on [`GET /backend/list`](../backends.md)) and to what the host has. A CUDA-only backend on a host without an NVIDIA GPU installed its CPU asset, and is not offered a GPU here. Empty for an online model. |
 
 **Errors:**
 
@@ -74,7 +74,7 @@ can live on different devices.
 ```http
 POST /stt/pipeline/1/model/whisper-large-v3/device HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 { "device": "gpu" }
@@ -123,7 +123,7 @@ picker to `available_devices`.
 ## `GET /stt/pipeline/{stage}/model/{model}/device/list`
 
 The devices this install can offer `model` on this host — the
-`available_devices` of the model's [device](#get-pipelinestagemodelmodeldevice),
+`available_devices` of the model's [device](#get-sttpipelinestagemodelmodeldevice),
 on its own, for a client that only wants to fill a picker. `model` resolves
 the same way, and the same errors apply.
 

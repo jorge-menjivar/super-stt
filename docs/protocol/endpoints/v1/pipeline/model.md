@@ -8,7 +8,7 @@ independently, so one stage's cancel is not a licence to abandon another's
 download, and a post-processor's reload leaves the transcription model alone.
 
 Emptying the stage entirely — forgetting the backend along with the model — is
-[`DELETE /stt/pipeline/{stage}`](./stage.md#delete-pipelinestage) instead. The
+[`DELETE /stt/pipeline/{stage}`](./stage.md#delete-sttpipelinestage) instead. The
 [auth](../pipeline.md#auth), the [model object](../pipeline.md#the-model-object)
 and its [`device`](../pipeline.md#the-device-object) and
 [`switch`](../pipeline.md#the-switch-object) sub-objects are described in the
@@ -22,7 +22,7 @@ on, and the load still in flight.
 ```http
 GET /stt/pipeline/1/model HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -47,7 +47,7 @@ Content-Type: application/json
 ```
 
 `model` is the **selection**, not the running instance: it survives an
-[unload](#delete-pipelinestagemodel), so a client can offer to load the same
+[unload](#delete-sttpipelinestagemodel), so a client can offer to load the same
 model again — onto another device, say — without the user picking it a second
 time. `loaded` is what says whether it is up. Both stages answer this way; stage
 1 collapsed the two into one bit until the stages were made to behave alike.
@@ -69,7 +69,7 @@ Run a model in this stage.
 ```http
 POST /stt/pipeline/2/model HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 { "model": "textclean" }
@@ -80,7 +80,7 @@ Content-Type: application/json
 | `model`  | string | yes      | A model its backend declares with this stage's `role`                    |
 | `source` | string | no       | Repo id of the serving backend. Omitted resolves to the backend selected for this stage. |
 
-The model loads on its own [device](./device.md#get-pipelinestagemodelmodeldevice), which
+The model loads on its own [device](./device.md#get-sttpipelinestagemodelmodeldevice), which
 is not part of this request: set it first, and it is remembered for every
 later load of that model. Changing the device of a model that is **already
 running** does not need this endpoint at all — `POST` the new device and the
@@ -116,7 +116,7 @@ selection here, because without an `enabled` flag that was the only way to stop
 a restart reloading what had just been stopped.
 
 Forgetting the model as well is
-[`DELETE /stt/pipeline/{stage}`](./stage.md#delete-pipelinestage), which drops the
+[`DELETE /stt/pipeline/{stage}`](./stage.md#delete-sttpipelinestage), which drops the
 backend with it.
 
 **Errors:** `404 unknown_stage`, `409 recording_in_progress`, plus the auth
@@ -138,7 +138,7 @@ one's to abandon.
 ## `POST /stt/pipeline/{stage}/model/reload`
 
 Re-instantiate this stage's model in place, picking up changed
-[secrets and options](../backend/list.md) without a manual stop/start. A stage with
+[secrets and options](../backends.md) without a manual stop/start. A stage with
 nothing loaded answers `200` and does nothing.
 
 Rarely needed by hand: writing a

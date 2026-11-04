@@ -7,10 +7,11 @@
 A Settings UI uses this scope to drive progress bars without polling: it sees a
 model switch move through `loading_model` → download ticks → `ready`, and it sees
 backend-registry installs report progress. The scope reveals nothing about audio
-or transcription text — only daemon configuration/lifecycle state.
+or transcription or spoken text — only daemon configuration/lifecycle state.
 
 It is usually requested alongside [`settings`](./settings.md) (which performs the
-mutations these events report on) and the recording/visualization scopes a
+mutations these events report on) and the recording, playback and
+visualization scopes a
 Settings UI also shows. Scopes are composable — see [auth.md](../auth.md).
 
 ## Topics
@@ -44,7 +45,9 @@ model the event is about — 1 for transcription, 2 for post-processing. Every
 stage reports its own lifecycle on this topic, so a client watching one must
 filter on it rather than assume; a payload without the field comes from a daemon
 older than it and is stage 1's. The remaining variants describe the daemon
-rather than one stage's model, and carry no `stage`.
+rather than one stage's model, and carry no `stage`. Text to speech has one
+stage, so its events carry no `stage` either; each event about a feature names
+it in `feature` instead (see [`/events`](../endpoints/v1/events.md)).
 
 The destination device is named `target_device` on both `loading_model_for_device`
 and `switching_device` (previously `switching_device` used `to_device`). The

@@ -37,11 +37,11 @@ async fn type_notice_types_the_marker_verbatim() {
 
     typer.type_notice(notice::NO_MODEL_LOADED).await;
 
-    assert_eq!(*buf.lock().unwrap(), "[Super STT: no model loaded]");
+    assert_eq!(*buf.lock().unwrap(), "[Super Voice: no model loaded]");
 }
 
 /// Transcript state feeds window stitching on the *next* recording. If a
-/// notice landed in it, the typer would try to extend "[Super STT: …]" into the
+/// notice landed in it, the typer would try to extend "[Super Voice: …]" into the
 /// following sentence.
 // `start_paused` so the notice's key-release delay is virtual — this test
 // asserts what gets typed, not how long it waits.
@@ -77,7 +77,7 @@ async fn type_notice_waits_for_shortcut_keys_to_be_released_before_typing() {
         "notice was typed after only {:?} — modifiers may still be held",
         start.elapsed()
     );
-    assert_eq!(*buf.lock().unwrap(), "[Super STT: no model loaded]");
+    assert_eq!(*buf.lock().unwrap(), "[Super Voice: no model loaded]");
 }
 
 // ---------------------------------------------------------------------------

@@ -29,7 +29,7 @@ So the library gets its own scope, the consent prompt names it in those terms
 ("list, play back, and delete your saved voice recordings"), and a client that
 wants both asks for both. Scopes never imply one another.
 
-Clips are stored under `$XDG_DATA_HOME/super-tts/voices`, owner-readable only
+Clips are stored under `$XDG_DATA_HOME/super-voice/voices`, owner-readable only
 (`0600`), and never leave the machine except to the loaded backend — which is
 local unless the user selected an online model.
 
