@@ -240,6 +240,25 @@ fn rejects_an_implausible_output_sample_rate() {
     assert!(Manifest::parse(&with_model("output_sample_rate = 48000")).is_ok());
 }
 
+/// The clients that skip the consent dialog are exactly the workspace's apps
+/// and CLIs. One left out would show its user a dialog meant for strangers;
+/// one named that is not ours would be trusted for its name alone.
+#[test]
+fn the_first_party_clients_are_the_workspaces_apps_and_clis() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut ours: Vec<String> = std::fs::read_dir(&root)
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().join("Cargo.toml").is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with("-app") || name.ends_with("-cli"))
+        .collect();
+    ours.sort();
+    let mut named: Vec<&str> = SUPER_VOICE.clients.to_vec();
+    named.sort_unstable();
+    assert_eq!(named, ours);
+}
+
 /// Super Voice's manifests name it by the slug its daemon goes by, so a
 /// manifest for the daemon is a manifest for the product.
 #[test]
