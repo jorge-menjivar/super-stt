@@ -217,14 +217,13 @@ impl SuperTTSDaemon {
         };
 
         // Resolve against discovered backends; capture the install dir so the
-        // backend is recorded below. Online-ness is only knowable from the
-        // resolved model, so capture it here too.
+        // backend is recorded below.
         let resolved = {
             let backends = self.backends.read().await;
             backends::find_model(&backends, &model, &source)
-                .map(|(b, d)| (b.source.clone(), backends::dir_name(b), d.is_online()))
+                .map(|(b, _)| (b.source.clone(), backends::dir_name(b)))
         };
-        let Some((backend_source, backend_dir, is_online)) = resolved else {
+        let Some((backend_source, backend_dir)) = resolved else {
             return DaemonResponse::error_with_code(
                 ErrorCode::InvalidModel,
                 &format!(
@@ -233,18 +232,6 @@ impl SuperTTSDaemon {
                 ),
             );
         };
-
-        // Online models must be explicitly enabled — gated after resolution
-        // since online-ness is a property of the resolved model. Emit the
-        // documented `400 online_models_disabled` code so clients can show the
-        // "enable online models" affordance instead of treating an uncoded 500
-        // as a crash (audit 2 Tier 1 #9).
-        if is_online && !self.config.read().await.online.allow_online_models {
-            return DaemonResponse::error_with_code(
-                ErrorCode::OnlineModelsDisabled,
-                "Online models are disabled. Enable 'Allow Online Models' in settings first.",
-            );
-        }
 
         // Selecting a model makes its backend the active one — record this
         // before the load so a load failure leaves the backend selected with no

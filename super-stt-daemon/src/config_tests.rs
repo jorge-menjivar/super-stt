@@ -79,53 +79,6 @@ fn config_preserves_all_online_model_variants() {
 }
 
 #[test]
-fn default_config_has_no_custom_models_dir() {
-    let config = DaemonConfig::default();
-    assert!(config.transcription.custom_models_dir.is_none());
-}
-
-#[test]
-fn config_without_custom_models_dir_deserializes() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-tiny"
-write_mode = false
-preview_typing_enabled = false
-recording_stop_mode = "silence_and_manual"
-write_method = "auto"
-"#;
-    let config = from_toml(toml_str);
-    assert!(config.transcription.custom_models_dir.is_none());
-}
-
-#[test]
-fn config_with_custom_models_dir_round_trips() {
-    let mut config = DaemonConfig::default();
-    config.transcription.custom_models_dir = Some("/tmp/models".to_string());
-
-    let parsed = round_trip(&config);
-    assert_eq!(
-        parsed.transcription.custom_models_dir.as_deref(),
-        Some("/tmp/models")
-    );
-}
-
-#[test]
-fn config_with_none_custom_models_dir_round_trips() {
-    let config = DaemonConfig::default();
-
-    let parsed = round_trip(&config);
-    assert!(parsed.transcription.custom_models_dir.is_none());
-}
-
-#[test]
 fn backend_options_set_clear_and_round_trip() {
     let mut config = DaemonConfig::default();
     let src = "github.com/super-stt/openai";
@@ -403,9 +356,6 @@ fn v0_1_3_full_daemon_config_loads_and_migrates() {
     // `preferred_model` widened from STTModel enum to String: the old value is
     // retained verbatim (daemon model loader has its own fallback downstream).
     assert_eq!(cfg.transcription.preferred_model, "WhisperLargeV3Turbo");
-
-    // Removed field dropped (no `deny_unknown_fields`); the replacement is None.
-    assert_eq!(cfg.transcription.custom_models_dir, None);
 
     // New fields materialize at their defaults.
     assert_eq!(cfg.transcription.preferred_source, "");

@@ -97,49 +97,6 @@ impl FromDaemon for NotificationMethodState {
     }
 }
 
-/// Whether models that synthesize over the network may be used at all.
-#[derive(Serialize, ToSchema)]
-pub(crate) struct AllowOnlineModelsState {
-    #[schema(example = "success")]
-    status: &'static str,
-    /// `false` keeps every utterance on this machine: a model whose backend
-    /// would send text to a third party cannot be loaded while it is off.
-    allow_online_models: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    message: Option<String>,
-}
-
-impl FromDaemon for AllowOnlineModelsState {
-    fn from_daemon(resp: DaemonResponse) -> Self {
-        Self {
-            status: "success",
-            allow_online_models: resp.allow_online_models.unwrap_or(false),
-            message: resp.message,
-        }
-    }
-}
-
-/// The models directory override.
-#[derive(Serialize, ToSchema)]
-pub(crate) struct CustomModelsDirState {
-    #[schema(example = "success")]
-    status: &'static str,
-    /// The configured directory, or `null` when no override is set. Always
-    /// present — `null` is the answer, not an absent key.
-    custom_models_dir: Option<String>,
-}
-
-impl FromDaemon for CustomModelsDirState {
-    fn from_daemon(resp: DaemonResponse) -> Self {
-        Self {
-            status: "success",
-            // Doubly optional on the bus: the outer layer is "this command did
-            // not set it", the inner is the documented nullable value.
-            custom_models_dir: resp.custom_models_dir.flatten(),
-        }
-    }
-}
-
 /// Whether the periodic update check runs.
 #[derive(Serialize, ToSchema)]
 pub(crate) struct UpdateCheckEnabledState {

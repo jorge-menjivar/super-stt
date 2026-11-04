@@ -56,10 +56,6 @@ impl TryFrom<DaemonRequest> for Command {
             "get_model_voice" => cmd_get_model_voice(&request),
             "clear_model_voice" => cmd_clear_model_voice(&request),
             "list_model_voices" => cmd_list_model_voices(&request),
-            "set_allow_online_models" => cmd_set_allow_online_models(&request),
-            "get_allow_online_models" => Ok(Command::GetAllowOnlineModels),
-            "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
-            "get_custom_models_dir" => Ok(Command::GetCustomModelsDir),
             "list_backends" => Ok(Command::ListBackends),
             "reload_active_model" => Ok(Command::ReloadActiveModel),
             "unload_active_model" => Ok(Command::UnloadActiveModel),
@@ -214,13 +210,6 @@ fn cmd_set_notification_method(request: &DaemonRequest) -> Result<Command, Strin
     Ok(Command::SetNotificationMethod { method })
 }
 
-fn cmd_set_allow_online_models(request: &DaemonRequest) -> Result<Command, String> {
-    let enabled = request
-        .enabled
-        .ok_or("Missing enabled field for set_allow_online_models command")?;
-    Ok(Command::SetAllowOnlineModels { enabled })
-}
-
 fn cmd_set_update_check_enabled(request: &DaemonRequest) -> Result<Command, String> {
     let enabled = request
         .enabled
@@ -253,16 +242,6 @@ fn cmd_set_volume(request: &DaemonRequest) -> Result<Command, String> {
         return Err("Volume must be between 0 and 100".to_string());
     }
     Ok(Command::SetVolume { volume })
-}
-
-fn cmd_set_custom_models_dir(request: &DaemonRequest) -> Command {
-    let path = request
-        .data
-        .as_ref()
-        .and_then(|data| data.get("path"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    Command::SetCustomModelsDir { path }
 }
 
 fn cmd_set_backend_option(request: &DaemonRequest) -> Result<Command, String> {

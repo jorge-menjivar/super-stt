@@ -71,7 +71,6 @@ async fn raw_post_json(
 const SETTINGS_READS: &[(&str, &str)] = &[
     ("/settings/audio_theme", "audio_theme"),
     ("/settings/audio_theme/list", "available_audio_themes"),
-    ("/settings/custom_models_dir", "custom_models_dir"),
     ("/settings/language", "language"),
     ("/settings/notification_method", "notification_method"),
     ("/settings/preview_typing", "preview_typing_enabled"),

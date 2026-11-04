@@ -20,9 +20,7 @@
 //! lives in the macro call and nowhere else, so a setting cannot be served at
 //! one URL and documented at another.
 
-pub(crate) mod allow_online_models;
 pub(crate) mod audio_theme;
-pub(crate) mod custom_models_dir;
 pub(crate) mod language;
 pub(crate) mod notification_method;
 pub(crate) mod update_beta_optin;
@@ -43,19 +41,11 @@ use utoipa_axum::routes;
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(
-            allow_online_models::get_allow_online_models,
-            allow_online_models::set_allow_online_models
-        ))
-        .routes(routes!(
             audio_theme::get_audio_theme,
             audio_theme::set_audio_theme
         ))
         .routes(routes!(audio_theme::list_audio_themes))
         .routes(routes!(audio_theme::test_audio_theme))
-        .routes(routes!(
-            custom_models_dir::get_custom_models_dir,
-            custom_models_dir::set_custom_models_dir
-        ))
         .routes(routes!(
             language::get_language,
             language::set_language,

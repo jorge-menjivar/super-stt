@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, ModelOperationState};
-use crate::daemon::client::{
-    get_gpu_info, get_stage_view, list_stage_devices, list_stage_models, set_allow_online_models,
-};
+use crate::daemon::client::{get_gpu_info, get_stage_view, list_stage_devices, list_stage_models};
 use crate::ui::messages::{DeviceMessage, Message, ModelMessage, ModelsPageMessage};
 use cosmic::prelude::*;
 use log::info;
@@ -61,10 +59,6 @@ impl AppModel {
                     )))
                 }
             }),
-            // Online backends are gated by the install-time choice to
-            // add an online-capable backend, not a runtime toggle, so
-            // ensure the daemon permits them. Fire-and-forget.
-            Task::perform(set_allow_online_models(true), |_| cosmic::Action::None),
             crate::core::app::handlers::tasks::reload_backends(),
             Task::perform(get_gpu_info(), |result| {
                 cosmic::Action::App(Message::ModelsPage(ModelsPageMessage::GpuInfoLoaded(

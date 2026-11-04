@@ -131,7 +131,7 @@ is already running.",
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "Accepted. The model may still be downloading — read `switch` on `GET /pipeline/{stage}/model` to follow it.", body = StageMutation),
-        (status = 400, description = "`model` was missing or empty (`invalid_value`); no installed backend serves `(model, source)` in this stage's role (`invalid_model`); `source` was omitted and the stage has no backend (`invalid_backend`); or the model is online and `allow_online_models` is off (`online_models_disabled`).", body = ErrorEnvelope),
+        (status = 400, description = "`model` was missing or empty (`invalid_value`); no installed backend serves `(model, source)` in this stage's role (`invalid_model`); or `source` was omitted and the stage has no backend (`invalid_backend`).", body = ErrorEnvelope),
         (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
         (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
         (status = 404, description = "No such stage (`unknown_stage`).", body = ErrorEnvelope),

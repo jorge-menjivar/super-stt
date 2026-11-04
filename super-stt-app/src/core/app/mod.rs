@@ -167,10 +167,6 @@ pub struct AppModel {
     /// already overwritten `volume` (audit Tier 3 #37).
     pub last_committed_volume: u8,
 
-    // Custom models directory
-    pub custom_models_dir: Option<String>,
-    pub custom_models_dir_input: String,
-
     // Models page UI state (tabs, active-backend card selection/staging, menus).
     pub models_page: crate::state::models_page::ModelsPageState,
 

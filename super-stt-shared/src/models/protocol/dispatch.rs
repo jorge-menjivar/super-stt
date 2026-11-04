@@ -75,8 +75,6 @@ impl TryFrom<DaemonRequest> for Command {
             "get_model_language" => cmd_get_model_language(&request),
             "clear_model_language" => cmd_clear_model_language(&request),
             "list_model_languages" => cmd_list_model_languages(&request),
-            "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
-            "get_custom_models_dir" => Ok(Command::GetCustomModelsDir),
             "list_backends" => Ok(Command::ListBackends),
             "list_transcription_backends" => Ok(Command::ListTranscriptionBackends),
             "list_post_processor_backends" => Ok(Command::ListPostProcessorBackends),
@@ -417,16 +415,6 @@ fn cmd_set_volume(request: &DaemonRequest) -> Result<Command, String> {
         return Err("Volume must be between 0 and 100".to_string());
     }
     Ok(Command::SetVolume { volume })
-}
-
-fn cmd_set_custom_models_dir(request: &DaemonRequest) -> Command {
-    let path = request
-        .data
-        .as_ref()
-        .and_then(|data| data.get("path"))
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    Command::SetCustomModelsDir { path }
 }
 
 fn cmd_set_backend_option(request: &DaemonRequest) -> Result<Command, String> {

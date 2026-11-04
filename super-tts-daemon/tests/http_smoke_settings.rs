@@ -209,46 +209,6 @@ async fn settings_scope_endpoints() {
     assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error_code"], "invalid_backend", "{body}");
 
-    // --- GET /settings/allow_online_models ---
-    let (s, body) = raw_get_json(
-        &http_socket,
-        "/settings/allow_online_models",
-        &settings_token,
-    )
-    .await;
-    assert_eq!(
-        s,
-        StatusCode::OK,
-        "GET /settings/allow_online_models: {body}"
-    );
-    assert_eq!(body["status"], "success");
-    let initial_allow = body["allow_online_models"].as_bool().unwrap_or(false);
-
-    // --- POST /settings/allow_online_models: round-trip the inverse ---
-    let (s, _) = raw_post_json(
-        &http_socket,
-        "/settings/allow_online_models",
-        &settings_token,
-        serde_json::json!({ "enabled": !initial_allow }),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK, "POST /settings/allow_online_models");
-    let (_, body) = raw_get_json(
-        &http_socket,
-        "/settings/allow_online_models",
-        &settings_token,
-    )
-    .await;
-    assert_eq!(body["allow_online_models"], !initial_allow);
-    // Restore.
-    let _ = raw_post_json(
-        &http_socket,
-        "/settings/allow_online_models",
-        &settings_token,
-        serde_json::json!({ "enabled": initial_allow }),
-    )
-    .await;
-
     // --- GET /settings/update_check_enabled ---
     let (s, body) = raw_get_json(
         &http_socket,

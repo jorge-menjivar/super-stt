@@ -232,11 +232,6 @@ const RESPONSE_KEYS: &[(&str, &str, &[&str])] = &[
         &["available_audio_themes"],
     ),
     (
-        "/v1/settings/custom_models_dir",
-        "get",
-        &["custom_models_dir"],
-    ),
-    (
         "/v1/settings/notification_method",
         "get",
         &["notification_method"],

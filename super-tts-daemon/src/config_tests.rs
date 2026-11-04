@@ -20,43 +20,6 @@ fn round_trip(config: &DaemonConfig) -> DaemonConfig {
 }
 
 #[test]
-fn default_config_has_online_models_disabled() {
-    let config = DaemonConfig::default();
-    assert!(!config.online.allow_online_models);
-}
-
-#[test]
-fn config_without_online_section_deserializes() {
-    let ron_str = r#"(
-    device: (preferred_device: "cpu"),
-    audio: (theme: "classic", volume: 100),
-    synthesis: (preferred_model: "kokoro-tiny"),
-)"#;
-    let config = from_ron(ron_str);
-    assert!(!config.online.allow_online_models);
-}
-
-#[test]
-fn config_with_online_section_round_trips() {
-    let mut config = DaemonConfig::default();
-    config.online.allow_online_models = true;
-
-    let parsed = round_trip(&config);
-    assert!(parsed.online.allow_online_models);
-}
-
-#[test]
-fn config_with_online_model_preferred_round_trips() {
-    let mut config = DaemonConfig::default();
-    config.online.allow_online_models = true;
-    config.synthesis.preferred_model = "kokoro-1".to_string();
-
-    let parsed = round_trip(&config);
-    assert!(parsed.online.allow_online_models);
-    assert_eq!(parsed.synthesis.preferred_model, "kokoro-1");
-}
-
-#[test]
 fn config_preserves_all_online_model_variants() {
     for name in [
         "kokoro-1",
@@ -72,49 +35,6 @@ fn config_preserves_all_online_model_variants() {
         let parsed = round_trip(&config);
         assert_eq!(parsed.synthesis.preferred_model, model);
     }
-}
-
-#[test]
-fn online_config_default_is_disabled() {
-    let online = OnlineConfig::default();
-    assert!(!online.allow_online_models);
-}
-
-#[test]
-fn default_config_has_no_custom_models_dir() {
-    let config = DaemonConfig::default();
-    assert!(config.synthesis.custom_models_dir.is_none());
-}
-
-#[test]
-fn config_without_custom_models_dir_deserializes() {
-    let ron_str = r#"(
-    device: (preferred_device: "cpu"),
-    audio: (theme: "classic", volume: 100),
-    synthesis: (preferred_model: "kokoro-tiny"),
-)"#;
-    let config = from_ron(ron_str);
-    assert!(config.synthesis.custom_models_dir.is_none());
-}
-
-#[test]
-fn config_with_custom_models_dir_round_trips() {
-    let mut config = DaemonConfig::default();
-    config.synthesis.custom_models_dir = Some("/tmp/models".to_string());
-
-    let parsed = round_trip(&config);
-    assert_eq!(
-        parsed.synthesis.custom_models_dir.as_deref(),
-        Some("/tmp/models")
-    );
-}
-
-#[test]
-fn config_with_none_custom_models_dir_round_trips() {
-    let config = DaemonConfig::default();
-
-    let parsed = round_trip(&config);
-    assert!(parsed.synthesis.custom_models_dir.is_none());
 }
 
 #[test]
@@ -182,7 +102,6 @@ fn config_with_legacy_provider_string_falls_back() {
         preferred_provider: "LocalKokoro",
         preferred_source: "BadValue",
     ),
-    online: (allow_online_models: true),
 )"#;
     let config = from_ron(ron_str);
     // The source is a free-form string, so any value is accepted. The legacy
@@ -193,7 +112,6 @@ fn config_with_legacy_provider_string_falls_back() {
     assert_eq!(config.synthesis.preferred_model, "kokoro-tiny");
     assert_eq!(config.audio.theme, AudioTheme::Silent);
     assert_eq!(config.audio.volume, 75);
-    assert!(config.online.allow_online_models);
 }
 
 /// `synthesis.active_backend` defaults to `None` (no backend selected

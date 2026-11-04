@@ -35,12 +35,12 @@ pub struct DaemonResponse {
     /// onto a `"gpu"` preference; JSON `null` when the preference is `"gpu"`
     /// but nothing has loaded yet. See `docs/protocol/endpoints/v1/active_device.md`.
     ///
-    /// Doubly `Option`, the same way `custom_models_dir` below is: the outer
-    /// layer is "irrelevant to this response" (omitted, as for every other
-    /// field here); the inner layer is the documented nullable value itself,
-    /// so an unresolved `"gpu"` preference serializes as an explicit `null`
-    /// rather than an absent key on `/active_device`, while every other
-    /// command's response omits the key entirely.
+    /// Doubly `Option`: the outer layer is "irrelevant to this response"
+    /// (omitted, as for every other field here); the inner layer is the
+    /// documented nullable value itself, so an unresolved `"gpu"` preference
+    /// serializes as an explicit `null` rather than an absent key on
+    /// `/active_device`, while every other command's response omits the key
+    /// entirely.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_accel: Option<Option<String>>,
 
@@ -120,14 +120,6 @@ pub struct DaemonResponse {
     pub update_check_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub update_beta_optin: Option<String>,
-
-    // Online models
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_online_models: Option<bool>,
-
-    // Custom models directory (None = no override, daemon uses default cache)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_models_dir: Option<Option<String>>,
 
     // Synthesis language: for GET /settings/language a string|null; for
     // GET /pipeline/{stage}/model/{model}/language the resolution block. See
@@ -452,18 +444,6 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_update_beta_optin(mut self, value: String) -> Self {
         self.update_beta_optin = Some(value);
-        self
-    }
-
-    #[must_use]
-    pub fn with_allow_online_models(mut self, allowed: bool) -> Self {
-        self.allow_online_models = Some(allowed);
-        self
-    }
-
-    #[must_use]
-    pub fn with_custom_models_dir(mut self, dir: Option<String>) -> Self {
-        self.custom_models_dir = Some(dir);
         self
     }
 }

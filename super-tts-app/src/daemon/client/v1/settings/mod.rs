@@ -13,9 +13,7 @@
 //! The two macros that generate most of these wrappers live in `v1::macros`,
 //! not here — they answer on no path either.
 
-pub(crate) mod allow_online_models;
 pub(crate) mod audio_theme;
-pub(crate) mod custom_models_dir;
 pub(crate) mod language;
 pub(crate) mod notification_method;
 pub(crate) mod update_beta_optin;

@@ -4,9 +4,9 @@
 //! result-to-`Message` mapping isn't re-rolled at each call site.
 
 use crate::daemon::client::{
-    get_current_audio_theme, get_custom_models_dir, get_notification_method, get_preview_typing,
-    get_recording_stop_mode, get_stage_view, get_update_check_enabled, get_update_status,
-    get_volume, get_write_method, list_backends, ping_daemon,
+    get_current_audio_theme, get_notification_method, get_preview_typing, get_recording_stop_mode,
+    get_stage_view, get_update_check_enabled, get_update_status, get_volume, get_write_method,
+    list_backends, ping_daemon,
 };
 use crate::state::AudioTheme;
 use crate::state::device_offers::PP_STAGE;
@@ -106,15 +106,6 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
             Err(e) => {
                 warn!("Failed to load volume: {e}");
                 cosmic::Action::App(Message::Daemon(DaemonMessage::VolumeLoaded(100)))
-            }
-        }),
-        Task::perform(get_custom_models_dir(), |result| match result {
-            Ok(dir) => {
-                cosmic::Action::App(Message::Daemon(DaemonMessage::CustomModelsDirLoaded(dir)))
-            }
-            Err(e) => {
-                warn!("Failed to load custom models dir: {e}");
-                cosmic::Action::App(Message::Daemon(DaemonMessage::CustomModelsDirLoaded(None)))
             }
         }),
         load_post_processor(),

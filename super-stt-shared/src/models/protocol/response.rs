@@ -39,12 +39,12 @@ pub struct DaemonResponse {
     /// onto a `"gpu"` preference; JSON `null` when the preference is `"gpu"`
     /// but nothing has loaded yet. See `docs/protocol/endpoints/v1/active_device.md`.
     ///
-    /// Doubly `Option`, the same way `custom_models_dir` below is: the outer
-    /// layer is "irrelevant to this response" (omitted, as for every other
-    /// field here); the inner layer is the documented nullable value itself,
-    /// so an unresolved `"gpu"` preference serializes as an explicit `null`
-    /// rather than an absent key on `/active_device`, while every other
-    /// command's response omits the key entirely.
+    /// Doubly `Option`: the outer layer is "irrelevant to this response"
+    /// (omitted, as for every other field here); the inner layer is the
+    /// documented nullable value itself, so an unresolved `"gpu"` preference
+    /// serializes as an explicit `null` rather than an absent key on
+    /// `/active_device`, while every other command's response omits the key
+    /// entirely.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_accel: Option<Option<String>>,
 
@@ -169,10 +169,6 @@ pub struct DaemonResponse {
     // Streaming preview text (intermediate transcription during recording)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_text: Option<String>,
-
-    // Custom models directory (None = no override, daemon uses default cache)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom_models_dir: Option<Option<String>>,
 
     // Transcription language: for GET /language a string|null; for
     // GET /backend/{source}/models/{model}/language the resolution block. See
@@ -522,12 +518,6 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_preview_text(mut self, text: String) -> Self {
         self.preview_text = Some(text);
-        self
-    }
-
-    #[must_use]
-    pub fn with_custom_models_dir(mut self, dir: Option<String>) -> Self {
-        self.custom_models_dir = Some(dir);
         self
     }
 }
