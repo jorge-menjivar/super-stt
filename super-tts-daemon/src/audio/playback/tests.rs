@@ -566,22 +566,14 @@ fn a_stream_error_is_told_apart_by_what_was_playing() {
     assert_eq!(p.state(), State::Idle);
     // Both branches must run without panicking or blocking the stream thread;
     // the counter is what proves each one was taken.
-    stream_error(
-        &p.shared,
-        &p.stream_errors,
-        &cpal::StreamError::DeviceNotAvailable,
-    );
+    stream_error(&p.shared, &p.stream_errors, &cpal::ErrorKind::Xrun.into());
     assert_eq!(
         p.stream_errors.load(std::sync::atomic::Ordering::Relaxed),
         1
     );
 
     p.shared.lock().state = State::Playing;
-    stream_error(
-        &p.shared,
-        &p.stream_errors,
-        &cpal::StreamError::DeviceNotAvailable,
-    );
+    stream_error(&p.shared, &p.stream_errors, &cpal::ErrorKind::Xrun.into());
     assert_eq!(
         p.stream_errors.load(std::sync::atomic::Ordering::Relaxed),
         2
@@ -594,15 +586,86 @@ fn a_stream_error_is_told_apart_by_what_was_playing() {
 fn a_stream_error_reported_while_the_lock_is_held_does_not_block() {
     let p = Playback::detached(DEVICE);
     let held = p.shared.lock();
-    stream_error(
-        &p.shared,
-        &p.stream_errors,
-        &cpal::StreamError::DeviceNotAvailable,
-    );
+    stream_error(&p.shared, &p.stream_errors, &cpal::ErrorKind::Xrun.into());
     drop(held);
     assert_eq!(
         p.stream_errors.load(std::sync::atomic::Ordering::Relaxed),
         1,
         "the report still lands even when the state cannot be read"
     );
+}
+
+/// A device that went away ends cpal's ALSA stream, so it is reported loudly
+/// even with nothing playing: every utterance after it is silent.
+#[test]
+fn a_device_gone_is_reported_whatever_was_playing() {
+    let p = Playback::detached(DEVICE);
+    assert_eq!(p.state(), State::Idle);
+    stream_error(
+        &p.shared,
+        &p.stream_errors,
+        &cpal::ErrorKind::DeviceNotAvailable.into(),
+    );
+    assert_eq!(
+        p.stream_errors.load(std::sync::atomic::Ordering::Relaxed),
+        1
+    );
+}
+
+fn range(
+    format: cpal::SampleFormat,
+    channels: u16,
+    min: u32,
+    max: u32,
+) -> cpal::SupportedStreamConfigRange {
+    cpal::SupportedStreamConfigRange::new(
+        channels,
+        min,
+        max,
+        cpal::SupportedBufferSize::Unknown,
+        format,
+    )
+}
+
+/// cpal 0.18 defaults a device without `F32` to `I32` where 0.17 chose `I16`.
+/// The pipeline asks for the `I16` that device still offers, at the rate and
+/// channel count the default named, rather than refusing the device.
+#[test]
+fn an_integer_default_falls_back_to_i16_at_the_same_rate_and_channels() {
+    let default = cpal::SupportedStreamConfig::new(
+        2,
+        48000,
+        cpal::SupportedBufferSize::Unknown,
+        cpal::SampleFormat::I32,
+    );
+    let offered = [
+        range(cpal::SampleFormat::I32, 2, 8000, 192_000),
+        range(cpal::SampleFormat::I16, 1, 8000, 192_000),
+        range(cpal::SampleFormat::I16, 2, 8000, 44100),
+        range(cpal::SampleFormat::I16, 2, 8000, 192_000),
+    ];
+    let chosen = i16_alternative(&default, offered).expect("an I16 config is offered");
+    assert_eq!(chosen.sample_format(), cpal::SampleFormat::I16);
+    assert_eq!(chosen.channels(), 2);
+    assert_eq!(chosen.sample_rate(), 48000);
+}
+
+/// With no `I16` at the default's shape there is nothing to steer to; the
+/// default stands and `open` names the format it cannot write.
+#[test]
+fn no_matching_i16_leaves_the_default_alone() {
+    let default = cpal::SupportedStreamConfig::new(
+        2,
+        48000,
+        cpal::SupportedBufferSize::Unknown,
+        cpal::SampleFormat::I24,
+    );
+    let offered = [
+        range(cpal::SampleFormat::I24, 2, 48000, 48000),
+        range(cpal::SampleFormat::I16, 6, 48000, 48000),
+        range(cpal::SampleFormat::I16, 2, 44100, 44100),
+    ];
+    assert!(i16_alternative(&default, offered).is_none());
+    assert!(!renders(cpal::SampleFormat::I24));
+    assert!(renders(cpal::SampleFormat::F32) && renders(cpal::SampleFormat::I16));
 }

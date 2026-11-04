@@ -223,15 +223,22 @@ struct Producer {
 /// like a speech fault minutes after anyone last spoke. An xrun *during*
 /// playback is the opposite: the listener heard the gap.
 ///
+/// A device that went away is loud whatever was playing: cpal's ALSA worker
+/// exits after reporting it, so this is the last the stream says, and every
+/// utterance after it is silent.
+///
 /// Runs on cpal's stream thread, so it takes the lock with `try_lock` and
 /// treats a miss as "cannot tell" — reporting loudly is the safe way to be
 /// wrong.
-fn stream_error(
-    shared: &Mutex<Shared>,
-    seen: &std::sync::atomic::AtomicU64,
-    error: &cpal::StreamError,
-) {
+fn stream_error(shared: &Mutex<Shared>, seen: &std::sync::atomic::AtomicU64, error: &cpal::Error) {
     let count = seen.fetch_add(1, Ordering::Relaxed) + 1;
+    if error.kind() == cpal::ErrorKind::DeviceNotAvailable {
+        warn!(
+            "playback stream error #{count}, the output device is gone and playback \
+             stays silent until the daemon restarts: {error}"
+        );
+        return;
+    }
     let idle = shared.try_lock().map(|guard| guard.state == State::Idle);
     if idle == Some(true) {
         debug!("playback stream error #{count} with nothing playing: {error}");
@@ -246,6 +253,43 @@ fn stream_error(
 /// [`Playback::open`] owns this and must keep it on that thread until playback
 /// should stop. Dropping it closes the device.
 pub struct Stream(#[allow(dead_code)] cpal::Stream);
+
+/// The output config to hand [`Playback::open`] for `device`.
+///
+/// The device's default, unless that is a sample format the callback does not
+/// write. cpal 0.18 ranks `I32` and `I24` above `I16` for a device with no
+/// `F32`, where 0.17 ranked `I16` first. Left alone, a device the daemon used
+/// to open in `I16` would now be refused. Such a device still offers `I16`, so
+/// this asks for it at the default's rate and channel count.
+///
+/// # Errors
+/// Returns an error if the device reports no default config, or cannot list
+/// its configs when the default is unusable.
+pub fn output_config(device: &cpal::Device) -> Result<cpal::SupportedStreamConfig> {
+    let default = device.default_output_config()?;
+    if renders(default.sample_format()) {
+        return Ok(default);
+    }
+    let alternative = i16_alternative(&default, device.supported_output_configs()?);
+    Ok(alternative.unwrap_or(default))
+}
+
+/// Whether [`Playback::open`] writes `format`.
+fn renders(format: cpal::SampleFormat) -> bool {
+    matches!(format, cpal::SampleFormat::F32 | cpal::SampleFormat::I16)
+}
+
+/// `default`, but in `I16`, if one of `ranges` offers that.
+fn i16_alternative(
+    default: &cpal::SupportedStreamConfig,
+    ranges: impl IntoIterator<Item = cpal::SupportedStreamConfigRange>,
+) -> Option<cpal::SupportedStreamConfig> {
+    ranges
+        .into_iter()
+        .filter(|r| r.sample_format() == cpal::SampleFormat::I16)
+        .filter(|r| r.channels() == default.channels())
+        .find_map(|r| r.try_with_sample_rate(default.sample_rate()))
+}
 
 impl Playback {
     /// Build a pipeline for a device format without opening a stream.
@@ -290,6 +334,14 @@ impl Playback {
     /// broken stream. [`stream_error`] classifies it by what was playing at the
     /// time, because an xrun with an idle ring cannot have dropped a word.
     ///
+    /// That recovery needs cpal 0.18. The `PipeWire` ALSA plugin signals an xrun
+    /// as `POLLERR` and keeps signalling it until `snd_pcm_prepare`. cpal
+    /// 0.17 checked `POLLERR` first, reported it, and polled again. An xrun
+    /// that landed while the worker sat in `poll()` (it woke late on a busy
+    /// machine) therefore spun that thread flat out: hundreds of thousands of
+    /// "`alsa::poll()` returned POLLERR" reports a second, no audio, until the
+    /// daemon restarted.
+    ///
     /// # Errors
     /// Returns an error if the device's format is unsupported or the stream
     /// cannot be built or started.
@@ -311,7 +363,7 @@ impl Playback {
         };
         let stream = match config.sample_format() {
             cpal::SampleFormat::F32 => device.build_output_stream(
-                &config.config(),
+                config.config(),
                 move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     // `try_lock`, never `lock`: blocking here misses the
                     // device deadline, and a rare silent buffer is a far
@@ -329,7 +381,7 @@ impl Playback {
                 // Scratch buffer allocated once, outside the callback.
                 let mut scratch: Vec<f32> = Vec::new();
                 device.build_output_stream(
-                    &config.config(),
+                    config.config(),
                     move |out: &mut [i16], _: &cpal::OutputCallbackInfo| {
                         if scratch.len() < out.len() {
                             // Grows only until it has seen the device's largest

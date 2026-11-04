@@ -268,8 +268,7 @@ fn open(shared: &Arc<Mutex<Capture>>, max_seconds: f32) -> Result<cpal::Stream, 
     let device = host
         .default_input_device()
         .ok_or_else(|| "no microphone was found".to_string())?;
-    let supported = device
-        .default_input_config()
+    let supported = input_config(&device)
         .map_err(|e| format!("the microphone offered no usable format: {e}"))?;
     let config = supported.config();
     let channels = usize::from(config.channels).max(1);
@@ -285,7 +284,7 @@ fn open(shared: &Arc<Mutex<Capture>>, max_seconds: f32) -> Result<cpal::Stream, 
     let cap = (max_seconds * sample_rate as f32) as usize;
 
     let err_shared = Arc::clone(shared);
-    let err_fn = move |e: cpal::StreamError| {
+    let err_fn = move |e: cpal::Error| {
         if let Ok(mut guard) = err_shared.lock() {
             guard.error = Some(format!("the microphone stopped: {e}"));
             guard.finished = true;
@@ -299,7 +298,7 @@ fn open(shared: &Arc<Mutex<Capture>>, max_seconds: f32) -> Result<cpal::Stream, 
         cpal::SampleFormat::F32 => {
             let shared = Arc::clone(shared);
             device.build_input_stream(
-                &config,
+                config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     accumulate(&shared, data, channels, cap, |s| s);
                 },
@@ -310,7 +309,7 @@ fn open(shared: &Arc<Mutex<Capture>>, max_seconds: f32) -> Result<cpal::Stream, 
         cpal::SampleFormat::I16 => {
             let shared = Arc::clone(shared);
             device.build_input_stream(
-                &config,
+                config,
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
                     accumulate(&shared, data, channels, cap, |s| {
                         f32::from(s) / f32::from(i16::MAX)
@@ -323,6 +322,29 @@ fn open(shared: &Arc<Mutex<Capture>>, max_seconds: f32) -> Result<cpal::Stream, 
         other => return Err(format!("unsupported microphone sample format: {other}")),
     }
     .map_err(|e| format!("could not open the microphone: {e}"))
+}
+
+/// The microphone's default config, unless that is a format [`open`] does not
+/// read.
+///
+/// cpal 0.18 ranks `I32` and `I24` above `I16` for a device with no `F32`,
+/// where 0.17 ranked `I16` first. Such a device still offers `I16`, so this
+/// asks for it at the default's rate and channel count rather than refusing a
+/// microphone that used to work.
+fn input_config(device: &cpal::Device) -> Result<cpal::SupportedStreamConfig, cpal::Error> {
+    let default = device.default_input_config()?;
+    if matches!(
+        default.sample_format(),
+        cpal::SampleFormat::F32 | cpal::SampleFormat::I16
+    ) {
+        return Ok(default);
+    }
+    let i16 = device
+        .supported_input_configs()?
+        .filter(|r| r.sample_format() == cpal::SampleFormat::I16)
+        .filter(|r| r.channels() == default.channels())
+        .find_map(|r| r.try_with_sample_rate(default.sample_rate()));
+    Ok(i16.unwrap_or(default))
 }
 
 /// Downmix one callback block to mono, append it, and record its peak.

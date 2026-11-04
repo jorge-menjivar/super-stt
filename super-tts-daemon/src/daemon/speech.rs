@@ -1329,12 +1329,12 @@ async fn open_device_thread() -> Result<Playback, SpeakError> {
         .name("super-tts-playback".into())
         .spawn(move || {
             let opened = (|| {
-                use cpal::traits::{DeviceTrait, HostTrait};
+                use cpal::traits::HostTrait;
                 let host = cpal::default_host();
                 let device = host
                     .default_output_device()
                     .ok_or_else(|| anyhow!("no default output device"))?;
-                let config = device.default_output_config()?;
+                let config = crate::audio::playback::output_config(&device)?;
                 Playback::open(&device, &config)
             })();
 
