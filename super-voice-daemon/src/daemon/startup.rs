@@ -108,6 +108,20 @@ impl SuperSTTDaemon {
         let volume = config.audio.volume;
 
         let components = DaemonComponents::init().await;
+        // One of each for both features: text to speech is built on the same
+        // handles below.
+        let events = Arc::new(EventBus::new());
+        let config = Arc::new(tokio::sync::RwLock::new(config));
+        let tts = crate::tts::daemon::types::SuperTTSDaemon::new(
+            crate::tts::daemon::types::Shared {
+                config: Arc::clone(&config),
+                events: Arc::clone(&events),
+                secrets: secrets.clone(),
+                resource_manager: Arc::clone(&components.resource_manager),
+                shutdown_tx: components.shutdown_tx.clone(),
+            },
+            &*config.read().await,
+        );
 
         let daemon = SuperSTTDaemon {
             model: components.model,
@@ -115,12 +129,12 @@ impl SuperSTTDaemon {
             audio_processor: components.audio_processor,
             shutdown_tx: components.shutdown_tx,
             dbus_manager: components.dbus_manager,
-            events: Arc::new(EventBus::new()),
+            events,
             audio_theme: Arc::new(RwLock::new(audio_theme)),
             volume: Arc::new(RwLock::new(volume)),
             busy: Arc::new(tokio::sync::RwLock::new(false)),
             download_manager: components.download_manager,
-            config: Arc::new(tokio::sync::RwLock::new(config)),
+            config,
             resource_manager: components.resource_manager,
             preview_typing_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 preview_typing_enabled,
@@ -129,6 +143,7 @@ impl SuperSTTDaemon {
             simulator: Arc::new(tokio::sync::RwLock::new(None)),
             preview_text: Arc::new(tokio::sync::RwLock::new(None)),
             backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            all_backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             active_backend: Arc::new(tokio::sync::RwLock::new(active_backend)),
             notifier: Arc::new(tokio::sync::Mutex::new(
                 crate::output::notification::Notifier::desktop(),
@@ -136,6 +151,7 @@ impl SuperSTTDaemon {
             self_update: Arc::new(crate::self_update::checker()),
             loading: Arc::new(crate::daemon::types::StageLoadGates::default()),
             secrets,
+            tts,
         };
 
         daemon.post_init().await;
@@ -155,9 +171,12 @@ impl SuperSTTDaemon {
     /// temporary session-level device override, then kick off background
     /// loading of the startup model (if one is configured).
     async fn post_init(&self) {
-        self.move_super_stt_backends().await;
+        self.move_old_data().await;
         // Discover installed backends.
         self.refresh_backends().await;
+        // Text to speech discovers its own models in the same folder and
+        // loads its startup model in the background, beside this one's.
+        self.tts.post_init().await;
 
         // Load the configured startup model — if any — in the **background** so
         // the HTTP listener can come up immediately. A model load may download
@@ -226,32 +245,34 @@ impl SuperSTTDaemon {
         }
     }
 
-    /// Move the backends Super STT installed into Super Voice's folder, once:
-    /// a start that finds none to move does nothing. Only into the default
-    /// folder, since a folder the user chose is theirs to fill. A failure is
-    /// logged, never fatal: the daemon still starts, with whatever backends
-    /// its own folder holds.
-    async fn move_super_stt_backends(&self) {
-        if self
-            .config
-            .read()
-            .await
-            .transcription
-            .backends_dir
-            .is_some()
-        {
-            return;
+    /// Move the backends Super STT and Super TTS installed, and the voices
+    /// cloned with Super TTS, into Super Voice's folders, once: a start that
+    /// finds none to move does nothing. Only into the default folders, since a
+    /// folder the user chose is theirs to fill. A failure is logged, never
+    /// fatal: the daemon still starts, with whatever its own folders hold.
+    async fn move_old_data(&self) {
+        let mut moves = Vec::new();
+        if self.config.read().await.backends_dir.is_none() {
+            let into = backends::default_backends_dir();
+            for product in crate::old_data::OLD_PRODUCTS {
+                moves.push((product, into.clone(), "backend"));
+            }
         }
-        let into = backends::default_backends_dir();
-        let Some(from) = crate::old_data::super_stt_backends_dir(&into) else {
-            return;
-        };
-        if let Err(e) = crate::old_data::move_backends(&from, &into) {
-            warn!(
-                "Could not move Super STT's backends from {} into {}: {e}",
-                from.display(),
-                into.display()
-            );
+        let voices = crate::tts::voices::VoiceLibrary::default_dir();
+        if self.tts.voices.dir() == voices {
+            moves.push(("super-tts", voices, "voice"));
+        }
+        for (product, into, what) in moves {
+            let Some(from) = crate::old_data::old_product_dir(&into, product) else {
+                continue;
+            };
+            if let Err(e) = crate::old_data::move_folders(&from, &into, what) {
+                warn!(
+                    "Could not move {product}'s {what}s from {} into {}: {e}",
+                    from.display(),
+                    into.display()
+                );
+            }
         }
     }
 

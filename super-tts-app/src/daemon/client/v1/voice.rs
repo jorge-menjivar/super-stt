@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/voice` — the cloned-voice library.
+//! `/tts/voice` — the cloned-voice library.
 //!
 //! A voice is a reference recording plus the id (`voice:<uuid>`) that names it
-//! on `POST /speak`. These calls own the recording; speaking in one is
+//! on `POST /tts/speak`. These calls own the recording; speaking in one is
 //! [`super::speak::speak_in_voice`].
 //!
 //! The upload is the one call in the app that does not send JSON: the body is
@@ -27,7 +27,7 @@ fn enc(s: &str) -> String {
 }
 
 /// The library plus what the loaded model can do with it
-/// (HTTP `GET /voice/list`).
+/// (HTTP `GET /tts/voice/list`).
 ///
 /// Returns both halves because they arrive together and a UI needs both to
 /// render one card: the voices, and whether the loaded model can speak in any
@@ -35,13 +35,14 @@ fn enc(s: &str) -> String {
 /// still readable, it just cannot be spoken with yet.
 pub async fn list_voices() -> HttpResult<(Vec<VoiceInfo>, Option<VoiceModelSupport>)> {
     with_settings_token(|socket, token| async move {
-        let resp: VoiceListResponse = transport::get_json(socket, &token, "/voice/list").await?;
+        let resp: VoiceListResponse =
+            transport::get_json(socket, &token, "/tts/voice/list").await?;
         Ok((resp.voices, resp.model))
     })
     .await
 }
 
-/// Add a voice from a WAV file (HTTP `POST /voice`).
+/// Add a voice from a WAV file (HTTP `POST /tts/voice`).
 ///
 /// `audio` is a complete WAV file. The daemon downmixes, resamples, and stores
 /// it — the app sends whatever the recorder or the file produced rather than
@@ -63,7 +64,7 @@ pub async fn create_voice(
                 .as_deref()
                 .filter(|t| !t.trim().is_empty())
                 .map_or_else(String::new, |t| format!("&transcript={}", enc(t)));
-            let path = format!("/voice?label={}{transcript}", enc(&label));
+            let path = format!("/tts/voice?label={}{transcript}", enc(&label));
             let resp: VoiceResponse =
                 transport::post_bytes(socket, &token, &path, "audio/wav", audio).await?;
             Ok(resp.voice)
@@ -72,7 +73,7 @@ pub async fn create_voice(
     .await
 }
 
-/// Rename a voice (HTTP `PATCH /voice/{id}`).
+/// Rename a voice (HTTP `PATCH /tts/voice/{id}`).
 ///
 /// Only the label is editable. The transcript describes the stored audio and
 /// backends cache what they derived from the pair, so changing it would leave
@@ -81,7 +82,7 @@ pub async fn rename_voice(id: String, label: String) -> HttpResult<VoiceInfo> {
     with_settings_token(move |socket, token| {
         let (id, label) = (id.clone(), label.clone());
         async move {
-            let path = format!("/voice/{}", enc(&id));
+            let path = format!("/tts/voice/{}", enc(&id));
             let resp: VoiceResponse = transport::patch_json(
                 socket,
                 &token,
@@ -95,7 +96,7 @@ pub async fn rename_voice(id: String, label: String) -> HttpResult<VoiceInfo> {
     .await
 }
 
-/// Delete a voice and its recording (HTTP `DELETE /voice/{id}`).
+/// Delete a voice and its recording (HTTP `DELETE /tts/voice/{id}`).
 ///
 /// The daemon also drops the voice from the loaded model, so speech cannot keep
 /// using a recording the user just deleted.
@@ -103,7 +104,7 @@ pub async fn delete_voice(id: String) -> HttpResult<String> {
     with_settings_token(move |socket, token| {
         let id = id.clone();
         async move {
-            let path = format!("/voice/{}", enc(&id));
+            let path = format!("/tts/voice/{}", enc(&id));
             let resp: VoiceDeletedResponse = transport::delete_json(socket, &token, &path).await?;
             Ok(resp.deleted)
         }

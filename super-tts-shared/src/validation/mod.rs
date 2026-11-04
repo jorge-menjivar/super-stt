@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Input validation for Super TTS protocol messages and data.
+//! Input validation for text to speech protocol messages and data.
 use anyhow::Result;
 
 mod inputs;
@@ -11,19 +11,19 @@ pub use inputs::{
 };
 pub use super_engine_protocol::runtime::SUN_PATH_MAX;
 
-/// Super TTS's runtime path `<runtime dir>/tts/<relative>`, validated as
+/// Super Voice's runtime path `<runtime dir>/voice/<relative>`, validated as
 /// [`super_engine_protocol::runtime::secure_runtime_path`] describes.
 #[must_use]
 pub fn secure_runtime_path(relative: &str) -> std::path::PathBuf {
-    super_engine_protocol::runtime::secure_runtime_path(&crate::SUPER_TTS, relative)
+    super_engine_protocol::runtime::secure_runtime_path(&crate::SUPER_VOICE, relative)
 }
 
-/// The daemon's HTTP socket, `super-tts-http.sock`, or
-/// `SUPER_TTS_HTTP_SOCKET` when set. See
+/// The daemon's HTTP socket, `super-voice-http.sock`, or
+/// `SUPER_VOICE_HTTP_SOCKET` when set. See
 /// [`super_engine_protocol::runtime::get_http_socket_path`].
 #[must_use]
 pub fn get_http_socket_path() -> std::path::PathBuf {
-    super_engine_protocol::runtime::get_http_socket_path(&crate::SUPER_TTS)
+    super_engine_protocol::runtime::get_http_socket_path(&crate::SUPER_VOICE)
 }
 
 /// Validation errors for better error reporting

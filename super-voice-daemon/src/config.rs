@@ -9,11 +9,30 @@ use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
 use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
 
+/// Super Voice's one config file. What the daemon has once comes first; then a
+/// section per feature: speech to text's `transcription`, `post_processor` and
+/// `contexts`, and text to speech's `synthesis`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonConfig {
     pub device: DeviceConfig,
     pub audio: AudioConfig,
+    /// How a failure is surfaced to the user, a recording's or an
+    /// utterance's. An unparseable stored value degrades to the default
+    /// rather than failing the whole config load.
+    #[serde(default, deserialize_with = "deserialize_notification_method")]
+    pub notification_method: NotificationMethod,
+    /// The global default language every model starts from: a BCP-47 tag,
+    /// the reserved `"auto"`, or `None` (no preference; models use their
+    /// `primary_language`).
+    #[serde(default)]
+    pub primary_language: Option<String>,
+    /// Directory scanned for installed backends, of every feature. `None`
+    /// uses the default (`<data_dir>/super-voice/backends`).
+    #[serde(default)]
+    pub backends_dir: Option<String>,
     pub transcription: TranscriptionConfig,
+    #[serde(default)]
+    pub synthesis: SynthesisConfig,
     #[serde(default)]
     pub backends: BackendsConfig,
     #[serde(default)]
@@ -95,6 +114,17 @@ pub struct ModelSettings {
     /// sharing the pipeline with either has its own answer again.
     #[serde(default)]
     pub device: Option<String>,
+    /// The voice a synthesis model speaks in when an utterance names none: a
+    /// `voice` id in any of the three shapes `docs/protocol/backend/config.md`
+    /// defines, or `None` for the model's manifest `default_voice`.
+    ///
+    /// Per model rather than global for the same reason the device is: a
+    /// voice id means nothing to another model. `ryan` is one of the nine
+    /// speakers the `CustomVoice` checkpoints declare and is not a voice any
+    /// Kokoro build has, and a cloned `voice:<uuid>` is refused outright by a
+    /// model whose `voice_kinds` do not include `cloned`.
+    #[serde(default)]
+    pub voice: Option<String>,
 }
 
 /// The device models fall back to when they have none of their own
@@ -303,24 +333,26 @@ pub struct TranscriptionConfig {
     pub recording_stop_mode: RecordingStopMode,
     #[serde(default, deserialize_with = "deserialize_write_method")]
     pub write_method: WriteMethod,
-    /// How a recording failure is surfaced to the user. An unparseable stored
-    /// value degrades to the default rather than failing the whole config load.
-    #[serde(default, deserialize_with = "deserialize_notification_method")]
-    pub notification_method: NotificationMethod,
-    /// Directory scanned for installed backends. `None` uses the default
-    /// (`<data_dir>/super-stt/backend/list`).
-    #[serde(default)]
-    pub backends_dir: Option<String>,
-    /// Relative install dir (subdir of [`backends_dir`]) of the selected active
+    /// Relative install dir (subdir of [`DaemonConfig::backends_dir`]) of the selected active
     /// backend, or `None` when idle. Metadata (name/source/models) is read from
     /// that dir's `backend.toml`. An active backend with an empty
     /// `preferred_model` means "backend selected, no model loaded".
     #[serde(default)]
     pub active_backend: Option<String>,
-    /// Global default transcription language: a BCP-47 tag, the reserved
-    /// `"auto"`, or `None` (no preference; models use their `primary_language`).
+}
+
+/// Text to speech's section: the synthesis stage's selection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SynthesisConfig {
     #[serde(default)]
-    pub primary_language: Option<String>,
+    pub preferred_model: String,
+    #[serde(default)]
+    pub preferred_source: String,
+    /// Relative install dir (subdir of [`DaemonConfig::backends_dir`]) of the
+    /// selected synthesis backend, or `None` when idle. An active backend with
+    /// an empty `preferred_model` means "backend selected, no model loaded".
+    #[serde(default)]
+    pub active_backend: Option<String>,
 }
 
 impl TranscriptionConfig {
@@ -357,6 +389,9 @@ impl Default for DaemonConfig {
                 theme: AudioTheme::default(),
                 volume: default_volume(),
             },
+            notification_method: NotificationMethod::default(),
+            primary_language: None,
+            backends_dir: None,
             transcription: TranscriptionConfig {
                 // Empty preference: the daemon stays idle until a model is
                 // selected — it never auto-picks one, since loading a model can
@@ -371,11 +406,9 @@ impl Default for DaemonConfig {
                 preview_typing_enabled: false, // Default to disabled (beta feature)
                 recording_stop_mode: RecordingStopMode::default(),
                 write_method: WriteMethod::default(),
-                notification_method: NotificationMethod::default(),
-                backends_dir: None,
                 active_backend: None,
-                primary_language: None,
             },
+            synthesis: SynthesisConfig::default(),
             backends: BackendsConfig::default(),
             update: UpdateConfig::default(),
             post_processor: PostProcessorConfig::default(),
@@ -811,12 +844,89 @@ impl DaemonConfig {
     }
 
     pub fn update_primary_language(&mut self, language: Option<String>) {
-        self.transcription.primary_language = language;
+        self.primary_language = language;
     }
 
     #[must_use]
     pub fn primary_language(&self) -> Option<&str> {
-        self.transcription.primary_language.as_deref()
+        self.primary_language.as_deref()
+    }
+
+    /// Set the global default device: the one models without a device of
+    /// their own fall back to. Per-model choices are untouched, which is the
+    /// point of the split: flipping the default must not silently move a model
+    /// the user deliberately pinned somewhere else.
+    pub fn update_preferred_device(&mut self, device: String) {
+        self.device.preferred_device = device;
+    }
+
+    /// Set (`Some`) or clear (`None`) the voice a synthesis model speaks in
+    /// by default.
+    pub fn update_model_voice(&mut self, source: String, model: String, voice: Option<String>) {
+        match voice {
+            Some(v) => {
+                self.backends
+                    .models
+                    .entry(source)
+                    .or_default()
+                    .entry(model)
+                    .or_default()
+                    .voice = Some(v);
+            }
+            None => {
+                if let Some(models) = self.backends.models.get_mut(&source)
+                    && let Some(settings) = models.get_mut(&model)
+                {
+                    settings.voice = None;
+                }
+            }
+        }
+    }
+
+    /// A synthesis model's own default voice, if it has one.
+    #[must_use]
+    pub fn model_voice(&self, source: &str, model: &str) -> Option<&str> {
+        self.backends
+            .models
+            .get(source)
+            .and_then(|m| m.get(model))
+            .and_then(|s| s.voice.as_deref())
+    }
+
+    /// Select the synthesis model, and the backend serving it.
+    pub fn update_synthesis_model(&mut self, model: String, source: String) {
+        self.synthesis.preferred_model = model;
+        self.synthesis.preferred_source = source;
+    }
+
+    /// Clear the synthesis model preference while keeping its backend
+    /// selected. Used by the unload path so a daemon restart stays idle
+    /// instead of reloading the unloaded model.
+    pub fn clear_synthesis_model(&mut self) {
+        self.synthesis.preferred_model = String::new();
+        self.synthesis.preferred_source = String::new();
+    }
+
+    /// Select the synthesis backend (its relative install dir) and drop the
+    /// model preference — selecting a backend does not load a model.
+    pub fn update_synthesis_backend(&mut self, dir: String) {
+        self.synthesis.active_backend = Some(dir);
+        self.synthesis.preferred_model = String::new();
+    }
+
+    /// Repoint the synthesis backend to `new_dir` without touching the model
+    /// preference: an install renamed the same backend's directory. See
+    /// [`rename_active_backend`](Self::rename_active_backend), the same
+    /// distinction for speech to text.
+    pub fn rename_synthesis_backend(&mut self, new_dir: String) {
+        self.synthesis.active_backend = Some(new_dir);
+    }
+
+    /// Clear the synthesis backend and its model preference (→ idle).
+    pub fn clear_synthesis_backend(&mut self) {
+        self.synthesis.active_backend = None;
+        self.synthesis.preferred_model = String::new();
+        self.synthesis.preferred_source = String::new();
     }
 
     /// Set (`Some`) or clear (`None`) a per-model language override.

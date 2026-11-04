@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::daemon::types::SuperSTTDaemon;
+use crate::stt_models::backends::DiscoveredBackend;
 use log::{info, warn};
 use super_stt_shared::models::backends::{BackendInfo, BackendModel, BackendOption, BackendSecret};
 use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
@@ -31,8 +32,11 @@ impl SuperSTTDaemon {
     /// Handle list backends command — the installed-backend catalog with each
     /// backend's models, declared secrets, and options (with effective values).
     /// Drives the settings UI; see `docs/protocol/endpoints/v1/backend/list.md`.
+    ///
+    /// Every installed backend, whichever feature it serves, with all its
+    /// models: each model's `role` says its feature.
     pub async fn handle_list_backends(&self) -> DaemonResponse {
-        let catalog = self.backend_catalog().await;
+        let catalog = self.backend_catalog(&self.all_backends).await;
         info!("Backends catalog requested: {} backend(s)", catalog.len());
         let backends_json = serde_json::to_value(&catalog).unwrap_or_default();
         DaemonResponse::success()
@@ -51,7 +55,7 @@ impl SuperSTTDaemon {
     pub async fn handle_list_stage_backends(&self, post_processor: bool) -> DaemonResponse {
         let role = ModelRole::PostProcessor.to_string();
         let catalog: Vec<BackendInfo> = self
-            .backend_catalog()
+            .backend_catalog(&self.backends)
             .await
             .into_iter()
             .filter_map(|mut b| {
@@ -77,10 +81,14 @@ impl SuperSTTDaemon {
 
     /// The installed-backend catalog both list endpoints answer from, so a
     /// stage's view of a backend and the whole catalog's cannot differ in
-    /// anything but which backends are in it.
-    async fn backend_catalog(&self) -> Vec<BackendInfo> {
+    /// anything but which backends are in it: `backends` is the whole set for
+    /// `GET /backend/list`, speech to text's for a stage.
+    async fn backend_catalog(
+        &self,
+        backends: &tokio::sync::RwLock<Vec<DiscoveredBackend>>,
+    ) -> Vec<BackendInfo> {
         let config = self.config.read().await;
-        let backends = self.backends.read().await;
+        let backends = backends.read().await;
 
         let catalog: Vec<BackendInfo> = backends
             .iter()
@@ -214,6 +222,8 @@ impl SuperSTTDaemon {
                 warnings.push(resp.message.unwrap_or_else(|| "unknown error".to_string()));
             }
         }
+        // A backend can serve both features, and its key is one key.
+        warnings.extend(self.tts.reload_if_source_active(source).await);
         (!warnings.is_empty()).then(|| warnings.join("; "))
     }
 
@@ -236,10 +246,26 @@ impl SuperSTTDaemon {
     /// Returns a warning if the new context could not be resolved. The stages
     /// keep running on the old one, and the caller has to surface that: the
     /// value is stored, so nothing else would tell the user it is not in use.
+    ///
+    /// Text to speech's model too: a backend can serve both features, and an
+    /// option is the backend's, not a feature's.
     pub(in crate::daemon) async fn reconfigure_if_source_active(
         &self,
         source: &str,
     ) -> Option<String> {
+        let warnings: Vec<String> = [
+            self.reconfigure_stages_from(source).await,
+            self.tts.reconfigure_if_source_active(source).await,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        (!warnings.is_empty()).then(|| warnings.join("; "))
+    }
+
+    /// [`reconfigure_if_source_active`](Self::reconfigure_if_source_active)
+    /// for speech to text's two stages.
+    async fn reconfigure_stages_from(&self, source: &str) -> Option<String> {
         #[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
         {
             let transcription = self
@@ -344,7 +370,7 @@ impl SuperSTTDaemon {
     /// a write lock on the config, and holding a read guard on the catalog
     /// across that is how two settings writes deadlock each other.
     async fn declared_option(&self, source: &str, name: &str) -> Option<Opt> {
-        let backends = self.backends.read().await;
+        let backends = self.all_backends.read().await;
         backends
             .iter()
             .find(|b| b.source == source)?

@@ -106,7 +106,7 @@ pub struct DaemonResponse {
 
     /// Whether the daemon is currently speaking — synthesizing or playing out
     /// an utterance. Surfaced on `GET /v1/status` so a client can decide
-    /// whether `POST /v1/speak` will interrupt something. Absent on responses
+    /// whether `POST /v1/tts/speak` will interrupt something. Absent on responses
     /// where it's not meaningful.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub busy: Option<bool>,
@@ -122,32 +122,32 @@ pub struct DaemonResponse {
     pub update_beta_optin: Option<String>,
 
     // Synthesis language: for GET /settings/language a string|null; for
-    // GET /pipeline/{stage}/model/{model}/language the resolution block. See
+    // GET /tts/pipeline/{stage}/model/{model}/language the resolution block. See
     // docs/protocol/endpoints/v1/settings/language.md and
-    // docs/protocol/endpoints/v1/pipeline/language.md.
+    // docs/protocol/endpoints/v1/tts/pipeline/language.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<Value>,
 
     /// The BCP-47 tags a language setting will accept, plus the reserved
     /// `auto`. Answers both `/settings/language/list` (what the global setting
-    /// takes) and `/pipeline/{stage}/model/{model}/language/list` (what one
+    /// takes) and `/tts/pipeline/{stage}/model/{model}/language/list` (what one
     /// model takes, which may be narrower).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_languages: Option<Vec<String>>,
 
     /// The voice resolution block for
-    /// `GET /pipeline/{stage}/model/{model}/voice`. See
-    /// docs/protocol/endpoints/v1/pipeline/voice.md.
+    /// `GET /tts/pipeline/{stage}/model/{model}/voice`. See
+    /// docs/protocol/endpoints/v1/tts/pipeline/voice.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voice: Option<Value>,
 
     /// The voices one model can be pinned to, for
-    /// `/pipeline/{stage}/model/{model}/voice/list` — its manifest presets and,
+    /// `/tts/pipeline/{stage}/model/{model}/voice/list` — its manifest presets and,
     /// when it clones, the stored cloned voices as `voice:<uuid>`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_voices: Option<Vec<Value>>,
 
-    /// Every pipeline stage, in order — the body of `GET /pipeline`.
+    /// Every pipeline stage, in order — the body of `GET /tts/pipeline`.
     ///
     /// A typed report rather than a `Value`: the stage shape is published in
     /// the `OpenAPI` document, and a schema cannot be generated from arbitrary
@@ -155,7 +155,7 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pipeline: Option<Vec<super::StageReport>>,
 
-    /// One stage's model slot — the body of `GET /pipeline/{stage}/model`.
+    /// One stage's model slot — the body of `GET /tts/pipeline/{stage}/model`.
     ///
     /// Separate from `pipeline` because it has a different lifetime: a stage is
     /// a durable selection and its model has a runtime. Reporting the model
@@ -219,12 +219,12 @@ impl DaemonResponse {
     /// Build an error response, sanitizing `message` before it crosses the Unix
     /// socket boundary. Full details stay in the daemon logs; clients receive
     /// only a trimmed first-line prefix so internal paths/secrets aren't leaked
-    /// (opt out for local debugging via `SUPER_TTS_DEBUG_ERRORS=1`).
+    /// (opt out for local debugging via `SUPER_VOICE_DEBUG_ERRORS=1`).
     #[must_use]
     pub fn error(message: &str) -> Self {
         fn sanitize_error_message(message: &str) -> String {
             // Opt-in detailed errors for local debugging
-            let debug = std::env::var("SUPER_TTS_DEBUG_ERRORS").is_ok_and(|v| v == "1")
+            let debug = std::env::var("SUPER_VOICE_DEBUG_ERRORS").is_ok_and(|v| v == "1")
                 || cfg!(debug_assertions);
             if debug {
                 return message.to_string();

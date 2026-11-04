@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! HTTP client for the daemon protocol: `super_engine_client::http_client`,
-//! which Super TTS shares with Super STT, plus Super TTS's own endpoints.
+//! plus text to speech's own endpoints.
 //!
 //! The transport is HTTP/1.1 over the daemon's Unix socket
 //! (`super_tts_shared::validation::get_http_socket_path()`). Authentication is
@@ -18,20 +18,21 @@ pub use super_engine_client::http_client::{
     events_stream, ping,
 };
 
-use crate::models::protocol::DaemonResponse;
+use super_stt_shared::models::status::VoiceStatus;
 
-/// `GET /status` — current model + device.
+/// `GET /status` — each feature's model, device and whether it is at work.
+/// Text to speech's is `tts`.
 ///
 /// # Errors
 /// Returns an error if the daemon HTTP listener isn't reachable or the
 /// response can't be parsed.
-pub async fn status(socket_path: PathBuf, token: &str) -> HttpResult<DaemonResponse> {
+pub async fn status(socket_path: PathBuf, token: &str) -> HttpResult<VoiceStatus> {
     super_engine_client::http_client::status(socket_path, token).await
 }
 
 /// Public transport surface for downstream clients that compose their own
 /// per-scope endpoint wrappers (e.g. the settings app): the engine's, plus
-/// the `settings_*` calls that read Super TTS's [`DaemonResponse`]. Returns
+/// the `settings_*` calls that read text to speech's [`DaemonResponse`]. Returns
 /// [`HttpError`] on transport/auth failure; `401` becomes
 /// [`HttpError::InvalidSession`].
 pub mod transport {

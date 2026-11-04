@@ -142,7 +142,7 @@ pub struct AppModel {
     /// event — never from what the user staged.
     pub current_device: String,
     /// The devices the stage's selected backend can run models on here, from
-    /// `GET /pipeline/{stage}/device/list`.
+    /// `GET /tts/pipeline/{stage}/device/list`.
     ///
     /// The union over the models that backend serves, and so the only device
     /// answer available before a model is picked. It keeps the card's device
@@ -199,7 +199,7 @@ pub struct AppModel {
     /// each declares. Drives the per-backend sections on the Models page.
     pub backends: Vec<BackendInfo>,
     /// The subset of [`Self::backends`] that can fill the synthesis stage, as
-    /// `GET /pipeline/{stage}/backend/list` reports it.
+    /// `GET /tts/pipeline/{stage}/backend/list` reports it.
     ///
     /// What the "Select a backend" sheet may offer. Selecting a backend that
     /// serves nothing this stage can run is refused by the daemon, so a sheet

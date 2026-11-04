@@ -249,7 +249,7 @@ impl AppModel {
                     // accepted, so speech starting means preparation finished.
                     //
                     // This rather than the request returning, which is what the
-                    // page used to wait for: `POST /speak` answers once the
+                    // page used to wait for: `POST /tts/speak` answers once the
                     // *last* sample is queued, so holding "Preparing…" until
                     // then left the label up for seconds of audible speech.
                     //

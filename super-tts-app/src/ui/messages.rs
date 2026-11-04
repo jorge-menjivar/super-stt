@@ -212,13 +212,13 @@ pub enum ModelsPageMessage {
     /// it, then points the stage at that model. No-op when nothing is staged
     /// or a load is already in progress.
     LoadStagedModel,
-    /// User clicked the Unload button. `DELETE /pipeline/{stage}/model` frees
+    /// User clicked the Unload button. `DELETE /tts/pipeline/{stage}/model` frees
     /// the device memory but keeps both the backend and the model it was
     /// pointed at, so loading it again — onto another device, say — is one
     /// click rather than a re-pick.
     UnloadActiveModel,
     /// User clicked Reload. Re-instantiates the same model on the same device
-    /// (`POST /pipeline/{stage}/model/reload`), downloading nothing.
+    /// (`POST /tts/pipeline/{stage}/model/reload`), downloading nothing.
     ///
     /// Rarely the right button, and deliberately not the only route: writing a
     /// backend option or secret already reloads every stage running that
@@ -339,11 +339,11 @@ pub enum ModelsPageMessage {
 /// control has to draw itself from until then.
 #[derive(Debug, Clone)]
 pub enum DeviceMessage {
-    /// `GET /pipeline/{stage}/device/list` — the union over the models the
+    /// `GET /tts/pipeline/{stage}/device/list` — the union over the models the
     /// stage's backend serves. Re-read whenever that backend changes, since it
     /// is that backend's answer and not the host's.
     StageDevicesLoaded(Vec<String>),
-    /// `GET /pipeline/{stage}/model/{model}/device` for one model: its stored
+    /// `GET /tts/pipeline/{stage}/model/{model}/device` for one model: its stored
     /// preference, what that resolved to, and the devices this host can offer
     /// it. Tagged with the `(source, model)` it describes so a late answer for
     /// a model the user has already moved on from is dropped rather than
@@ -353,7 +353,7 @@ pub enum DeviceMessage {
         model: String,
         device: crate::daemon::client::v1::pipeline::device::ModelDevice,
     },
-    /// `GET /pipeline/{stage}/model/{model}/device/list` — only the offered
+    /// `GET /tts/pipeline/{stage}/model/{model}/device/list` — only the offered
     /// devices, for the case where what a model *may* run on has changed while
     /// what it is *set to* has not: a backend update can swap a CPU-only asset
     /// for an accelerated one. Re-reading the whole block there would overwrite
@@ -401,11 +401,11 @@ pub enum NotificationMethodMessage {
 #[derive(Debug, Clone)]
 pub enum BackendMessage {
     BackendsLoaded(Vec<BackendInfo>),
-    /// The backends `GET /pipeline/{stage}/backend/list` says can fill the
+    /// The backends `GET /tts/pipeline/{stage}/backend/list` says can fill the
     /// synthesis stage — the subset of the catalog above that serves this
     /// stage's role.
     ///
-    /// Read separately because `POST /pipeline/{stage}` refuses a backend that
+    /// Read separately because `POST /tts/pipeline/{stage}` refuses a backend that
     /// serves nothing the stage can run: a picker built from the general
     /// catalog offers choices the daemon then rejects, and the user only finds
     /// out by making one. The two lists hold the same backends while synthesis
@@ -473,7 +473,7 @@ pub enum BackendMessage {
 #[derive(Debug, Clone)]
 pub enum VoiceMessage {
     /// Resolution block for `(source, model)`, from
-    /// `GET /pipeline/{stage}/model/{model}/voice`.
+    /// `GET /tts/pipeline/{stage}/model/{model}/voice`.
     ModelVoiceLoaded {
         source: String,
         model: String,
@@ -520,14 +520,14 @@ pub enum LanguageMessage {
     /// User picked a global language (None = clear → DELETE).
     PrimaryLanguageSelected(Option<String>),
     /// Per-model resolution block
-    /// (`/pipeline/{stage}/model/{model}/language`) loaded from the daemon for
+    /// (`/tts/pipeline/{stage}/model/{model}/language`) loaded from the daemon for
     /// `(source, model)`.
     ModelLanguageLoaded {
         source: String,
         model: String,
         block: crate::state::LanguageResolution,
     },
-    /// The tags `GET /pipeline/{stage}/model/{model}/language/list` says this
+    /// The tags `GET /tts/pipeline/{stage}/model/{model}/language/list` says this
     /// model can be pinned to.
     ///
     /// A separate message from the resolution block because they change on

@@ -3,7 +3,7 @@ use crate::core::app::AppModel;
 // Two language surfaces, two modules. The global setting is a daemon-wide
 // preference under `/settings`; a model's override is addressed through the
 // stage that resolves its bare name to a backend, and so lives under
-// `/pipeline`. They used to share one alias here, which is exactly the sort of
+// `/tts/pipeline`. They used to share one alias here, which is exactly the sort of
 // thing that survives a move by pointing at whichever module still happens to
 // export a matching name.
 use crate::daemon::client::v1::pipeline::language as model_language;

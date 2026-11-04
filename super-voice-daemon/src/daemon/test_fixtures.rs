@@ -57,3 +57,14 @@ pub(crate) fn openai_backend(
         models,
     }
 }
+
+/// Seed `daemon` with `all` the way a backend refresh does: the whole set,
+/// and each feature's view of it.
+pub(crate) async fn install_backends(
+    daemon: &crate::daemon::types::SuperSTTDaemon,
+    all: Vec<DiscoveredBackend>,
+) {
+    *daemon.backends.write().await = crate::stt_models::backends::speech_to_text(&all);
+    *daemon.tts.backends.write().await = crate::tts::tts_models::backends::synthesis(&all);
+    *daemon.all_backends.write().await = all;
+}

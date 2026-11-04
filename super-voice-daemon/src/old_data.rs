@@ -1,39 +1,44 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Moving the backends the speech-to-text daemon installed before it was Super
-//! Voice into Super Voice's backends folder, on the first start that finds
-//! them.
+//! Moving what Super STT and Super TTS kept before they were one product —
+//! the backends each installed, and the voices cloned with Super TTS — into
+//! Super Voice's data folder, on the first start that finds them.
 //!
-//! The folders are moved, not copied: each holds a backend's manifest, its
+//! The folders are moved, not copied: a backend's holds its manifest, its
 //! entrypoint, the record of which release is installed and the models it
-//! downloaded, which can be gigabytes. The old and the new folder sit in the
-//! same data directory, so each move is a rename.
+//! downloaded, which can be gigabytes, and a voice's holds its recording. The
+//! old and the new folder sit in the same data directory, so each move is a
+//! rename.
 //!
-//! A backend already in the new folder is never replaced. The old copy is
-//! left where it was, and the log says so.
+//! A folder already in the new place is never replaced. The old copy is left
+//! where it was, and the log says so.
 
 use log::{info, warn};
 use std::path::Path;
 
-/// What a [`move_backends`] did.
+/// The products whose data Super Voice takes over, by their data folders'
+/// names.
+pub const OLD_PRODUCTS: [&str; 2] = ["super-stt", "super-tts"];
+
+/// What a [`move_folders`] did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Moved {
-    /// The backends now in the new folder, by folder name.
+    /// The folders now in the new place, by name.
     pub moved: Vec<String>,
-    /// The backends left behind, because the new folder already had one of
-    /// the same name or the move failed.
+    /// The folders left behind, because the new place already had one of the
+    /// same name or the move failed.
     pub left: Vec<String>,
 }
 
-/// Move every backend folder in `from` into `into`, then remove `from` if
-/// nothing is left in it. Nothing to move, or no `from` at all, is not an
-/// error.
+/// Move every folder in `from` into `into`, then remove `from` if nothing is
+/// left in it. `what` is one of them, `backend` or `voice`, for the log.
+/// Nothing to move, or no `from` at all, is not an error.
 ///
 /// # Errors
 /// When `from` exists but cannot be read, or `into` cannot be created. A
-/// backend that cannot be moved is left in place and reported in
+/// folder that cannot be moved is left in place and reported in
 /// [`Moved::left`], not returned as an error, so one bad folder does not keep
 /// the others from moving.
-pub fn move_backends(from: &Path, into: &Path) -> std::io::Result<Moved> {
+pub fn move_folders(from: &Path, into: &Path, what: &str) -> std::io::Result<Moved> {
     let entries = match std::fs::read_dir(from) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Moved::default()),
@@ -54,7 +59,7 @@ pub fn move_backends(from: &Path, into: &Path) -> std::io::Result<Moved> {
         let target = into.join(&name);
         if target.exists() {
             warn!(
-                "Not moving backend {shown} from {}: {} already has one",
+                "Not moving {what} {shown} from {}: {} already has one",
                 from.display(),
                 into.display()
             );
@@ -63,43 +68,40 @@ pub fn move_backends(from: &Path, into: &Path) -> std::io::Result<Moved> {
         }
         match std::fs::rename(from.join(&name), &target) {
             Ok(()) => {
-                info!("Moved backend {shown} to {}", target.display());
+                info!("Moved {what} {shown} to {}", target.display());
                 report.moved.push(shown);
             }
             Err(e) => {
-                warn!(
-                    "Could not move backend {shown} from {}: {e}",
-                    from.display()
-                );
+                warn!("Could not move {what} {shown} from {}: {e}", from.display());
                 report.left.push(shown);
             }
         }
     }
 
     // Only succeeds once the folder is empty, which is what is wanted: a
-    // backend left behind keeps its folder where the user can find it.
+    // folder left behind stays where the user can find it.
     if std::fs::remove_dir(from).is_ok() {
         info!("Removed {}, now empty", from.display());
     }
     Ok(report)
 }
 
-/// Super STT's backends folder, beside Super Voice's in the data directory:
-/// `<data>/super-stt/backends` for `<data>/super-voice/backends`.
+/// The old `product`'s folder matching one of Super Voice's, beside it in the
+/// data directory: `<data>/super-tts/voices` for `<data>/super-voice/voices`.
 #[must_use]
-pub fn super_stt_backends_dir(voice_backends: &Path) -> Option<std::path::PathBuf> {
+pub fn old_product_dir(voice_dir: &Path, product: &str) -> Option<std::path::PathBuf> {
     Some(
-        voice_backends
+        voice_dir
             .parent()?
             .parent()?
-            .join("super-stt")
-            .join("backends"),
+            .join(product)
+            .join(voice_dir.file_name()?),
     )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Moved, move_backends, super_stt_backends_dir};
+    use super::{Moved, move_folders, old_product_dir};
     use std::path::Path;
 
     fn backend(root: &Path, name: &str, marker: &str) {
@@ -116,7 +118,7 @@ mod tests {
         backend(&from, "app.super-stt.whisper", "whisper");
         backend(&from, "app.super-stt.voxtral", "voxtral");
 
-        let report = move_backends(&from, &into).unwrap();
+        let report = move_folders(&from, &into, "backend").unwrap();
 
         assert_eq!(
             report,
@@ -147,7 +149,7 @@ mod tests {
         backend(&from, "app.super-stt.qwen", "old");
         backend(&into, "app.super-stt.qwen", "new");
 
-        let report = move_backends(&from, &into).unwrap();
+        let report = move_folders(&from, &into, "backend").unwrap();
 
         assert_eq!(report.left, vec!["app.super-stt.qwen".to_string()]);
         assert_eq!(
@@ -163,9 +165,10 @@ mod tests {
     #[test]
     fn nothing_to_move_is_not_an_error() {
         let home = tempfile::tempdir().unwrap();
-        let report = move_backends(
+        let report = move_folders(
             &home.path().join("super-stt/backends"),
             &home.path().join("super-voice/backends"),
+            "backend",
         )
         .unwrap();
         assert_eq!(report, Moved::default());
@@ -176,10 +179,31 @@ mod tests {
     }
 
     #[test]
-    fn super_stt_s_folder_is_beside_super_voice_s() {
+    fn the_old_folders_are_beside_super_voice_s() {
         assert_eq!(
-            super_stt_backends_dir(Path::new("/d/super-voice/backends")).as_deref(),
+            old_product_dir(Path::new("/d/super-voice/backends"), "super-stt").as_deref(),
             Some(Path::new("/d/super-stt/backends"))
         );
+        assert_eq!(
+            old_product_dir(Path::new("/d/super-voice/voices"), "super-tts").as_deref(),
+            Some(Path::new("/d/super-tts/voices"))
+        );
+    }
+
+    /// Voices move the same way: one folder per voice, recording and all.
+    #[test]
+    fn moves_cloned_voices() {
+        let home = tempfile::tempdir().unwrap();
+        let from = home.path().join("super-tts/voices");
+        let into = home.path().join("super-voice/voices");
+        std::fs::create_dir_all(from.join("3f2a")).unwrap();
+        std::fs::write(from.join("3f2a/clip.wav"), b"RIFF").unwrap();
+        std::fs::write(from.join("3f2a/voice.json"), b"{}").unwrap();
+
+        let report = move_folders(&from, &into, "voice").unwrap();
+
+        assert_eq!(report.moved, vec!["3f2a".to_string()]);
+        assert_eq!(std::fs::read(into.join("3f2a/clip.wav")).unwrap(), b"RIFF");
+        assert!(!from.exists());
     }
 }

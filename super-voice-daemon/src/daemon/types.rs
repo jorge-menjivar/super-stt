@@ -113,8 +113,12 @@ pub struct SuperSTTDaemon {
     // [`PreviewSlot`]: the id closes the busy-check TOCTOU that let a losing
     // request null the winner's preview stream.
     pub preview_text: PreviewSlot,
-    // Backends discovered from the backends directory.
+    // Speech to text's backends, discovered from the backends directory: each
+    // with its transcription and post-processing models only.
     pub backends: Arc<tokio::sync::RwLock<Vec<DiscoveredBackend>>>,
+    // Every backend in the directory, with the models of every feature: the
+    // catalog `/v1/backend/list` serves.
+    pub all_backends: Arc<tokio::sync::RwLock<Vec<DiscoveredBackend>>>,
     // Active backend: the relative install dir (a subdir of the backends dir)
     // of the selected backend, or None when idle. Runtime mirror of
     // `config.transcription.active_backend`.
@@ -132,6 +136,9 @@ pub struct SuperSTTDaemon {
     // The secrets file: the session tokens the daemon has issued and every
     // backend's API keys. One per process, opened at startup; clones share it.
     pub secrets: Secrets,
+    /// Text to speech: the daemon's second feature, built on the same config,
+    /// event bus, secrets and limits as everything above.
+    pub tts: crate::tts::daemon::types::SuperTTSDaemon,
 }
 
 /// A [`LoadGate`] for each pipeline stage.
@@ -216,6 +223,7 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         simulator: Arc::new(tokio::sync::RwLock::new(None)),
         preview_text: Arc::new(tokio::sync::RwLock::new(None)),
         backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        all_backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         active_backend: Arc::new(tokio::sync::RwLock::new(None)),
         // A fake notifier, not `Notifier::dbus()`: no daemon test may reach
         // the real session bus, or it can pop a genuine desktop notification
@@ -232,6 +240,7 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         loading: Arc::new(StageLoadGates::default()),
         // In memory: no daemon test reads or writes the user's secrets file.
         secrets: Secrets::in_memory(),
+        tts: crate::tts::daemon::types::test_daemon().await,
     }
 }
 
@@ -325,6 +334,16 @@ impl SuperSTTDaemon {
     pub fn publish_settings_changed(&self, setting: &str) {
         self.events
             .publish_daemon_status(DaemonStatusEvent::SettingsChanged {
+                setting: setting.to_string(),
+            });
+    }
+
+    /// [`publish_settings_changed`](Self::publish_settings_changed) for a
+    /// setting both features read: the global language and the update
+    /// settings. It names no feature, so both features' clients re-fetch.
+    pub fn publish_shared_setting_changed(&self, setting: &str) {
+        self.events
+            .publish_shared_status(DaemonStatusEvent::SettingsChanged {
                 setting: setting.to_string(),
             });
     }

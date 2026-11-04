@@ -218,17 +218,12 @@ async fn cmd_status(
     socket_path: PathBuf,
     token: String,
 ) -> super_stt_shared::daemon::http_client::HttpResult<()> {
-    let resp = http_client::status(socket_path, &token).await?;
-    if resp.status != "success" {
-        return Err(http_client::HttpError::Other(
-            resp.message.unwrap_or_else(|| "unknown error".to_string()),
-        ));
-    }
+    let stt = http_client::status(socket_path, &token).await?.stt;
     println!(
         "Model:  {}",
-        resp.current_model.as_deref().unwrap_or("(none loaded)")
+        stt.current_model.as_deref().unwrap_or("(none loaded)")
     );
-    println!("Device: {}", resp.device.as_deref().unwrap_or("unknown"));
+    println!("Device: {}", stt.device);
     Ok(())
 }
 
@@ -247,7 +242,7 @@ async fn cmd_record(
     // start-or-stop decision on the client (see
     // `docs/protocol/endpoints/v1/transcribe.md`).
     let status = http_client::status(socket_path.clone(), &token).await?;
-    if status.busy.unwrap_or(false) {
+    if status.stt.busy {
         return cmd_stop(socket_path, token).await;
     }
 

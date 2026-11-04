@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline` — the ordered stages an utterance passes through.
+//! `/tts/pipeline` — the ordered stages an utterance passes through.
 //!
-//! Mirrors the daemon's `v1/pipeline/` tree: [`stage`] wraps `/pipeline/{stage}`,
-//! [`backend`] the menu that fills it, [`model`] wraps `/pipeline/{stage}/model`
+//! Mirrors the daemon's `v1/pipeline/` tree: [`stage`] wraps `/tts/pipeline/{stage}`,
+//! [`backend`] the menu that fills it, [`model`] wraps `/tts/pipeline/{stage}/model`
 //! and its verbs, [`device`], [`language`] and [`voice`] the per-model
 //! preferences.
 //!
@@ -54,7 +54,7 @@ pub struct StageState {
     /// an unload, so the card can offer to load the same model again without
     /// the user picking it a second time.
     pub model: Option<String>,
-    /// Whether that model is up. This is what `POST /speak` requires.
+    /// Whether that model is up. This is what `POST /tts/speak` requires.
     pub loaded: bool,
     /// The device the selection runs on; `None` when nothing is selected.
     ///
@@ -98,7 +98,7 @@ impl StageState {
 }
 
 /// Read a whole stage: its backend and its model slot
-/// (HTTP `GET /pipeline/{stage}` then `GET /pipeline/{stage}/model`).
+/// (HTTP `GET /tts/pipeline/{stage}` then `GET /tts/pipeline/{stage}/model`).
 ///
 /// Two requests over a Unix socket, which is what a card needs and what the
 /// split costs. A failure in either fails the read, since a half-drawn card —

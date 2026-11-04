@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::{decode_source, find_backend};
+use super::{decode_source, find_installed_backend};
 use crate::daemon::http::state::AppState;
 use crate::daemon::http::v1::wire::{json_error, json_error_msg, ok};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
@@ -87,7 +87,7 @@ surface: a token granted `settings` cannot reach it.",
 )]
 async fn list_secrets(State(s): State<AppState>, Path(source): Path<String>) -> Response {
     let source = decode_source(&source);
-    let Some(backend) = find_backend(&s, &source).await else {
+    let Some(backend) = find_installed_backend(&s, &source).await else {
         return json_error(StatusCode::NOT_FOUND, "unknown_backend");
     };
     let mut out = Vec::with_capacity(backend.secrets.len());
@@ -157,8 +157,8 @@ Writes the credential to the daemon's secrets file. It cannot be read back after
 only replaced or cleared.
 
 Every stage running a model from this backend is reloaded so the new credential is \
-used at once, a transcription model and a post-processor alike. A reload that fails is \
-reported in the message, and the stage keeps running the old instance.",
+used at once, a transcription model, a post-processor and a speech model alike. A reload \
+that fails is reported in the message, and the stage keeps running the old instance.",
     params(
         ("backend_id" = String, Path,
          description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
@@ -245,7 +245,7 @@ enum Guard {
 }
 
 async fn declared_secret(s: &AppState, source: &str, name: &str) -> Guard {
-    match find_backend(s, source).await {
+    match find_installed_backend(s, source).await {
         None => Guard::NoBackend,
         Some(b) if b.secrets.iter().any(|x| x.name == name) => Guard::Ok,
         Some(_) => Guard::NoItem,

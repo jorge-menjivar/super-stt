@@ -25,9 +25,13 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "Super STT daemon protocol",
+        title = "Super Voice daemon protocol",
         description = "\
 HTTP/1.1 + JSON on two transports that serve the identical API.
+
+One daemon serves both of Super Voice's features. What is speech to text's own is under \
+`/v1/stt`, what is text to speech's own under `/v1/tts`, and what the daemon has once \
+— auth, events, status, backends, the registry, settings, updates — at `/v1`.
 
 **A Unix domain socket** under the per-user runtime directory at \
 `<runtime dir>/voice/super-voice-http.sock` (override with `SUPER_VOICE_HTTP_SOCKET`), which is \
@@ -52,11 +56,11 @@ With curl, over the socket:
 
 ```
 curl --unix-socket \"${XDG_RUNTIME_DIR:-$TMPDIR}/voice/super-voice-http.sock\" \\
-     -H \"Authorization: Bearer $STT_TOKEN\" \\
+     -H \"Authorization: Bearer $VOICE_TOKEN\" \\
      http://voice.local/v1/ping
 ```",
         license(name = "GPL-3.0-only", identifier = "GPL-3.0-only"),
-        contact(name = "Super STT", url = "https://github.com/jorge-menjivar/super-stt"),
+        contact(name = "Super Voice", url = "https://github.com/jorge-menjivar/super-stt"),
     ),
     // The servers list is filled in by `LocalServers`, not here: the TCP
     // entry's URL embeds `config::DEFAULT_TCP_PORT`, and a macro attribute
@@ -74,9 +78,11 @@ curl --unix-socket \"${XDG_RUNTIME_DIR:-$TMPDIR}/voice/super-voice-http.sock\" \
         (name = "auth", description = "Consent handshake and token probing."),
         (name = "health", description = "Liveness and what the daemon is currently running."),
         (name = "transcribe", description = "Start, stop and stream transcription."),
-        (name = "events", description = "Server-Sent Events for recording state, audio levels, model and download progress, and final transcripts."),
-        (name = "pipeline", description = "The ordered stages a transcript passes through: which backend fills each, which model runs there, and on what device."),
-        (name = "settings", description = "Stored daemon preferences, one value apiece, all under `/v1/settings`: audio cues, write and notification methods, language, update policy. Sharing the `settings` scope is not the same as being a setting \u{2014} `backends`, `pipeline` and `registry` are guarded by it too."),
+        (name = "speak", description = "Synthesize text, play it, and stop it — including the incremental WebSocket path for text that is still being produced."),
+        (name = "voices", description = "The cloned-voice library: reference recordings the user owns, and the ids that name them on `POST /v1/tts/speak`."),
+        (name = "events", description = "Server-Sent Events for recording and playback state, audio levels, model and download progress, and final transcripts."),
+        (name = "pipeline", description = "Each feature's ordered stages, under `/v1/stt/pipeline` and `/v1/tts/pipeline`: which backend fills each, which model runs there, and on what device. Stages are numbered from 1 within each feature."),
+        (name = "settings", description = "Stored daemon preferences, one value apiece, all under `/v1/settings`, one of each for both features: audio cues, volume, write and notification methods, language, update policy. Sharing the `settings` scope is not the same as being a setting \u{2014} `backends`, `pipeline` and `registry` are guarded by it too."),
         (name = "hardware", description = "What the daemon can see of this machine: GPUs, drivers, runtimes."),
         (name = "update", description = "Whether a newer daemon exists, and asking it to look now."),
         (name = "backends", description = "Installed backends: their models, options and secrets."),
@@ -220,6 +226,40 @@ pub(crate) fn annotate_scopes(openapi: &mut utoipa::openapi::OpenApi) {
                 && !summary.ends_with(&note)
             {
                 summary.push_str(&note);
+            }
+        }
+    }
+}
+
+/// Prefix each feature route's `operationId` with its feature: `stt_` under
+/// `/v1/stt`, `tts_` under `/v1/tts`.
+///
+/// utoipa takes the id from the handler's name, and both features have a
+/// pipeline whose handlers are named alike — `get_stage` serves
+/// `/v1/stt/pipeline/{stage}` and `/v1/tts/pipeline/{stage}` both. The path
+/// already names the feature, so the id says it the same way, and the routes
+/// the daemon has once keep their plain ids.
+pub(crate) fn name_feature_operations(openapi: &mut utoipa::openapi::OpenApi) {
+    for (path, item) in &mut openapi.paths.paths {
+        let Some(feature) = ["stt", "tts"]
+            .into_iter()
+            .find(|f| path.starts_with(&format!("/v1/{f}/")))
+        else {
+            continue;
+        };
+        let operations = [
+            &mut item.get,
+            &mut item.put,
+            &mut item.post,
+            &mut item.delete,
+            &mut item.options,
+            &mut item.head,
+            &mut item.patch,
+            &mut item.trace,
+        ];
+        for operation in operations.into_iter().flatten() {
+            if let Some(id) = operation.operation_id.as_mut() {
+                *id = format!("{feature}_{id}");
             }
         }
     }

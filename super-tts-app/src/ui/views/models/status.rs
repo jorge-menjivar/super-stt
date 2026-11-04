@@ -337,7 +337,7 @@ mod model_status_tests {
 
     /// Active backend with an unmet required secret → red, even if a model
     /// from another backend happens to be loaded (which shouldn't really
-    /// happen — `POST /pipeline/{stage}` unloads a foreign model when the
+    /// happen — `POST /tts/pipeline/{stage}` unloads a foreign model when the
     /// stage's backend changes — but the dot should still reflect the current
     /// backend's state).
     #[test]

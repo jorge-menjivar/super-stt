@@ -57,8 +57,18 @@ pub(super) fn settings_widget_event_to_message(
         // `Message::DaemonEventsReceived` handler already knows how to
         // dispatch the legacy JSON shape, so we wrap each event in a
         // singleton `NotificationEvent` and feed it through unchanged.
-        "daemon_status_changed" | "download_progress" => widget_event_to_notification(evt)
-            .map(|n| Message::Daemon(DaemonMessage::DaemonEventsReceived(vec![n]))),
+        //
+        // Both features publish these two, each naming itself in `feature`,
+        // and the daemon's own news — an update, a shared setting — names
+        // none. This app takes speech to text's and the daemon's.
+        "daemon_status_changed" | "download_progress"
+            if p.get("feature")
+                .and_then(Value::as_str)
+                .is_none_or(|feature| feature == "stt") =>
+        {
+            widget_event_to_notification(evt)
+                .map(|n| Message::Daemon(DaemonMessage::DaemonEventsReceived(vec![n])))
+        }
         "registry_install" => {
             use super_stt_shared::registry::events::RegistryEvent;
             let p = &evt.payload;
@@ -260,5 +270,59 @@ mod widget_event_to_notification_tests {
             }),
         };
         assert!(widget_event_to_notification(&evt).is_none());
+    }
+}
+
+#[cfg(test)]
+mod feature_filter_tests {
+    //! Both features publish `daemon_status_changed` and `download_progress`
+    //! on the daemon's one event stream. A model load in the other feature
+    //! must not move this app's progress bar.
+    use super::*;
+    use super_stt_shared::daemon::http_client::WidgetEvent;
+
+    fn event(name: &str, feature: &str) -> WidgetEvent {
+        WidgetEvent {
+            name: name.to_string(),
+            payload: serde_json::json!({
+                "feature": feature,
+                "status": "ready",
+                "timestamp": "2026-11-04T12:00:00Z",
+            }),
+        }
+    }
+
+    #[test]
+    fn this_features_events_are_routed() {
+        for name in ["daemon_status_changed", "download_progress"] {
+            assert!(
+                settings_widget_event_to_message(&event(name, "stt")).is_some(),
+                "{name} from stt must reach the app"
+            );
+        }
+    }
+
+    /// The daemon's own news names no feature, and is everyone's.
+    #[test]
+    fn the_daemons_own_events_are_routed() {
+        let evt = WidgetEvent {
+            name: "daemon_status_changed".to_string(),
+            payload: serde_json::json!({
+                "status": "settings_changed",
+                "setting": "language",
+                "timestamp": "2026-11-04T12:00:00Z",
+            }),
+        };
+        assert!(settings_widget_event_to_message(&evt).is_some());
+    }
+
+    #[test]
+    fn the_other_features_events_are_dropped() {
+        for name in ["daemon_status_changed", "download_progress"] {
+            assert!(
+                settings_widget_event_to_message(&event(name, "tts")).is_none(),
+                "{name} from tts is not this app's"
+            );
+        }
     }
 }

@@ -40,14 +40,15 @@ fn normalize(path: &str) -> String {
     out.split('?').next().unwrap_or(&out).to_string()
 }
 
+/// The daemon's OpenAPI document, as JSON: what a client generator receives.
+fn document() -> serde_json::Value {
+    serde_json::to_value(super_voice_daemon::daemon::http::openapi_document())
+        .expect("the document serializes")
+}
+
 /// Every path in the published document, `/v1` stripped and params normalized.
 fn documented() -> BTreeSet<String> {
-    let spec =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tts/docs/protocol/openapi.json");
-    let doc: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&spec).unwrap_or_else(|e| panic!("read {}: {e}", spec.display())),
-    )
-    .expect("openapi.json is valid JSON");
+    let doc = document();
 
     doc["paths"]
         .as_object()
@@ -150,11 +151,11 @@ fn the_scan_finds_the_paths_the_app_depends_on() {
         "/backend/list",
         "/backend/{}/option/{}",
         "/backend/{}/secret/{}",
-        "/pipeline/{}",
-        "/pipeline/{}/model",
+        "/tts/pipeline/{}",
+        "/tts/pipeline/{}/model",
         "/gpu_info",
         "/settings/volume",
-        "/voice/list",
+        "/tts/voice/list",
     ] {
         assert!(
             found.contains(required),
@@ -173,12 +174,12 @@ fn the_scan_finds_the_paths_the_app_depends_on() {
 /// rather than as an error. Nothing logs, nothing 404s — a card simply comes up
 /// with nothing in it.
 ///
-/// That is not hypothetical. `GET /pipeline/{stage}/model` answers with its
+/// That is not hypothetical. `GET /tts/pipeline/{stage}/model` answers with its
 /// slot under `model`, and the shared `DaemonResponse` spells the same thing
 /// `stage_model`; reading it that way returns `None` on every call, so the
 /// stage would come back from a restart having forgotten a selection the daemon
 /// had faithfully persisted — with every test passing, because both sides were
-/// internally consistent. `GET /pipeline/{stage}` has no field on that envelope
+/// internally consistent. `GET /tts/pipeline/{stage}` has no field on that envelope
 /// at all. Both are parsed through their own local envelope types for exactly
 /// this reason, and this table is what keeps those types honest.
 ///
@@ -186,36 +187,40 @@ fn the_scan_finds_the_paths_the_app_depends_on() {
 /// actually reads: this is a check on the agreement, not an inventory of the
 /// schema.
 const RESPONSE_KEYS: &[(&str, &str, &[&str])] = &[
-    ("/v1/pipeline/{stage}", "get", &["stage"]),
-    ("/v1/pipeline/{stage}/backend/list", "get", &["backends"]),
-    ("/v1/pipeline/{stage}/model", "get", &["model"]),
+    ("/v1/tts/pipeline/{stage}", "get", &["stage"]),
     (
-        "/v1/pipeline/{stage}/model/list",
+        "/v1/tts/pipeline/{stage}/backend/list",
+        "get",
+        &["backends"],
+    ),
+    ("/v1/tts/pipeline/{stage}/model", "get", &["model"]),
+    (
+        "/v1/tts/pipeline/{stage}/model/list",
         "get",
         &["available_models"],
     ),
     (
-        "/v1/pipeline/{stage}/device/list",
+        "/v1/tts/pipeline/{stage}/device/list",
         "get",
         &["available_devices"],
     ),
     (
-        "/v1/pipeline/{stage}/model/{model}/device",
+        "/v1/tts/pipeline/{stage}/model/{model}/device",
         "get",
         &["device", "available_devices"],
     ),
     (
-        "/v1/pipeline/{stage}/model/{model}/device/list",
+        "/v1/tts/pipeline/{stage}/model/{model}/device/list",
         "get",
         &["available_devices"],
     ),
     (
-        "/v1/pipeline/{stage}/model/{model}/language",
+        "/v1/tts/pipeline/{stage}/model/{model}/language",
         "get",
         &["language"],
     ),
     (
-        "/v1/pipeline/{stage}/model/{model}/language/list",
+        "/v1/tts/pipeline/{stage}/model/{model}/language/list",
         "get",
         &["available_languages"],
     ),
@@ -272,12 +277,7 @@ fn success_body_keys(doc: &serde_json::Value, path: &str, method: &str) -> BTree
 
 #[test]
 fn every_response_key_the_client_reads_is_one_the_daemon_sends() {
-    let spec =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tts/docs/protocol/openapi.json");
-    let doc: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&spec).unwrap_or_else(|e| panic!("read {}: {e}", spec.display())),
-    )
-    .expect("openapi.json is valid JSON");
+    let doc = document();
 
     let mut missing = Vec::new();
     for (path, method, keys) in RESPONSE_KEYS {

@@ -183,11 +183,7 @@ check-features:
     # green. Running it needs a systemd --user session (SUPER_VOICE_TEST_SUBPROCESS=1)
     # that hosted runners lack — unlike the WASM mock it can't run hermetically —
     # but compiling it keeps it from bit-rotting (audit 2 Tier 2 #13).
-    RUSTFLAGS="-D warnings" cargo test -p super-voice-daemon --features test-fixtures --no-run --test subprocess_mock
-    RUSTFLAGS="-D warnings" cargo check -p super-tts-daemon --no-default-features --features subprocess-backends
-    RUSTFLAGS="-D warnings" cargo check -p super-tts-daemon --no-default-features --features wasm-backends
-    RUSTFLAGS="-D warnings" cargo check -p super-tts-daemon --no-default-features
-    RUSTFLAGS="-D warnings" cargo test -p super-tts-daemon --features test-fixtures --no-run --test subprocess_mock
+    RUSTFLAGS="-D warnings" cargo test -p super-voice-daemon --features test-fixtures --no-run --test subprocess_mock --test tts_subprocess_mock
 
 # Check formatting without modifying files
 fmt-check:
@@ -729,14 +725,14 @@ build-consent: linux-only-gui
 # Requires: rustup target add wasm32-wasip2
 build-mock-wasm-backend:
     cargo build --manifest-path super-voice-daemon/tests/fixtures/mock-wasm-backend/Cargo.toml --target wasm32-wasip2 --release
-    cargo build --manifest-path super-tts-daemon/tests/fixtures/mock-wasm-backend/Cargo.toml --target wasm32-wasip2 --release
+    cargo build --manifest-path super-voice-daemon/tests/fixtures/mock-wasm-tts-backend/Cargo.toml --target wasm32-wasip2 --release
 
 # Build the generic mock REALTIME WASM backend fixture (wasm32-wasip2) that
 # tests/wasm_mock_realtime.rs loads to exercise the daemon's realtime
 # orchestration (ws-server.handle). Requires: rustup target add wasm32-wasip2
 build-mock-wasm-realtime-backend:
     cargo build --manifest-path super-voice-daemon/tests/fixtures/mock-wasm-realtime-backend/Cargo.toml --target wasm32-wasip2 --release
-    cargo build --manifest-path super-tts-daemon/tests/fixtures/mock-wasm-realtime-backend/Cargo.toml --target wasm32-wasip2 --release
+    cargo build --manifest-path super-voice-daemon/tests/fixtures/mock-wasm-realtime-tts-backend/Cargo.toml --target wasm32-wasip2 --release
 
 # Copy the canonical WIT (realtime.wit + deps) into every backend that bundles it.
 sync-wit:
@@ -780,32 +776,6 @@ gen-schemas:
 # secrets file — the document is built from the route registrations themselves.
 openapi:
     cargo run -q -p super-voice-daemon --bin gen_openapi
-
-# Write tts/docs/protocol/openapi.json from the TTS daemon's /v1 router. Unlike
-# Super STT's, this one is committed: the TTS settings app's path-contract
-# tests read it. Run it after changing a TTS route.
-[doc("Regenerate the committed TTS OpenAPI document")]
-openapi-tts:
-    cargo run -q -p super-tts-daemon --bin gen_openapi
-
-# Fails when the committed TTS OpenAPI document no longer matches the router.
-# Regenerates in place and restores the file on exit, so a failing check never
-# leaves the tree modified.
-[doc("Check the committed TTS OpenAPI document is current")]
-openapi-tts-check:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    spec=tts/docs/protocol/openapi.json
-    before=$(mktemp)
-    cp "$spec" "$before"
-    trap 'cp "$before" "$spec"; rm -f "$before"' EXIT
-    cargo run -q -p super-tts-daemon --bin gen_openapi >/dev/null
-    if ! diff -u "$before" "$spec"; then
-        echo >&2
-        echo "tts/docs/protocol/openapi.json is stale. Run 'just openapi-tts' and commit it." >&2
-        exit 1
-    fi
-    echo "tts/docs/protocol/openapi.json is current"
 
 # Browse the protocol spec locally. Regenerates it first so what you read is
 # what the router currently serves, then serves docs/protocol/ over HTTP —

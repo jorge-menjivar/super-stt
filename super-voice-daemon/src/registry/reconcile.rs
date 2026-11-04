@@ -2,9 +2,9 @@
 //! Removing the duplicate directories `dedup_sources` identified, and
 //! repointing the active backend at the winner when it named one of them.
 //!
-//! The removal itself is `super_engine_daemon::registry::reconcile`, shared
-//! with Super TTS; the active backend lives in Super STT's config, so
-//! repointing it is here.
+//! The removal itself is `super_engine_daemon::registry::reconcile`; the
+//! features' selected backends live in Super Voice's config, so repointing
+//! them is here.
 
 use std::path::{Path, PathBuf};
 
@@ -70,25 +70,45 @@ pub(crate) async fn repoint_active_backend(
     let Some(new_name) = winner.file_name().and_then(|n| n.to_str()) else {
         return;
     };
-    let mut cfg = daemon.config.write().await;
-    let Some(active) = cfg.transcription.active_backend.clone() else {
-        return;
-    };
     // Losers and winner are siblings under the backends directory, so a name
     // match is an identity match: the pointer named a directory that is gone.
-    let was_removed = removed
-        .iter()
-        .any(|d| d.file_name().and_then(|n| n.to_str()) == Some(active.as_str()));
-    if !was_removed {
+    let was_removed = |active: &str| {
+        removed
+            .iter()
+            .any(|d| d.file_name().and_then(|n| n.to_str()) == Some(active))
+    };
+    let mut cfg = daemon.config.write().await;
+    let transcription = cfg
+        .transcription
+        .active_backend
+        .clone()
+        .filter(|active| was_removed(active));
+    let synthesis = cfg
+        .synthesis
+        .active_backend
+        .clone()
+        .filter(|active| was_removed(active));
+    if transcription.is_none() && synthesis.is_none() {
         return;
     }
-    cfg.rename_active_backend(new_name.to_string());
-    drop(cfg);
-    *daemon.active_backend.write().await = Some(new_name.to_string());
-    if let Err(e) = daemon.persist_config().await {
-        log::warn!("Failed to persist config after repointing {active}: {e}");
+    if transcription.is_some() {
+        cfg.rename_active_backend(new_name.to_string());
     }
-    log::info!("Repointed active_backend from {active} to {new_name}");
+    if synthesis.is_some() {
+        cfg.rename_synthesis_backend(new_name.to_string());
+    }
+    drop(cfg);
+    if let Some(active) = &transcription {
+        *daemon.active_backend.write().await = Some(new_name.to_string());
+        log::info!("Repointed the transcription backend from {active} to {new_name}");
+    }
+    if let Some(active) = &synthesis {
+        *daemon.tts.active_backend.write().await = Some(new_name.to_string());
+        log::info!("Repointed the synthesis backend from {active} to {new_name}");
+    }
+    if let Err(e) = daemon.persist_config().await {
+        log::warn!("Failed to persist config after repointing to {new_name}: {e}");
+    }
 }
 
 #[cfg(test)]

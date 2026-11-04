@@ -12,6 +12,12 @@
     path = "src/bin/mock_backend.rs"
     required-features = ["test-fixtures"]
 
+# Text to speech's mock subprocess backend, for `tests/tts_subprocess_mock.rs`.
+[[bin]]
+    name = "mock_tts_backend"
+    path = "src/bin/mock_tts_backend.rs"
+    required-features = ["test-fixtures"]
+
 # Writes docs/protocol/openapi.json from the live `/v1` router. CI runs it
 # (`just openapi`) and publishes the result; the file is not committed.
 [[bin]]
@@ -27,13 +33,21 @@
         default-features = false,
         features = ["json", "query", "tokio", "ws"]
     }
+    base64 = "0.23.1"
+    bytes = { version = "1.11.1", optional = true }
     chrono.workspace = true
     clap.workspace = true
     cpal.workspace = true
+    # Text to speech plays through cpal 0.18 while speech to text still
+    # captures with the workspace's 0.17. Renamed so both build in one crate
+    # until the capture side moves up.
+    cpal-playback = { package = "cpal", version = "0.18.2" }
     dashmap.workspace = true
     dirs.workspace = true
     futures = "0.3"
     hex = "0.4.3"
+    hound.workspace = true
+    http-body = { version = "1.0.1", optional = true }
     http-body-util = "0.1"
     hyper = { version = "1", features = ["http1", "server"] }
     hyper-util = {
@@ -57,7 +71,7 @@
     strum_macros.workspace = true
     super-engine-daemon = { workspace = true, features = ["beeper"] }
     super-engine-forge.workspace = true
-    super-voice-registry-types = { path = "../super-voice-registry-types" }
+    super-voice-registry-types = { path = "../super-voice-registry-types", features = ["openapi"] }
     # Shared crate
     super-stt-shared = {
         path = "../super-stt-shared",
@@ -67,6 +81,14 @@
             # The protocol types the daemon publishes in its OpenAPI document
             # carry their own `ToSchema`, so the spec describes each one where it
             # is defined instead of restating its fields at the router.
+            "openapi",
+        ]
+    }
+    super-tts-shared = {
+        path = "../super-tts-shared",
+        features = [
+            "analysis",
+            "audio",
             "openapi",
         ]
     }
@@ -150,12 +172,16 @@
     # default. GPU residency now lives in the backend, so the daemon no longer
     # has cuda/cudnn/flash-attn features.
     default = ["subprocess-backends", "wasm-backends"]
-    # Spawn STT backends as sandboxed native subprocesses.
-    subprocess-backends = ["super-engine-daemon/subprocess"]
+    # Spawn backends as sandboxed native subprocesses.
+    subprocess-backends = [
+        "dep:bytes",
+        "dep:http-body",
+        "super-engine-daemon/subprocess",
+    ]
     # Build the mock_backend test fixture binary (used by tests/subprocess_mock.rs).
     test-fixtures = ["hyper-util/service"]
-    # Load STT backends as sandboxed WASM components.
-    wasm-backends = ["super-engine-daemon/wasm"]
+    # Load backends as sandboxed WASM components.
+    wasm-backends = ["dep:bytes", "dep:http-body", "super-engine-daemon/wasm"]
 
 [lints]
     workspace = true

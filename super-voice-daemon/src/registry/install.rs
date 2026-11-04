@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Install pipeline: `super_engine_daemon::registry::install`, shared with
-//! Super TTS, for Super STT's manifests. State machine: Resolving →
-//! Downloading → Verifying → Extracting → Installing → Rescanning → Done |
-//! Failed.
+//! Install pipeline: `super_engine_daemon::registry::install`, for Super STT's
+//! manifests. State machine: Resolving → Downloading → Verifying → Extracting →
+//! Installing → Rescanning → Done | Failed.
 
 use std::path::{Path, PathBuf};
 

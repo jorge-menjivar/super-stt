@@ -52,23 +52,7 @@ pub static SUPER_VOICE: ProductSpec = ProductSpec {
         ("final_stt", "global_transcriptions"),
         ("speaking_state", "playback_events"),
         ("speech_progress", "playback_events"),
-    ],
-};
-
-/// The text-to-speech daemon's names, until it is part of the Super Voice
-/// daemon. See [`SUPER_VOICE`].
-pub static SUPER_TTS: ProductSpec = ProductSpec {
-    display_name: "Super TTS",
-    slug: "super-tts",
-    short_name: "tts",
-    env_prefix: "SUPER_TTS",
-    tcp_port: 7301,
-    repo: "github.com/jorge-menjivar/super-tts",
-    index_url: INDEX_URL,
-    scopes: &["speak", "voices", "playback_events"],
-    topics: &[
-        ("speaking_state", "playback_events"),
-        ("speech_progress", "playback_events"),
+        ("playback_frequency_bands", "audio_visualization"),
     ],
 };
 

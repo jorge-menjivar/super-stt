@@ -171,14 +171,21 @@ fn assemble(groups: ScopeGroups) -> OpenApiRouter<AppState> {
 /// consent dialog, so a page from an unlisted origin must be stopped before it
 /// can put a popup on the user's screen, not merely stopped from using the
 /// token it would mint.
+///
+/// Text to speech's routes come in here, under `/v1/tts`: their handlers are
+/// handed the feature rather than the whole daemon, so they are bound to their
+/// own state and merged once both are. The origin gate goes on last, over both.
 pub(crate) fn router(state: AppState) -> Router {
     let (router, _spec) = assemble(guarded(scope_groups(), &state)).split_for_parts();
+    let tts = crate::tts::daemon::http::v1::router(crate::tts::daemon::http::state::AppState::new(
+        std::sync::Arc::new(state.daemon.tts.clone()),
+        state.auth.clone(),
+    ));
+    let auth = state.auth.clone();
     router
-        .layer(middleware::from_fn_with_state(
-            state.auth.clone(),
-            require_allowed_origin,
-        ))
         .with_state(state)
+        .merge(tts)
+        .layer(middleware::from_fn_with_state(auth, require_allowed_origin))
 }
 
 /// The generated document for the same surface. The guards are omitted because
@@ -189,6 +196,8 @@ pub(crate) fn openapi() -> utoipa::openapi::OpenApi {
     // Has to happen here, not as an `ApiDoc` modifier: the paths only exist
     // once the router has been assembled.
     crate::daemon::http::openapi::annotate_scopes(&mut spec);
+    spec.merge(crate::tts::daemon::http::openapi_document());
+    crate::daemon::http::openapi::name_feature_operations(&mut spec);
     spec
 }
 
@@ -225,5 +234,7 @@ pub(super) fn enforced_scopes() -> std::collections::BTreeMap<String, Option<Vec
             enforced.insert(format!("/v1{path}"), scopes.clone());
         }
     }
+    // Text to speech's routes are merged in by `router`, guards and all.
+    enforced.extend(crate::tts::daemon::http::v1::enforced_scopes());
     enforced
 }

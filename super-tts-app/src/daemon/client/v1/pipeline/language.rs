@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/model/{model}/language` — one model's language.
+//! `/tts/pipeline/{stage}/model/{model}/language` — one model's language.
 //!
 //! A per-model override, and the resolution that answers which language is
 //! actually in effect: the override, the global `/settings/language` setting,
@@ -8,7 +8,7 @@
 //!
 //! This is the model's *language*, not its voice. The language decides how text
 //! is pronounced; the voice decides who says it, and a voice is a per-utterance
-//! field on `POST /speak` rather than a stored preference.
+//! field on `POST /tts/speak` rather than a stored preference.
 //!
 //! Addressed through the stage, like [`super::device`], and for the same
 //! reason: the daemon keys the override by `(source, model)`, and the stage is
@@ -33,11 +33,11 @@ fn enc(s: &str) -> String {
 }
 
 fn language_path(stage: u32, model: &str) -> String {
-    format!("/pipeline/{stage}/model/{}/language", enc(model))
+    format!("/tts/pipeline/{stage}/model/{}/language", enc(model))
 }
 
 /// Read how one model's language resolves
-/// (HTTP `GET /pipeline/{stage}/model/{model}/language`).
+/// (HTTP `GET /tts/pipeline/{stage}/model/{model}/language`).
 ///
 /// The whole resolution rather than the stored value alone: a card showing
 /// "Automatic" still has to say what automatic resolved to, and three settings
@@ -71,7 +71,7 @@ pub async fn get_model_language(
 }
 
 /// Pin one model to a language
-/// (HTTP `POST /pipeline/{stage}/model/{model}/language`).
+/// (HTTP `POST /tts/pipeline/{stage}/model/{model}/language`).
 ///
 /// Stored against the backend and model together, so it survives model switches
 /// rather than following whichever model happens to be loaded. Returns the
@@ -110,7 +110,7 @@ pub async fn set_model_language(
 }
 
 /// Remove the pin, returning the model to Automatic
-/// (HTTP `DELETE /pipeline/{stage}/model/{model}/language`).
+/// (HTTP `DELETE /tts/pipeline/{stage}/model/{model}/language`).
 ///
 /// Distinct from setting `auto`, which is itself a stated preference: this
 /// falls back to the global setting, and to the model's own primary language
@@ -138,7 +138,7 @@ pub async fn clear_model_language(
 }
 
 /// The languages `model` can be pinned to
-/// (HTTP `GET /pipeline/{stage}/model/{model}/language/list`).
+/// (HTTP `GET /tts/pipeline/{stage}/model/{model}/language/list`).
 ///
 /// What [`set_model_language`] will accept — the model's own tags plus the
 /// reserved `auto` — not a general BCP-47 list. Which of `en` and `en-US` a
@@ -152,7 +152,7 @@ pub async fn list_model_languages(stage: u32, model: String) -> HttpResult<Vec<S
     with_settings_token(move |socket, token| {
         let model = model.clone();
         async move {
-            let path = format!("/pipeline/{stage}/model/{}/language/list", enc(&model));
+            let path = format!("/tts/pipeline/{stage}/model/{}/language/list", enc(&model));
             let resp = require_success(
                 transport::settings_get(socket, &token, &path).await?,
                 "list_model_languages",

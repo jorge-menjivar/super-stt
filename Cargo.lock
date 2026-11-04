@@ -7247,6 +7247,7 @@ dependencies = [
  "slotmap",
  "super-engine-forge",
  "super-tts-shared",
+ "super-voice-daemon",
  "super-voice-registry-types",
  "tempfile",
  "tokio",
@@ -7269,79 +7270,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-tts-consent"
-version = "0.3.0-beta.2"
-dependencies = [
- "libc",
- "libcosmic",
- "log",
- "super-tts-shared",
-]
-
-[[package]]
-name = "super-tts-daemon"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "base64 0.23.1",
- "bytes",
- "chrono",
- "clap",
- "cpal 0.18.2",
- "dirs 7.0.0",
- "futures",
- "futures-util",
- "hex",
- "hound",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "libc",
- "log",
- "mockito",
- "parking_lot",
- "reqwest",
- "ring",
- "rustls",
- "semver",
- "serde",
- "serde_json",
- "super-engine-daemon",
- "super-engine-forge",
- "super-engine-test-daemon",
- "super-tts-shared",
- "super-voice-registry-types",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-tungstenite",
- "urlencoding",
- "utoipa",
- "utoipa-axum",
- "uuid",
- "wiremock",
- "zbus",
-]
-
-[[package]]
-name = "super-tts-install"
-version = "0.3.0-beta.2"
-dependencies = [
- "flate2",
- "hex",
- "mockito",
- "ring",
- "serde_json",
- "super-engine-installer",
- "super-voice-registry-types",
- "tar",
- "tokio",
-]
-
-[[package]]
 name = "super-tts-shared"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -7358,6 +7286,7 @@ dependencies = [
  "super-engine-client",
  "super-engine-protocol",
  "super-engine-spec",
+ "super-stt-shared",
  "super-voice-registry-types",
  "thiserror 2.0.21",
  "tokio",
@@ -7382,9 +7311,12 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "base64 0.23.1",
+ "bytes",
  "chrono",
  "clap",
  "cpal 0.17.3",
+ "cpal 0.18.2",
  "dashmap",
  "dirs 7.0.0",
  "enigo",
@@ -7392,6 +7324,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hound",
+ "http-body",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -7413,6 +7346,7 @@ dependencies = [
  "super-engine-forge",
  "super-engine-test-daemon",
  "super-stt-shared",
+ "super-tts-shared",
  "super-voice-registry-types",
  "tempfile",
  "thiserror 2.0.21",

@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
                 ), // No --voice/--language/--speed/--instructions: how the
                    // machine speaks is the user's configuration, not a flag on the
                    // thing that makes it talk. Set a voice with the settings app
-                   // or `POST /pipeline/{stage}/model/{model}/voice`.
+                   // or `POST /tts/pipeline/{stage}/model/{model}/voice`.
         )
         .subcommand(Command::new("stop").about("Stop the utterance now playing"))
         .subcommand(
@@ -136,25 +136,13 @@ async fn cmd_status(
     socket_path: PathBuf,
     token: String,
 ) -> super_tts_shared::daemon::http_client::HttpResult<()> {
-    let resp = http_client::status(socket_path, &token).await?;
-    if resp.status != "success" {
-        return Err(http_client::HttpError::Other(
-            resp.message.unwrap_or_else(|| "unknown error".to_string()),
-        ));
-    }
+    let tts = http_client::status(socket_path, &token).await?.tts;
     println!(
         "Model:  {}",
-        resp.current_model.as_deref().unwrap_or("(none loaded)")
+        tts.current_model.as_deref().unwrap_or("(none loaded)")
     );
-    println!("Device: {}", resp.device.as_deref().unwrap_or("unknown"));
-    println!(
-        "State:  {}",
-        if resp.busy.unwrap_or(false) {
-            "speaking"
-        } else {
-            "idle"
-        }
-    );
+    println!("Device: {}", tts.device);
+    println!("State:  {}", if tts.busy { "speaking" } else { "idle" });
     Ok(())
 }
 

@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Super STT's event bus for the `/events` SSE stream.
+//! Super Voice's event bus for the `/events` SSE stream: one bus for both
+//! features.
 //!
 //! The bus, the core topics every daemon publishes (`frequency_bands`,
 //! `daemon_status_changed`, `download_progress`, `registry_install`) and the
-//! stream itself are `super_engine_daemon::events`, shared with Super TTS.
-//! What is Super STT's is below: the recording and transcription topics,
-//! their payloads, and the methods that publish them. [`event_topics!`]
-//! generates the [`Topic`] enum, the [`EventBus`] and the [`AnyReceiver`]
-//! from these rows plus the core ones.
+//! stream itself are `super_engine_daemon::events`. What is Super Voice's is
+//! the table below: speech to text's recording and transcription topics, whose
+//! payloads and publishers are here, and text to speech's playback topics,
+//! whose payloads and publishers are in [`crate::tts::daemon::events`].
+//! [`event_topics!`] generates the [`Topic`] enum, the [`EventBus`] and the
+//! [`AnyReceiver`] from these rows plus the core ones.
 //!
 //! The wire shape of each topic is set by the structs below and matches
 //! the topic tables in `docs/protocol/endpoints/v1/events.md` exactly.
@@ -98,6 +100,25 @@ super_engine_daemon::event_topics! {
         wire: "final_stt", scope: "global_transcriptions",
         field: final_stt, payload: SttEvent, capacity: STATE_BUF_CAPACITY,
     },
+    /// Whether speech is currently coming out of the speakers.
+    SpeakingState {
+        wire: "speaking_state", scope: "playback_events",
+        field: speaking_state, payload: crate::tts::daemon::events::SpeakingStateEvent,
+        capacity: STATE_BUF_CAPACITY,
+    },
+    /// How far through the current utterance playback has got.
+    SpeechProgress {
+        wire: "speech_progress", scope: "playback_events",
+        field: speech_progress, payload: crate::tts::daemon::events::SpeechProgressEvent,
+        capacity: STATE_BUF_CAPACITY,
+    },
+    /// The frequency bands of what the daemon is speaking, for visualizers.
+    /// `frequency_bands` is the microphone's; one daemon now has both.
+    PlaybackFrequencyBands {
+        wire: "playback_frequency_bands", scope: "audio_visualization",
+        field: playback_frequency_bands, payload: super_engine_daemon::events::FrequencyBandsEvent,
+        capacity: super_engine_daemon::events::AUDIO_BUF_CAPACITY,
+    },
 }
 
 // ---------- Publish API --------------------------------------------------------
@@ -151,9 +172,30 @@ impl EventBus {
     /// event carries (mirroring [`Self::publish_download_progress`]). Serializing
     /// the enum is the single construction path, so producers no longer hand-build
     /// `json!` maps whose keys can silently drift (audit 2 Tier 2 #9).
+    ///
+    /// The event is speech to text's, and says so in `feature`: both features
+    /// number their stages from 1, and both report on this one topic.
     pub fn publish_daemon_status(
         &self,
         event: super_stt_shared::models::protocol::DaemonStatusEvent,
+    ) {
+        self.publish_status(event, Some("stt"));
+    }
+
+    /// [`publish_daemon_status`](Self::publish_daemon_status) for the daemon's
+    /// own news rather than a feature's — an update, a change to a setting
+    /// both features read. It names no feature, so every client takes it.
+    pub fn publish_shared_status(
+        &self,
+        event: super_stt_shared::models::protocol::DaemonStatusEvent,
+    ) {
+        self.publish_status(event, None);
+    }
+
+    fn publish_status(
+        &self,
+        event: super_stt_shared::models::protocol::DaemonStatusEvent,
+        feature: Option<&str>,
     ) {
         let mut payload = serde_json::to_value(event).unwrap_or_else(|_| serde_json::json!({}));
         if let Some(obj) = payload.as_object_mut() {
@@ -161,8 +203,49 @@ impl EventBus {
                 "timestamp".into(),
                 serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
             );
+            if let Some(feature) = feature {
+                obj.insert("feature".into(), serde_json::Value::String(feature.into()));
+            }
         }
         self.publish_daemon_status_changed(payload);
+    }
+}
+
+/// Text to speech's playback publishers. Here rather than with its payloads in
+/// [`crate::tts::daemon::events`] because they send on the bus's fields, which
+/// are this module's.
+impl EventBus {
+    /// Publish a `speaking_state` change.
+    pub fn publish_speaking_state(&self, is_speaking: bool, utterance_id: Option<String>) {
+        let _ = self
+            .speaking_state
+            .send(crate::tts::daemon::events::SpeakingStateEvent {
+                is_speaking,
+                utterance_id,
+            });
+    }
+
+    /// Publish a `speech_progress` update.
+    pub fn publish_speech_progress(&self, utterance_id: String, spoken_ms: u64, queued_ms: u64) {
+        let _ = self
+            .speech_progress
+            .send(crate::tts::daemon::events::SpeechProgressEvent {
+                utterance_id,
+                spoken_ms,
+                queued_ms,
+            });
+    }
+    /// Publish a `playback_frequency_bands` event: the bands of what is
+    /// being spoken.
+    pub fn publish_playback_frequency_bands(
+        &self,
+        bands: &[f32],
+        sample_rate: f32,
+        total_energy: f32,
+    ) {
+        let _ = self.playback_frequency_bands.send(
+            super_engine_daemon::events::FrequencyBandsEvent::new(bands, sample_rate, total_energy),
+        );
     }
 }
 
@@ -207,6 +290,28 @@ mod tests {
         })
         .expect("serializes");
         assert!(final_.get("source").is_none(), "got {final_}");
+    }
+
+    /// A feature's status names the feature; the daemon's own news names
+    /// none, so a client of either feature takes it.
+    #[tokio::test]
+    async fn only_a_features_status_names_the_feature() {
+        use super_stt_shared::models::protocol::DaemonStatusEvent;
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe(Topic::DaemonStatusChanged);
+
+        bus.publish_daemon_status(DaemonStatusEvent::SettingsChanged {
+            setting: "contexts".into(),
+        });
+        let (_, payload) = rx.recv_json().await.expect("a status");
+        assert_eq!(payload["feature"], "stt");
+
+        bus.publish_shared_status(DaemonStatusEvent::UpdateAvailable {
+            latest_version: "v1.0.0".into(),
+        });
+        let (_, payload) = rx.recv_json().await.expect("a status");
+        assert!(payload.get("feature").is_none(), "{payload}");
+        assert!(payload.get("timestamp").is_some());
     }
 
     #[test]
@@ -259,6 +364,12 @@ mod tests {
         assert_eq!(Topic::DaemonStatusChanged.required_scope(), "daemon_status");
         assert_eq!(Topic::DownloadProgress.required_scope(), "daemon_status");
         assert_eq!(Topic::RegistryInstall.required_scope(), "daemon_status");
+        assert_eq!(Topic::SpeakingState.required_scope(), "playback_events");
+        assert_eq!(Topic::SpeechProgress.required_scope(), "playback_events");
+        assert_eq!(
+            Topic::PlaybackFrequencyBands.required_scope(),
+            "audio_visualization"
+        );
     }
 
     #[test]

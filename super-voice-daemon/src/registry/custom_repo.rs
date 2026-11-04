@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Resolve an arbitrary repo URL into an [`IndexBackend`] for the Custom-repo
-//! install path: `super_engine_daemon::registry::custom_repo`, shared with
-//! Super TTS, for Super STT's manifests.
+//! install path: `super_engine_daemon::registry::custom_repo`, for Super STT's manifests.
 
 use super_engine_forge::ForgeClient;
 

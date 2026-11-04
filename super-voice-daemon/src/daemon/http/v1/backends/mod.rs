@@ -46,7 +46,24 @@ pub(crate) fn decode_source(raw: &str) -> String {
     urlencoding::decode(raw).map_or_else(|_| raw.to_string(), std::borrow::Cow::into_owned)
 }
 
-/// Clone the catalog entry for `source`, if installed.
+/// Clone the installed backend `source`, with every model it serves, whichever
+/// feature. What the `/backend/{backend_id}` routes are about: options and
+/// secrets are the backend's, not a feature's.
+pub(crate) async fn find_installed_backend(
+    s: &AppState,
+    source: &str,
+) -> Option<DiscoveredBackend> {
+    s.daemon
+        .all_backends
+        .read()
+        .await
+        .iter()
+        .find(|b| b.source == source)
+        .cloned()
+}
+
+/// Clone speech to text's catalog entry for `source`, if installed: the
+/// backend with its transcription and post-processing models only.
 pub(crate) async fn find_backend(s: &AppState, source: &str) -> Option<DiscoveredBackend> {
     s.daemon
         .backends
@@ -67,9 +84,10 @@ Every backend installed on this machine, each with the models it serves, the opt
 it exposes, and which of its secrets are configured. Secret *values* are never \
 returned — only whether each is set.
 
-This is the full catalog, roles included. `GET /stt/pipeline/{stage}/model/list` is the \
-narrower read a stage's model picker wants; browsing what is *available to install* \
-is `GET /registry/backend/list`.",
+This is the full catalog, for both features, roles included: each model's `role` says \
+which feature it serves. `GET /stt/pipeline/{stage}/model/list` and \
+`GET /tts/pipeline/{stage}/model/list` are the narrower reads a stage's model picker \
+wants; browsing what is *available to install* is `GET /registry/backend/list`.",
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "The installed catalog.", body = BackendCatalog),
@@ -91,12 +109,14 @@ pub(crate) async fn list_backends(State(s): State<AppState>) -> Response {
     description = "\
 Removes an installed backend and its files from disk.
 
-If the backend was filling a pipeline stage, that stage is emptied first: any loaded \
-model is unloaded and the selection cleared, so the daemon does not end up pointing \
-at files that no longer exist. The response says which stages were affected.
+If the backend was filling a pipeline stage of either feature, that stage is emptied \
+first: any loaded model is unloaded and the selection cleared, so the daemon does not \
+end up pointing at files that no longer exist. The response says which stages were \
+affected.
 
-Refused with `409 backend_busy` while a recording or realtime session is in flight \
-— removing files out from under one would strand state it still depends on.",
+Refused with `409 backend_busy` while a recording, a realtime session or an utterance \
+is in flight — removing files out from under one would strand state it still depends \
+on.",
     params(
         ("backend_id" = String, Path,
          description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
@@ -128,13 +148,14 @@ pub(crate) async fn uninstall_backend(
     // guard the model/backend switch commands use. Removing a backend (and the
     // `refresh_backends` that follows) under an in-flight session would strand
     // state the session still depends on.
-    if s.daemon.switch_guard().await.is_some() {
+    // Speech counts too: the backend may be the one speaking.
+    if s.daemon.switch_guard().await.is_some() || s.daemon.tts.is_busy() {
         return registry_error(StatusCode::CONFLICT, "backend_busy");
     }
 
     // Look up the installed backend directory from the in-memory catalog.
     let install_dir = {
-        let backends = s.daemon.backends.read().await;
+        let backends = s.daemon.all_backends.read().await;
         backends
             .iter()
             .find(|b| b.source == source)
@@ -168,6 +189,14 @@ pub(crate) async fn uninstall_backend(
     if was_post_processor {
         s.daemon.handle_clear_post_processor_backend().await;
     }
+    // Text to speech's stage, the same way as stage 1.
+    let was_synthesis = {
+        let active = s.daemon.tts.active_backend.read().await;
+        active.as_deref() == dir.file_name().and_then(|n| n.to_str())
+    };
+    if was_synthesis {
+        s.daemon.tts.handle_clear_active_backend().await;
+    }
 
     // Remove from disk.
     if let Err(e) = tokio::fs::remove_dir_all(&dir).await {
@@ -188,6 +217,7 @@ pub(crate) async fn uninstall_backend(
         uninstalled: true,
         was_active,
         was_post_processor,
+        was_synthesis,
     };
     (
         StatusCode::OK,

@@ -309,10 +309,14 @@ fn every_response_names_a_real_shape() {
             };
             let Some(json) = content.get("application/json") else {
                 // `text/event-stream`: the frames are documented in prose,
-                // since SSE has no schema language.
+                // since SSE has no schema language. `audio/wav`: bytes, whose
+                // shape is the container format rather than anything OpenAPI
+                // can express — `GET /tts/voice/{id}/audio` hands back a stored
+                // reference clip, and its errors are JSON like everyone else's.
                 assert!(
-                    content.get("text/event-stream").is_some(),
-                    "{method} {path} {code} has a body in neither JSON nor SSE"
+                    content.get("text/event-stream").is_some()
+                        || content.get("audio/wav").is_some(),
+                    "{method} {path} {code} has a body in none of JSON, SSE or WAV"
                 );
                 continue;
             };

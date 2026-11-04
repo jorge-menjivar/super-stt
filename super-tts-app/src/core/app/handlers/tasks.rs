@@ -48,7 +48,7 @@ pub(in crate::core::app) fn reload_backend_catalogs() -> Task<cosmic::Action<Mes
 ///
 /// Both, because the two answer different questions and different surfaces ask
 /// them. The Library manages every installed backend; the Models page's "Load a
-/// backend" sheet may only offer the ones `POST /pipeline/{stage}` will accept,
+/// backend" sheet may only offer the ones `POST /tts/pipeline/{stage}` will accept,
 /// and a backend serving nothing this stage can run is refused there. Offering
 /// it anyway hands the user a pick that fails on click. They hold the same
 /// backends while synthesis is the only role — which is precisely why one list

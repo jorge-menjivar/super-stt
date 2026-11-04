@@ -42,7 +42,8 @@ backend's repo id, and the secret's name.
 ## `GET /backend/list`
 
 List every installed backend with the models it serves and its declared
-secrets and options.
+secrets and options — for both features: one list, whichever feature a backend
+serves, each model marked with its `role`.
 
 **Request:**
 
@@ -76,7 +77,7 @@ Authorization: Bearer stt_…64hex…
           "supported_languages":  ["en", "es-419", "es-ES", "fr"],  // accepted BCP-47 tags
           "supported_devices":    ["none"],
           "estimated_vram_bytes": 0,          // conservative GPU estimate; 0 = cloud/unknown
-          "role":                 "transcription"  // "transcription" | "post_processor"
+          "role":                 "transcription"  // "transcription" | "post_processor" | "synthesis"
         }
       ],
       "secrets": [
@@ -118,12 +119,14 @@ Authorization: Bearer stt_…64hex…
 | `…[].options`     | array            | Declared options: `{ name, label, description, type, default, required, value }`. `label` falls back to `name` when absent; `value` is the effective value (config override if set, else `default`). |
 | `…[].accepts_context` | bool         | Whether the backend declared [`[capabilities] context = true`](../../backend/config.md#capabilities) and is therefore handed the user's [dictation context](./context.md) as `x-stt-prompt` / `x-stt-vocabulary`. `false` for a backend that did not, and from a daemon older than the field — which is the same thing in effect, since such a daemon sends the headers to nobody. A settings UI needs this to say which installed backends will actually use a context: one that ignores the headers has no way to say so at runtime, so without it the user cannot tell a context that did nothing from one that is not working. |
 
-`models[].role` says what a model is for: `"transcription"` (the default, and
-what every model was before the field existed) or `"post_processor"`. A UI
-filters its transcription-model picker and its
-[post-processor](./pipeline.md) picker on this field — the two roles are
-not interchangeable, and selecting a model into the wrong slot is refused. A
-daemon that predates the field omits it; read that as `"transcription"`.
+`models[].role` says what a model is for, and so which feature it serves:
+`"transcription"` and `"post_processor"` are speech to text's, `"synthesis"`
+text to speech's. One backend may serve both features. A UI filters its
+transcription-model picker, its [post-processor](./pipeline.md) picker and its
+[speech](./tts/pipeline.md) picker on this field — the roles are not
+interchangeable, and selecting a model into the wrong slot is refused. Each
+stage's own [`backend/list`](./pipeline/backend-list.md) is this list already
+narrowed to what the stage can run.
 
 `models[].provider` is always an empty string. It is emitted so clients that
 require the key can still parse the response, and carries no information —
@@ -197,7 +200,7 @@ The `source` is URL-percent-encoded.
 ### Response
 
 ```json
-{ "uninstalled": true, "was_active": false, "was_post_processor": false }
+{ "uninstalled": true, "was_active": false, "was_post_processor": false, "was_synthesis": false }
 ```
 
 A backend can be filling either pipeline stage, and each is emptied before
@@ -207,8 +210,10 @@ model is unloaded (freeing device memory) and the active-backend and
 preferred-model config cleared, so `GET /status` stays consistent with
 `GET /stt/pipeline/1`. `was_post_processor` is `true` if it was selected as the
 post-processor backend, loaded or not: the post-processor is unloaded and the
-selection forgotten, as `DELETE /stt/pipeline/2` would. Both can be `true` for a
-backend serving both roles.
+selection forgotten, as `DELETE /stt/pipeline/2` would. `was_synthesis` is `true`
+if it was filling text to speech's stage, which is emptied the way
+`DELETE /tts/pipeline/1` would. Any of them can be `true` together for a
+backend serving several roles.
 
 ### Failure modes
 
@@ -218,5 +223,5 @@ machine-readable `code`), matching `POST /registry/install`:
 | Status | `error` | Cause |
 |---|---|---|
 | `404` | `not_found` | No backend with that source is installed. |
-| `409` | `backend_busy` | A recording or real-time session is active; the backend set cannot be mutated until it finishes. |
+| `409` | `backend_busy` | A recording, a real-time session or an utterance is active; the backend set cannot be mutated until it finishes. |
 | `500` | `remove_failed` | The backend directory could not be removed (includes a `message`). |

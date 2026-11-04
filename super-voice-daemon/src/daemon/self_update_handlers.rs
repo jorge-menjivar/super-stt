@@ -36,14 +36,14 @@ impl SuperSTTDaemon {
             let newly = !before.update_available || before.latest_version != status.latest_version;
             if newly && let Some(tag) = &status.latest_version {
                 self.events
-                    .publish_daemon_status(DaemonStatusEvent::UpdateAvailable {
+                    .publish_shared_status(DaemonStatusEvent::UpdateAvailable {
                         latest_version: tag.clone(),
                     });
             }
             if let Some(tag) = status.latest_version.clone()
                 && self.self_update.should_notify(&tag).await
             {
-                let method = self.config.read().await.transcription.notification_method;
+                let method = self.config.read().await.notification_method;
                 if matches!(
                     method,
                     NotificationMethod::Desktop | NotificationMethod::Auto

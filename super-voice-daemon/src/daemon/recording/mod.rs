@@ -81,7 +81,7 @@ impl SuperSTTDaemon {
         failure: &notice::Failure,
         write_mode: bool,
     ) {
-        let method = self.config.read().await.transcription.notification_method;
+        let method = self.config.read().await.notification_method;
         let mut notifier = self.notifier.lock().await;
         crate::output::notification::deliver(method, &mut notifier, typer, failure, write_mode)
             .await;
@@ -91,7 +91,7 @@ impl SuperSTTDaemon {
     /// [`crate::output::notification::deliver_without_keyboard`] for why this
     /// cannot go through [`Self::surface_failure`].
     pub(crate) async fn surface_keyboard_unavailable(&self, detail: &str) {
-        let method = self.config.read().await.transcription.notification_method;
+        let method = self.config.read().await.notification_method;
         let mut notifier = self.notifier.lock().await;
         crate::output::notification::deliver_without_keyboard(
             method,

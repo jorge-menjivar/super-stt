@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Model-file provisioning for backends: `super_engine_daemon::download`,
-//! shared with Super TTS.
+//! Model-file provisioning for backends: `super_engine_daemon::download`.
 //!
 //! Backends declare the files they need in `backend.toml` (`[[models.files]]`).
 //! Each file is a plain URL plus a `destination` path; the daemon downloads it

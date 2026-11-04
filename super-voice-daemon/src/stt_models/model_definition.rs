@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Resolved model identity used throughout the daemon:
-//! `super_engine_daemon::backends::ModelDefinition`, shared with Super TTS,
+//! `super_engine_daemon::backends::ModelDefinition`,
 //! carrying Super STT's own `[[models]]` keys under `product` — what the
 //! model is for (`product.role`) and whether it forces live previews
 //! (`product.force_preview_support`).

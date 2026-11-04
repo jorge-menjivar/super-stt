@@ -8,26 +8,32 @@ impl SuperSTTDaemon {
     /// The directory backends install into: the configured one, else the
     /// default.
     pub async fn backends_dir(&self) -> PathBuf {
-        let configured = self.config.read().await.transcription.backends_dir.clone();
+        let configured = self.config.read().await.backends_dir.clone();
         configured.map_or_else(backends::default_backends_dir, PathBuf::from)
     }
 
-    /// Re-scan the backends directory and refresh the in-memory registry.
+    /// Re-scan the backends directory and refresh the in-memory registry of
+    /// both features.
+    ///
+    /// The folder is read once, with every role's models: duplicates are a
+    /// property of the folder, not of a feature, so they are removed once and
+    /// both features' selected backends repointed. Each feature then keeps
+    /// the backends that serve it, with only its own models.
     pub async fn refresh_backends(&self) {
         let dir = self.backends_dir().await;
-        let (winners, losers) = backends::discover(&dir);
+        let (winners, losers) = backends::discover_all(&dir);
         info!(
             "Backend registry: {} backend(s) from {}",
             winners.len(),
             dir.display()
         );
 
-        // Skipped while a session holds the switch guard: removing a
-        // directory under an in-flight recording would strand state it
-        // still depends on, the same reason uninstall refuses. The
-        // duplicate is harmless until the next refresh.
+        // Skipped while a session holds the switch guard or an utterance is in
+        // flight: removing a directory under either would strand state it
+        // still depends on, the same reason uninstall refuses. The duplicate
+        // is harmless until the next refresh.
         if !losers.is_empty() {
-            if self.switch_guard().await.is_some() {
+            if self.switch_guard().await.is_some() || self.tts.is_busy() {
                 log::warn!(
                     "{} duplicate backend director(ies) left for a later refresh: \
                      a backend is busy",
@@ -39,7 +45,9 @@ impl SuperSTTDaemon {
             }
         }
 
-        *self.backends.write().await = winners;
+        *self.backends.write().await = backends::speech_to_text(&winners);
+        *self.tts.backends.write().await = crate::tts::tts_models::backends::synthesis(&winners);
+        *self.all_backends.write().await = winners;
     }
 
     /// Choose the model to load at startup: the configured preference, but only
@@ -100,6 +108,11 @@ mod tests {
     /// A minimal backend manifest at `dir`, sharing `source` with whatever
     /// else is written under the same backends root, at the given `version`.
     fn write_backend(dir: &std::path::Path, version: &str) {
+        write_backend_serving(dir, version, "transcription");
+    }
+
+    /// [`write_backend`], its one model in the given `role`.
+    fn write_backend_serving(dir: &std::path::Path, version: &str, role: &str) {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(
             dir.join("backend.toml"),
@@ -118,7 +131,7 @@ mod tests {
 
 [[models]]
     name                = "m"
-    role = "transcription"
+    role = "{role}"
     primary_language    = "en"
     supported_languages = ["en"]
     supported_devices   = ["cpu"]
@@ -142,8 +155,7 @@ mod tests {
 
         let daemon = test_daemon().await;
         *daemon.busy.write().await = true;
-        daemon.config.write().await.transcription.backends_dir =
-            Some(root.path().to_string_lossy().into_owned());
+        daemon.config.write().await.backends_dir = Some(root.path().to_string_lossy().into_owned());
 
         daemon.refresh_backends().await;
 
@@ -171,8 +183,7 @@ mod tests {
         write_backend(&loser, "1.0.0");
 
         let daemon = test_daemon().await;
-        daemon.config.write().await.transcription.backends_dir =
-            Some(root.path().to_string_lossy().into_owned());
+        daemon.config.write().await.backends_dir = Some(root.path().to_string_lossy().into_owned());
 
         daemon.refresh_backends().await;
 
@@ -202,7 +213,7 @@ mod tests {
         let daemon = test_daemon().await;
         {
             let mut cfg = daemon.config.write().await;
-            cfg.transcription.backends_dir = Some(root.path().to_string_lossy().into_owned());
+            cfg.backends_dir = Some(root.path().to_string_lossy().into_owned());
             cfg.transcription.active_backend = Some("super-stt-y".to_string());
             cfg.update_preferred_model("m".to_string(), "github.com/x/y".to_string());
         }
@@ -222,6 +233,66 @@ mod tests {
         assert_eq!(
             daemon.active_backend.read().await.as_deref(),
             Some("app.super-stt.y")
+        );
+    }
+
+    /// Text to speech holds the folder too: a duplicate is left in place while
+    /// an utterance is in flight, for the same reason as a recording.
+    #[tokio::test]
+    async fn reconciliation_is_skipped_while_speech_is_busy() {
+        let root = tempfile::tempdir().unwrap();
+        let winner = root.path().join("app.super-tts.y");
+        let loser = root.path().join("super-tts-y");
+        write_backend_serving(&winner, "1.0.1", "synthesis");
+        write_backend_serving(&loser, "1.0.0", "synthesis");
+
+        let daemon = test_daemon().await;
+        let _claim = daemon.tts.speech.claim_for_test("u-reconcile");
+        daemon.config.write().await.backends_dir = Some(root.path().to_string_lossy().into_owned());
+
+        daemon.refresh_backends().await;
+
+        assert!(
+            loser.exists(),
+            "a duplicate must not be removed while speech is in flight"
+        );
+        assert_eq!(daemon.tts.backends.read().await.len(), 1);
+    }
+
+    /// The refresh repoints text to speech's selected backend as well as
+    /// speech to text's: a reconcile that deleted the directory the synthesis
+    /// pointer names would leave the feature with no backend and no models.
+    #[tokio::test]
+    async fn a_refresh_that_reconciles_the_active_synthesis_directory_repoints_it() {
+        let root = tempfile::tempdir().unwrap();
+        let winner = root.path().join("app.super-tts.y");
+        let loser = root.path().join("super-tts-y");
+        write_backend_serving(&winner, "1.0.1", "synthesis");
+        write_backend_serving(&loser, "1.0.0", "synthesis");
+
+        let daemon = test_daemon().await;
+        {
+            let mut cfg = daemon.config.write().await;
+            cfg.backends_dir = Some(root.path().to_string_lossy().into_owned());
+            cfg.synthesis.active_backend = Some("super-tts-y".to_string());
+            cfg.update_synthesis_model("m".to_string(), "github.com/x/y".to_string());
+        }
+        *daemon.tts.active_backend.write().await = Some("super-tts-y".to_string());
+
+        daemon.refresh_backends().await;
+
+        assert!(!loser.exists());
+        let cfg = daemon.config.read().await;
+        assert_eq!(
+            cfg.synthesis.active_backend.as_deref(),
+            Some("app.super-tts.y"),
+            "the pointer must never be left naming a directory the refresh deleted"
+        );
+        assert_eq!(cfg.synthesis.preferred_model, "m");
+        drop(cfg);
+        assert_eq!(
+            daemon.tts.active_backend.read().await.as_deref(),
+            Some("app.super-tts.y")
         );
     }
 }

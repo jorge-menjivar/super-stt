@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/model` — the model a stage is pointed at.
+//! `/tts/pipeline/{stage}/model` — the model a stage is pointed at.
 //!
 //! Read it, run it, stop it, abandon a load still in flight, list what it could
 //! be, or re-instantiate it in place. All of them are scoped to the stage in
@@ -42,7 +42,7 @@ pub struct StageDevice {
 /// `model` is the *selection*, not the running instance — it survives an
 /// unload, so the card can offer to load the same model again, onto another
 /// device say, without the user picking it a second time. `loaded` is what says
-/// whether it is up, and what `POST /speak` requires.
+/// whether it is up, and what `POST /tts/speak` requires.
 ///
 /// Only the fields the settings app consumes are modeled; serde ignores the
 /// rest.
@@ -74,7 +74,7 @@ impl StageModel {
     }
 }
 
-/// Wire envelope for `GET /pipeline/{stage}/model`.
+/// Wire envelope for `GET /tts/pipeline/{stage}/model`.
 ///
 /// Parsed here rather than off the shared `DaemonResponse`, whose fields happen
 /// to match most envelope keys by name. That coupling is invisible and fails
@@ -134,10 +134,10 @@ struct StageDownload {
 }
 
 fn model_path(stage: u32) -> String {
-    format!("/pipeline/{stage}/model")
+    format!("/tts/pipeline/{stage}/model")
 }
 
-/// Read `stage`'s model slot (HTTP `GET /pipeline/{stage}/model`).
+/// Read `stage`'s model slot (HTTP `GET /tts/pipeline/{stage}/model`).
 pub async fn get_stage_model(stage: u32) -> HttpResult<StageModel> {
     with_settings_token(move |socket, token| async move {
         let envelope =
@@ -157,7 +157,7 @@ pub async fn get_stage_model(stage: u32) -> HttpResult<StageModel> {
 }
 
 /// The download `stage` has in flight, composed from its model slot's
-/// `switch.download` sub-object (HTTP `GET /pipeline/{stage}/model`).
+/// `switch.download` sub-object (HTTP `GET /tts/pipeline/{stage}/model`).
 ///
 /// The polled counterpart of the `download_progress` event, for the ticks a
 /// client may have missed — a page opened mid-download has no history to catch
@@ -200,7 +200,7 @@ pub async fn get_download_status(
     .await
 }
 
-/// Run `model` in `stage` (HTTP `POST /pipeline/{stage}/model`).
+/// Run `model` in `stage` (HTTP `POST /tts/pipeline/{stage}/model`).
 ///
 /// `source` is optional: omitted, the daemon resolves the model against the
 /// backend already filling the stage. Naming one also selects that backend, so
@@ -230,7 +230,7 @@ pub async fn set_stage_model(stage: u32, model: String, source: Option<String>) 
 }
 
 /// Stop running `stage`'s model, keeping the selection
-/// (HTTP `DELETE /pipeline/{stage}/model`).
+/// (HTTP `DELETE /tts/pipeline/{stage}/model`).
 ///
 /// This is a card's Unload: the device memory is freed, the backend stays *and
 /// so does the model*, so loading it again — onto another device, say — is one
@@ -245,7 +245,7 @@ pub async fn unload_stage_model(stage: u32) -> HttpResult<()> {
 }
 
 /// Abandon the load `stage` has in flight
-/// (HTTP `POST /pipeline/{stage}/model/cancel`).
+/// (HTTP `POST /tts/pipeline/{stage}/model/cancel`).
 ///
 /// Addressed to a stage because stages provision independently: cancelling one
 /// is not a licence to abandon another's download. A stage with nothing in
@@ -253,7 +253,7 @@ pub async fn unload_stage_model(stage: u32) -> HttpResult<()> {
 /// success — a Cancel that reported success without cancelling anything is
 /// worse than one that says there was nothing to cancel.
 pub async fn cancel_download(stage: u32) -> HttpResult<()> {
-    let path = format!("/pipeline/{stage}/model/cancel");
+    let path = format!("/tts/pipeline/{stage}/model/cancel");
     with_settings_token(move |socket, token| {
         let path = path.clone();
         async move {
@@ -266,7 +266,7 @@ pub async fn cancel_download(stage: u32) -> HttpResult<()> {
 }
 
 /// Re-instantiate `stage`'s model in place
-/// (HTTP `POST /pipeline/{stage}/model/reload`).
+/// (HTTP `POST /tts/pipeline/{stage}/model/reload`).
 ///
 /// Same model, same device, brought back up so it picks up a changed secret or
 /// option without the caller unloading and loading by hand. Nothing is
@@ -277,7 +277,7 @@ pub async fn cancel_download(stage: u32) -> HttpResult<()> {
 /// where something changed outside the daemon's view — a model file replaced
 /// underneath it, say.
 pub async fn reload_stage_model(stage: u32) -> HttpResult<()> {
-    let path = format!("/pipeline/{stage}/model/reload");
+    let path = format!("/tts/pipeline/{stage}/model/reload");
     with_settings_token(move |socket, token| {
         let path = path.clone();
         async move {
@@ -293,7 +293,7 @@ pub async fn reload_stage_model(stage: u32) -> HttpResult<()> {
     .await
 }
 
-/// The models `stage` can run (HTTP `GET /pipeline/{stage}/model/list`).
+/// The models `stage` can run (HTTP `GET /tts/pipeline/{stage}/model/list`).
 ///
 /// `[name, source]` pairs from the backend filling the stage, filtered to the
 /// ones that serve this stage's role — the exact pair
@@ -306,7 +306,7 @@ pub async fn reload_stage_model(stage: u32) -> HttpResult<()> {
 /// one hands the user a pick that does something other than what the list
 /// implied.
 pub async fn list_stage_models(stage: u32) -> HttpResult<Vec<(String, String)>> {
-    let path = format!("/pipeline/{stage}/model/list");
+    let path = format!("/tts/pipeline/{stage}/model/list");
     with_settings_token(move |socket, token| {
         let path = path.clone();
         async move {

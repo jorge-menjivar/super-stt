@@ -109,6 +109,7 @@ async fn uninstall_encodes_the_source_into_the_path() {
         "uninstalled": true,
         "was_active": true,
         "was_post_processor": false,
+        "was_synthesis": false,
     })));
 
     let removed = backends::uninstall(SOURCE).await.expect("backend removed");
@@ -127,7 +128,7 @@ async fn uninstall_encodes_the_source_into_the_path() {
 async fn an_uninstall_answer_without_the_post_processor_flag_still_parses() {
     let daemon = FakeDaemon::start().await;
     daemon.reply(Reply::json(
-        &json!({ "uninstalled": true, "was_active": false }),
+        &json!({ "uninstalled": true, "was_active": false, "was_synthesis": false }),
     ));
 
     let removed = backends::uninstall(SOURCE).await.expect("backend removed");

@@ -20,14 +20,14 @@ pub use transcribe::{
     TranscribeEvent, TranscribeOptions, transcribe, transcribe_stop, transcribe_stream,
 };
 
-use crate::models::protocol::DaemonResponse;
+use crate::models::status::VoiceStatus;
 
-/// `GET /status` — current model + device.
+/// `GET /status` — each feature's model, device and whether it is at work.
 ///
 /// # Errors
 /// Returns an error if the daemon HTTP listener isn't reachable or the
 /// response can't be parsed.
-pub async fn status(socket_path: PathBuf, token: &str) -> HttpResult<DaemonResponse> {
+pub async fn status(socket_path: PathBuf, token: &str) -> HttpResult<VoiceStatus> {
     super_engine_client::http_client::status(socket_path, token).await
 }
 

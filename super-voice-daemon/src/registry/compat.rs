@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Which build of a backend this host installs, and which variant of each
-//! model file it fetches: `super_engine_daemon::registry::compat`, shared
-//! with Super TTS, for Super STT's contract generations.
+//! model file it fetches: `super_engine_daemon::registry::compat`, for Super
+//! STT's contract generations.
 
 pub use super_engine_daemon::registry::compat::{
     GFX_FAMILY_FLOOR, Selection, select_files, to_selected_asset,

@@ -2,12 +2,11 @@
 //! Host-side driver for STT backends shipped as `wasi:http` proxy components
 //! (experimental — gated behind the `wasm-backends` feature).
 //!
-//! A [`WasmBackend`] is a `super_engine_daemon::wasm::WasmComponent`, shared
-//! with Super TTS, presented through the daemon's [`Transcribe`] trait.
-//! Secrets and options are injected as `x-stt-secret-*` / `x-stt-option-*`
-//! request headers; outbound egress is confined to the backend's
-//! `allowed_hosts` plus the endpoint the user authorized through its
-//! `base_url` option (see [`host::AllowlistHooks`]).
+//! A [`WasmBackend`] is a `super_engine_daemon::wasm::WasmComponent`, presented
+//! through the daemon's [`Transcribe`] trait. Secrets and options are injected
+//! as `x-stt-secret-*` / `x-stt-option-*` request headers; outbound egress is
+//! confined to the backend's `allowed_hosts` plus the endpoint the user
+//! authorized through its `base_url` option (see [`host::AllowlistHooks`]).
 
 pub mod host;
 pub mod ws_host;

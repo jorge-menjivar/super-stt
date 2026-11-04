@@ -87,7 +87,7 @@ impl AppModel {
 
             DownloadMessage::NoDownloadInProgress => {
                 // Only clear a `Provisioning` state. A `Loading` state means
-                // the `POST /pipeline/{stage}/model` call is still in flight
+                // the `POST /tts/pipeline/{stage}/model` call is still in flight
                 // (the subprocess might still be spawning, or the WASM
                 // component might still be initialising) — its `ModelChanged` /
                 // `ModelError` will land later and is the only message

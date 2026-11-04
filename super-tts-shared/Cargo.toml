@@ -23,6 +23,8 @@
     super-engine-client.workspace = true
     super-engine-protocol.workspace = true
     super-engine-spec.workspace = true
+    # The daemon's status, which reports both features.
+    super-stt-shared = { path = "../super-stt-shared" }
     super-voice-registry-types = { path = "../super-voice-registry-types" }
     thiserror.workspace = true
     tokio = {

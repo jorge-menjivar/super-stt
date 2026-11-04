@@ -101,14 +101,23 @@ async fn http_endpoints_respond() {
     assert_eq!(status.status, "success", "status response: {status:?}");
     // With no backends installed (hermetic test), the daemon is idle and has
     // no current model; with a backend it would report one. Either is valid.
-    assert!(status.device.is_some(), "status should have device");
-    // `busy` is the affordance the CLI uses to decide
-    // start-vs-stop on the toggle hotkey — must always be present.
-    assert_eq!(
-        status.busy,
-        Some(false),
-        "status must report busy=false on a freshly-booted daemon"
-    );
+    // Each feature reports its own part.
+    for (feature, part) in [("stt", &status.stt), ("tts", &status.tts)] {
+        assert_eq!(
+            part.device, "unknown",
+            "{feature}: nothing is loaded: {status:?}"
+        );
+        assert!(
+            !part.model_loaded,
+            "{feature}: nothing is loaded: {status:?}"
+        );
+        // `busy` is the affordance the CLI uses to decide start-vs-stop on
+        // the toggle hotkey — must always be present.
+        assert!(
+            !part.busy,
+            "{feature}: a freshly-booted daemon is not busy: {status:?}"
+        );
+    }
 
     // --- POST /stt/transcribe (fire-and-forget) ---
     // Hermetic test harness => no backend installed => no model loaded, so
@@ -186,9 +195,8 @@ async fn transcribe_stop_idempotent_when_idle() {
     let pre = http_client::status(http_socket.clone(), &token)
         .await
         .expect("status before stop");
-    assert_eq!(
-        pre.busy,
-        Some(false),
+    assert!(
+        !pre.stt.busy,
         "test setup: daemon must be idle before calling transcribe_stop"
     );
 
@@ -215,9 +223,8 @@ async fn transcribe_stop_idempotent_when_idle() {
     let post = http_client::status(http_socket.clone(), &token)
         .await
         .expect("status after stop");
-    assert_eq!(
-        post.busy,
-        Some(false),
+    assert!(
+        !post.stt.busy,
         "transcribe_stop on idle daemon must not start a recording; got {post:?}"
     );
 }

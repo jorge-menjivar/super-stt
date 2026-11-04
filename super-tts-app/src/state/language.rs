@@ -24,7 +24,7 @@ pub struct LanguageState {
     /// cached for the session — a stale copy offers tags that are refused on
     /// click and hides ones a new backend just added.
     pub primary_languages: Vec<String>,
-    /// Resolution block from `GET /pipeline/{stage}/model/{model}/language`
+    /// Resolution block from `GET /tts/pipeline/{stage}/model/{model}/language`
     /// for the model identified by `model_language_for`.
     pub model_language: Option<LanguageResolution>,
     /// The tags that model can be pinned to, from the sibling

@@ -162,6 +162,7 @@ pub async fn run() -> Result<()> {
     // path so `Transcribe::shutdown()` runs in an async context and stops
     // the unit cleanly.
     daemon.shutdown_unload().await;
+    daemon.tts.shutdown_unload().await;
 
     // Drain any queued session-store writes before `process::exit` skips the
     // fire-and-forget persist task — otherwise a token minted or revoked in the

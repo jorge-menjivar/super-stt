@@ -4,11 +4,11 @@
 //!
 //! Contracts: `docs/protocol/endpoints/v1/registry/`.
 //!
-//! What each endpoint does is `super_engine_daemon::registry::endpoints`,
-//! shared with Super TTS; the routes and their documentation are here, and so
-//! is what the endpoints need from this daemon ([`RegistryHost`]). Removing a
-//! backend is the one act that is not here — it belongs to the thing being
-//! removed, at [`DELETE /backend/{backend_id}`](super::backends::uninstall_backend).
+//! What each endpoint does is `super_engine_daemon::registry::endpoints`; the
+//! routes and their documentation are here, and so is what the endpoints need
+//! from this daemon ([`RegistryHost`]). Removing a backend is the one act that
+//! is not here — it belongs to the thing being removed, at [`DELETE
+//! /backend/{backend_id}`](super::backends::uninstall_backend).
 //!
 //! These endpoints answer failures in their own envelope — see
 //! [`registry_error`] — which is why they name `RegistryError` where the rest of
@@ -64,16 +64,22 @@ impl RegistryHost for SuperSTTDaemon {
         Arc::clone(&self.events)
     }
 
+    /// Every installed backend, whichever feature it serves: the registry is
+    /// one list for both. Not `self.backends`, which is speech to text's.
+    #[allow(
+        clippy::misnamed_getters,
+        reason = "the engine's name for the installed set, which here is `all_backends`"
+    )]
     fn backends(&self) -> &tokio::sync::RwLock<Vec<DiscoveredBackend>> {
-        &self.backends
+        &self.all_backends
     }
 
     async fn backends_dir(&self) -> PathBuf {
         SuperSTTDaemon::backends_dir(self).await
     }
 
-    /// Only the active backend is repointed. `rename_active_backend` keeps the
-    /// model selection, since it is the same backend in a new directory.
+    /// Each feature's selected backend is repointed. Renaming keeps the model
+    /// selection, since it is the same backend in a new directory.
     async fn backend_dirs_replaced(&self, removed: &[PathBuf], winner: &Path) {
         crate::registry::reconcile::repoint_active_backend(self, removed, winner).await;
     }
