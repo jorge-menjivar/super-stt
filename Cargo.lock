@@ -593,6 +593,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1254ebf6529f3763c491acfb5ab6e960809e3c75a38584cc664f8c5667fb7107"
 
 [[package]]
+name = "audio-core"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f93ebbf82d06013f4c41fe71303feb980cddd78496d904d06be627972de51a24"
+
+[[package]]
+name = "audioadapter"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91f87b70b051c5866680ad79f6743a42ccab264c009d1a71f4d33a3872ae60c8"
+dependencies = [
+ "audio-core",
+ "num-traits",
+]
+
+[[package]]
 name = "audioadapter"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -600,12 +616,33 @@ checksum = "d1292ef9edf681b7426ed089004b021a42896492f58bd0c909ad44e5faec9ac4"
 
 [[package]]
 name = "audioadapter-buffers"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9097d67933fb083d382ce980430afdb758aada60846010aee6be068c06cef0ca"
+dependencies = [
+ "audioadapter 3.0.0",
+ "audioadapter-sample 3.0.0",
+ "num-traits",
+]
+
+[[package]]
+name = "audioadapter-buffers"
 version = "5.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46289a81a3bfa26d0f8b2415f8ca9decde9a66308a150568af5c102381b3c8ce"
 dependencies = [
- "audioadapter",
- "audioadapter-sample",
+ "audioadapter 5.0.0",
+ "audioadapter-sample 5.2.0",
+ "num-traits",
+]
+
+[[package]]
+name = "audioadapter-sample"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34ab94f2bc04a14e1f49ee5f222f66460e8a1b51627bdfedf34eed394d747938"
+dependencies = [
+ "audio-core",
  "num-traits",
 ]
 
@@ -1264,9 +1301,9 @@ dependencies = [
 
 [[package]]
 name = "coreaudio-rs"
-version = "0.14.0"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d15c3c3cee7c087938f7ad1c3098840b3ef1f1bdc7f6e496336c3b1e7a6f3914"
+checksum = "7d5d7dca3ebcf65a035582c9ad4385371a9d9ee6537474d2a278f4e1e475bb58"
 dependencies = [
  "bitflags 2.11.0",
  "libc",
@@ -1465,6 +1502,36 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "windows 0.62.2",
+]
+
+[[package]]
+name = "cpal"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f02e8d0327b42d3e2e4ab2119af397344eb9fc54a34bf0ddeaa1277af8681f1"
+dependencies = [
+ "alsa",
+ "block2 0.6.2",
+ "coreaudio-rs",
+ "dasp_sample",
+ "jni 0.22.4",
+ "js-sys",
+ "libc",
+ "mach2 0.6.0",
+ "ndk",
+ "ndk-context",
+ "num-derive",
+ "num-traits",
+ "objc2 0.6.5",
+ "objc2-audio-toolbox",
+ "objc2-avf-audio",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "web-sys",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -4883,6 +4950,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
 dependencies = [
+ "bitflags 2.11.0",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
 ]
@@ -6151,12 +6219,28 @@ checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rubato"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4be9c88e3d722d3d36939e41941f6b6f52810c1235bf19998a7d4535b402892"
+dependencies = [
+ "audioadapter 3.0.0",
+ "audioadapter-buffers 3.0.0",
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "realfft",
+ "visibility",
+ "windowfunctions",
+]
+
+[[package]]
+name = "rubato"
 version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc1e951b9f5432ec1422f4dcfa5733fc501265902612edf5ef8bd8ecdd960930"
 dependencies = [
- "audioadapter",
- "audioadapter-buffers",
+ "audioadapter 5.0.0",
+ "audioadapter-buffers 5.2.0",
  "num-complex",
  "num-integer",
  "num-traits",
@@ -6947,7 +7031,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
- "cpal",
+ "cpal 0.17.3",
  "flate2",
  "futures-util",
  "gpu-probe",
@@ -7171,7 +7255,7 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
- "cpal",
+ "cpal 0.17.3",
  "dashmap",
  "dirs 7.0.0",
  "enigo",
@@ -7274,13 +7358,182 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
  "objc2-service-management",
- "rubato",
+ "rubato 5.0.1",
  "serde",
  "serde_json",
  "super-engine-client",
  "super-engine-protocol",
  "super-engine-spec",
  "super-stt-registry-types",
+ "thiserror 2.0.21",
+ "tokio",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
+name = "super-tts-app"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyhow",
+ "cpal 0.18.2",
+ "dirs 7.0.0",
+ "futures-util",
+ "hound",
+ "i18n-embed",
+ "i18n-embed-fl",
+ "libc",
+ "libcosmic",
+ "log",
+ "mockito",
+ "open",
+ "rfd 0.17.2",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "slab",
+ "slotmap",
+ "super-engine-forge",
+ "super-tts-registry-types",
+ "super-tts-shared",
+ "tempfile",
+ "tokio",
+ "toml 1.1.0+spec-1.1.0",
+ "urlencoding",
+ "uuid",
+ "vergen",
+]
+
+[[package]]
+name = "super-tts-cli"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyhow",
+ "clap",
+ "super-engine-test-daemon",
+ "super-tts-shared",
+ "tokio",
+]
+
+[[package]]
+name = "super-tts-consent"
+version = "0.3.0-beta.2"
+dependencies = [
+ "libc",
+ "libcosmic",
+ "log",
+ "super-tts-shared",
+]
+
+[[package]]
+name = "super-tts-daemon"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.23.1",
+ "bytes",
+ "chrono",
+ "clap",
+ "cpal 0.18.2",
+ "dirs 7.0.0",
+ "futures",
+ "futures-util",
+ "hex",
+ "hound",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "log",
+ "mockito",
+ "parking_lot",
+ "reqwest",
+ "ring",
+ "rustls",
+ "semver",
+ "serde",
+ "serde_json",
+ "super-engine-daemon",
+ "super-engine-forge",
+ "super-engine-test-daemon",
+ "super-tts-registry-types",
+ "super-tts-shared",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "urlencoding",
+ "utoipa",
+ "utoipa-axum",
+ "uuid",
+ "wiremock",
+ "zbus",
+]
+
+[[package]]
+name = "super-tts-indexer"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "super-engine-indexer",
+ "super-tts-registry-types",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "super-tts-install"
+version = "0.3.0-beta.2"
+dependencies = [
+ "flate2",
+ "hex",
+ "mockito",
+ "ring",
+ "serde_json",
+ "super-engine-installer",
+ "super-tts-registry-types",
+ "tar",
+ "tokio",
+]
+
+[[package]]
+name = "super-tts-registry-types"
+version = "0.3.0-beta.2"
+dependencies = [
+ "jsonschema",
+ "schemars",
+ "serde",
+ "serde_json",
+ "super-engine-protocol",
+ "super-engine-spec",
+ "thiserror 2.0.21",
+ "toml 1.1.0+spec-1.1.0",
+ "utoipa",
+]
+
+[[package]]
+name = "super-tts-shared"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "keyring",
+ "log",
+ "rubato 3.0.0",
+ "serde",
+ "serde_json",
+ "super-engine-client",
+ "super-engine-protocol",
+ "super-engine-spec",
+ "super-tts-registry-types",
  "thiserror 2.0.21",
  "tokio",
  "utoipa",

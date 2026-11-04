@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! The two macros that wrap a one-value settings endpoint.
+//!
+//! Most settings are a plain `GET`/`POST` pair over the settings token, so these
+//! generate the boilerplate: `settings_getter!` reads a value out of the
+//! response, `settings_setter!` posts `{ key: value }`. Endpoints with richer
+//! shapes — anything under `/pipeline`, the backend catalog, the voice library —
+//! stay hand-written.
+//!
+//! They live here rather than in `settings/mod.rs`, where they started, because
+//! they are not a path: this module answers on no URL and exists only to be
+//! expanded elsewhere. `#[macro_use]` in [`super`] is what puts them in scope
+//! for every module declared after it.
+
+/// Generate a settings **getter**: `GET <path>`, require success, then run
+/// `|resp| <extract>` over the response body to produce the return value.
+macro_rules! settings_getter {
+    ($fn:ident -> $ret:ty, $path:literal, $label:literal, |$resp:ident| $extract:expr $(,)?) => {
+        pub async fn $fn() -> super_tts_shared::daemon::http_client::HttpResult<$ret> {
+            crate::daemon::client::internal::session::with_settings_token(
+                |socket, token| async move {
+                    let $resp = crate::daemon::client::internal::response::require_success(
+                        super_tts_shared::daemon::http_client::transport::settings_get(
+                            socket, &token, $path,
+                        )
+                        .await?,
+                        $label,
+                    )?;
+                    Ok($extract)
+                },
+            )
+            .await
+        }
+    };
+}
+
+/// Generate a settings **setter**: `POST <path>` with `{ key: value }`, then
+/// require success (unit result).
+macro_rules! settings_setter {
+    ($fn:ident, $param:ident : $ty:ty, $path:literal, $key:literal, $label:literal $(,)?) => {
+        pub async fn $fn($param: $ty) -> super_tts_shared::daemon::http_client::HttpResult<()> {
+            // Build the body once (consuming the param); the retrying `Fn`
+            // closure clones the `Value` each call — cheap and uniform for
+            // `Copy` and owned params alike (a blanket `$param.clone()` would
+            // trip `clone_on_copy` on e.g. `bool`).
+            let body = serde_json::json!({ $key: $param });
+            crate::daemon::client::internal::session::with_settings_token(
+                move |socket, token| {
+                    let body = body.clone();
+                    async move {
+                        let resp =
+                            super_tts_shared::daemon::http_client::transport::settings_post(
+                                socket, &token, $path, &body,
+                            )
+                            .await?;
+                        crate::daemon::client::internal::response::require_unit(resp, $label)
+                    }
+                },
+            )
+            .await
+        }
+    };
+}

@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-only
+pub mod about;
+pub mod common;
+pub mod connection;
+pub mod customization;
+pub mod language_picker;
+pub mod models;
+pub mod speech;
+pub mod updates;
+pub mod voices;

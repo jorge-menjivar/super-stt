@@ -1,0 +1,37 @@
+[package]
+    name = "super-tts-registry-types"
+    version.workspace = true
+    authors.workspace = true
+    edition.workspace = true
+    description = "Super TTS's backend contract, on top of super-engine-spec"
+    license = "GPL-3.0-only"
+
+[[bin]]
+    name = "gen_schemas"
+    path = "src/bin/gen_schemas.rs"
+    required-features = ["schema"]
+
+[dependencies]
+    schemars = { version = "1", optional = true }
+    serde.workspace = true
+    serde_json.workspace = true
+    super-engine-protocol.workspace = true
+    super-engine-spec.workspace = true
+    thiserror.workspace = true
+    utoipa = { workspace = true, optional = true }
+
+[dev-dependencies]
+    jsonschema = { version = "0.49.4", default-features = false }
+    toml.workspace = true
+
+[features]
+    schema = ["dep:schemars", "super-engine-spec/schema"]
+    # Derive `utoipa::ToSchema` on the index leaves the daemon re-exports as its
+    # `/registry/backend/list` response shapes (see `super_tts_shared::registry`),
+    # so they carry their own definition into the generated OpenAPI document
+    # rather than being re-described there. Separate from `schema`, which is
+    # schemars for the backend.toml / registry.toml JSON Schemas.
+    openapi = ["dep:utoipa", "super-engine-spec/openapi"]
+
+[lints]
+    workspace = true

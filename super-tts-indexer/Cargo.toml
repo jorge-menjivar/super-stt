@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+    name = "super-tts-indexer"
+    edition = "2024"
+    description = "Cron-driven indexer that builds index.json from registry.toml"
+    license = "GPL-3.0-only"
+
+[dependencies]
+    anyhow.workspace = true
+    super-engine-indexer.workspace = true
+    super-tts-registry-types = { path = "../super-tts-registry-types" }
+    tokio.workspace = true
+
+[dev-dependencies]
+    serde_json.workspace = true
+    tempfile = "3"
+
+[lints]
+    workspace = true

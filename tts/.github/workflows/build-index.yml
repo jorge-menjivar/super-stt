@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-3.0-only
+name: Build registry index
+
+# The job is super-engine's, shared with Super STT. It is pinned at the same
+# rev as the super-engine crates in Cargo.toml.
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'    # every 6 hours
+  push:
+    branches: [main]
+    paths: ['registry/registry.toml', 'super-tts-registry-types/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to push to gh-pages branch
+
+concurrency:
+  group: build-index
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: super-libre/super-engine/.github/workflows/build-index.yml@e9a772d7b32b9355fa4896688baf147440052708
+    with:
+      indexer: super-tts-indexer
+      registry-types: super-tts-registry-types

@@ -1,0 +1,29 @@
+[Unit]
+Description=Super TTS Daemon - Text-to-speech service
+Documentation=https://github.com/jorge-menjivar/super-tts
+After=pipewire.service pulseaudio.service graphical-session.target
+Requires=graphical-session.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sh -c 'while [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do sleep 0.1; done'
+# Bare name: systemd resolves it against its fixed search path, so the
+# same unit works for /usr/local/bin (script install) and /usr/bin
+# (distro package) without editing.
+ExecStart=super-tts-daemon
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=10
+
+# Environment
+Environment=CUDA_PATH=/opt/cuda
+Environment=LD_LIBRARY_PATH=/opt/cuda/lib64:/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu
+
+# Output to user journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tts-daemon
+
+[Install]
+WantedBy=default.target

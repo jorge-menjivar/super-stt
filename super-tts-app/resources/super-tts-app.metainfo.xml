@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>ai.menjivar.super-tts-app</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3</project_license>
+  <name>Super TTS App</name>
+  <summary>An application for the COSMIC™ desktop</summary>
+  <icon type="stock">super-tts-app</icon>
+  <url type="vcs-browser">https://github.com/jorge-menjivar/super-tts</url>
+  <launchable type="desktop-id">super-tts-app.desktop</launchable>
+  <provides>
+    <id>ai.menjivar.super-tts-app</id>
+    <binaries>
+      <binary>super-tts-app</binary>
+    </binaries>
+  </provides>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <categories>
+    <category>COSMIC</category>
+  </categories>
+  <keywords>
+    <keyword>COSMIC</keyword>
+  </keywords>
+  <content_rating type="oars-1.1" />
+</component>

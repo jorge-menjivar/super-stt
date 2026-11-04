@@ -1,0 +1,200 @@
+name: Release
+
+# Stable release workflow. Builds the daemon/CLI/consent-helper split
+# plus the app, and publishes a non-prerelease
+# GitHub release. Tags containing the word "beta" go to
+# release-beta.yml instead, which ships the same layout as a prerelease
+# with a `-beta` tarball suffix.
+#
+# The COSMIC applet isn't in the tarball: it has releases of its own, in
+# super-libre/super-cosmic-applet, which the installer installs from.
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "!v*beta*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  config-compat:
+    name: Old config compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: taiki-e/install-action@v2.89.0
+        with:
+          tool: just
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libegl1-mesa-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libasound2-dev \
+            libdbus-1-dev \
+            pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-config-compat-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Load old config fixtures
+        run: just config-compat
+
+  build:
+    name: Build Binaries
+    needs: config-compat
+    strategy:
+      matrix:
+        include:
+          # Native builds (no cross), pinned to 22.04 (glibc 2.35) so the
+          # binaries run on older distros, not just the newest.
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libegl1-mesa-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libasound2-dev \
+            libdbus-1-dev \
+            pkg-config
+
+      # Build all five binaries in one cargo invocation so the shared
+      # dependency graph compiles once, then assemble the tarball.
+      - name: Build binaries
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            --bin super-tts-daemon \
+            --bin super-tts-cli \
+            --bin super-tts-consent \
+            --bin super-tts-app \
+            --bin super-tts-install
+
+      - name: Create tarball
+        run: |
+          mkdir -p dist
+          # Daemon, CLI, and consent helper. The consent helper MUST be in
+          # the same directory as the daemon — locate_consent_helper has no
+          # PATH fallback.
+          cp target/${{ matrix.target }}/release/super-tts-daemon dist/
+          cp target/${{ matrix.target }}/release/super-tts-cli dist/
+          cp target/${{ matrix.target }}/release/super-tts-consent dist/
+          cp target/${{ matrix.target }}/release/super-tts-app dist/
+
+          # Include systemd service files
+          mkdir -p dist/systemd
+          cp super-tts-daemon/systemd/super-tts.service dist/systemd/
+
+          mkdir -p dist/resources
+
+          # Include desktop app resources
+          cp -r super-tts-app/resources/* dist/resources
+
+          # Remove any extra assets
+          rm -rf dist/resources/assets
+
+          # Create tarball with architecture suffix
+          tar -czf super-tts-${{ matrix.target }}.tar.gz -C dist .
+
+      - name: Stage installer binary
+        run: cp "target/${{ matrix.target }}/release/super-tts-install" "super-tts-install-${{ matrix.target }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: super-tts-${{ matrix.target }}
+          path: |
+            super-tts-${{ matrix.target }}.tar.gz
+            super-tts-install-${{ matrix.target }}
+
+  create-release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Generate SHA256SUMS
+        run: |
+          shopt -s globstar nullglob
+          : > SHA256SUMS
+          for f in artifacts/**/*; do
+            [ -f "$f" ] || continue
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") >> SHA256SUMS
+          done
+          cat SHA256SUMS
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/super-tts-install-*
+            SHA256SUMS
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

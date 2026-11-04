@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-only
+name: Registry index (PR preview)
+
+# When a PR changes the registry (or the types that shape the index), build the
+# index.json the same way build-index.yml does on `main` — but instead of
+# publishing to gh-pages, surface it for manual review: a job-summary table of
+# the indexed backends plus the full index.json as a downloadable artifact.
+#
+# The job is super-engine's, shared with Super STT. It is pinned at the same
+# rev as the super-engine crates in Cargo.toml.
+
+on:
+  pull_request:
+    paths:
+      - 'registry/registry.toml'
+      - 'super-tts-registry-types/**'
+  workflow_dispatch: # manual run for testing on any branch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: registry-index-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    uses: super-libre/super-engine/.github/workflows/registry-index-pr.yml@e9a772d7b32b9355fa4896688baf147440052708
+    with:
+      indexer: super-tts-indexer
