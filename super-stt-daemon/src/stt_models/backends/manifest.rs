@@ -5,7 +5,7 @@
 //! shared with Super TTS. This module re-exports both.
 
 pub use super_engine_daemon::backends::validate_runtime;
-pub use super_stt_registry_types::manifest::*;
+pub use super_voice_registry_types::manifest::*;
 
 #[cfg(test)]
 mod tests {
@@ -23,6 +23,8 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+id = "app.test.openai"
+product = "super-voice"
 description = "Test backend."
 
 [[secrets]]
@@ -51,6 +53,8 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+id = "app.test.openai"
+product = "super-voice"
 description = "Test backend."
 
 [[secrets]]
@@ -73,6 +77,8 @@ version = "0.2.0"
 kind = "wasm"
 entrypoint = "mistral.wasm"
 contract = "v1"
+id = "app.test.mistral"
+product = "super-voice"
 description = "Test backend."
 
 [capabilities]
@@ -92,6 +98,8 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+id = "app.test.openai"
+product = "super-voice"
 description = "Test backend."
 "#;
         let m = Manifest::parse(toml_src).expect("parse");
@@ -115,6 +123,8 @@ version = "0.2.0"
 kind = "{kind}"
 entrypoint = "{entrypoint}"
 contract = "v1"
+id = "app.test.tidy"
+product = "super-voice"
 description = "Test backend."
 
 [capabilities]
@@ -143,6 +153,8 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+id = "app.test.openai"
+product = "super-voice"
 description = "Test backend."
 "#;
         let m = Manifest::parse(toml_src).expect("parse");
@@ -162,6 +174,8 @@ version = "0.2.0"
 kind = "wasm"
 entrypoint = "mistral.wasm"
 contract = "v1"
+id = "app.test.mistral"
+product = "super-voice"
 description = "Test backend."
 
 [capabilities]
@@ -169,6 +183,7 @@ websocket = true
 
 [[models]]
 name = "voxtral-mini-transcribe-realtime-2602"
+role = "transcription"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -189,10 +204,13 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "mistral.wasm"
 contract = "v1"
+id = "app.test.mistral"
+product = "super-voice"
 description = "Test backend."
 
 [[models]]
 name = "voxtral-mini-latest"
+role = "transcription"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -214,6 +232,8 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+id = "app.test.openai"
+product = "super-voice"
 description = "Test backend."
 
 [[options]]
@@ -260,6 +280,8 @@ version = "1.0.0"
 kind = "subprocess"
 entrypoint = "/usr/bin/python3"
 contract = "v1"
+id = "app.test.y"
+product = "super-voice"
 description = "Test backend."
 "#,
         )
@@ -284,10 +306,13 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "y.wasm"
 contract = "v1"
+id = "app.test.y"
+product = "super-voice"
 description = "Test backend."
 
 [[models]]
 name = "whisper-1"
+role = "transcription"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]
@@ -306,7 +331,8 @@ name = "Y"
 version = "0.1.0"
 kind = "wasm"
 entrypoint = "y.wasm"
-contract = "v2"
+contract = "v1"
+product = "super-voice"
 id = "app.super-stt.openai"
 description = "Test backend."
 
@@ -333,7 +359,8 @@ name = "Y"
 version = "0.1.0"
 kind = "wasm"
 entrypoint = "y.wasm"
-contract = "v2"
+contract = "v1"
+product = "super-voice"
 id = "app.super-stt.openai"
 description = "Test backend."
 

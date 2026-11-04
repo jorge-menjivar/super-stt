@@ -8,7 +8,7 @@
 [dependencies]
     anyhow.workspace = true
     super-engine-indexer.workspace = true
-    super-stt-registry-types = { path = "../super-stt-registry-types" }
+    super-voice-registry-types = { path = "../super-voice-registry-types" }
     tokio.workspace = true
 
 [dev-dependencies]

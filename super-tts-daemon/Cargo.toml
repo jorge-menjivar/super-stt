@@ -54,7 +54,7 @@
     serde_json.workspace = true
     super-engine-daemon = { workspace = true, features = ["beeper"] }
     super-engine-forge.workspace = true
-    super-tts-registry-types = { path = "../super-tts-registry-types", features = ["openapi"] }
+    super-voice-registry-types = { path = "../super-voice-registry-types", features = ["openapi"] }
     # Shared crate
     super-tts-shared = {
         path = "../super-tts-shared",

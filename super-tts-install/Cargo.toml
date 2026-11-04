@@ -9,7 +9,7 @@
 
 [dependencies]
     super-engine-installer.workspace = true
-    super-tts-registry-types = { path = "../super-tts-registry-types" }
+    super-voice-registry-types = { path = "../super-voice-registry-types" }
 
 # The end-to-end test builds a release tarball and serves it from a mocked
 # GitHub.

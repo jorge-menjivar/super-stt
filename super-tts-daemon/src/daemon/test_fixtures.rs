@@ -18,7 +18,7 @@ use crate::tts_models::backends::manifest::{Opt, OptionDefault, OptionType, Secr
 /// build the state the parser forbids, where the point of the test is that the
 /// daemon does not rely on that rejection.
 ///
-/// [`Manifest::parse`]: super_tts_registry_types::manifest::Manifest::parse
+/// [`Manifest::parse`]: super_voice_registry_types::manifest::Manifest::parse
 pub(crate) fn openai_backend(
     source: &str,
     models: Vec<ModelDefinition>,

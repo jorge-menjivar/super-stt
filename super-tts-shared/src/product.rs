@@ -6,7 +6,7 @@
 //! [`SUPER_TTS`] is defined in `super-tts-registry-types`, where the
 //! installer can reach it; the tests of what Super TTS shipped live here.
 
-pub use super_tts_registry_types::product::SUPER_TTS;
+pub use super_voice_registry_types::product::SUPER_TTS;
 
 #[cfg(test)]
 mod tests {

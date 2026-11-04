@@ -15,5 +15,7 @@ use crate::registry::index_schema::IndexBackend;
 /// # Errors
 /// See [`ResolveError`].
 pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
-    super_engine_daemon::registry::local_dir::resolve::<super_tts_registry_types::Tts>(local_path)
+    super_engine_daemon::registry::local_dir::resolve::<super_voice_registry_types::Voice>(
+        local_path,
+    )
 }

@@ -12,11 +12,11 @@ fn main() {
     let targets = [
         (
             root.join("target/schemas/backend.schema.json"),
-            super_tts_registry_types::schema::backend_schema_pretty(),
+            super_voice_registry_types::schema::backend_schema_pretty(),
         ),
         (
             root.join("target/schemas/registry.schema.json"),
-            super_tts_registry_types::schema::registry_schema_pretty(),
+            super_voice_registry_types::schema::registry_schema_pretty(),
         ),
     ];
     for (path, text) in targets {

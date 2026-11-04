@@ -4,11 +4,11 @@
 //! TTS's.
 
 use super_engine_indexer::Indexer;
-use super_tts_registry_types::Tts;
+use super_voice_registry_types::Voice;
 
 const INDEXER: Indexer = Indexer {
     name: "super-tts-indexer",
-    user_agent: Tts::USER_AGENT,
+    user_agent: Voice::USER_AGENT,
     // Every entry must declare an `id`. The exemptions were the ASR catalog
     // inherited from Super STT, and `registry/registry.toml` no longer lists
     // them, so nothing predates the requirement now.
@@ -17,7 +17,7 @@ const INDEXER: Indexer = Indexer {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
-    super_engine_indexer::main::<Tts>(&INDEXER).await
+    super_engine_indexer::main::<Voice>(&INDEXER).await
 }
 
 #[cfg(test)]

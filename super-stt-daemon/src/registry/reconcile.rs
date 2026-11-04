@@ -31,7 +31,7 @@ pub async fn reconcile(
         if dirs.is_empty() {
             continue;
         }
-        let done = reconcile_dirs::<super_stt_registry_types::Stt>(&dirs, &w.dir).await;
+        let done = reconcile_dirs::<super_voice_registry_types::Voice>(&dirs, &w.dir).await;
         reclaimed += done.reclaimed;
         repoint_active_backend(daemon, &done.removed, &w.dir).await;
     }
@@ -108,10 +108,13 @@ mod tests {
     kind       = "subprocess"
     entrypoint = "y"
     contract   = "v1"
+    id = "app.test.y"
+    product = "super-voice"
     description = "Test backend."
 
 [[models]]
     name                = "m"
+    role = "transcription"
     primary_language    = "en"
     supported_languages = ["en"]
     supported_devices   = ["cpu"]

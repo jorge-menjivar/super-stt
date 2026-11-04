@@ -8,8 +8,9 @@
     version = "1.2.3"
     kind = "wasm"
     entrypoint = "dummy.wasm"
-    product = "super-tts"
+    product = "super-voice"
     contract = "v1"
+    id = "app.test.dummy"
     description = "Test backend."
     license = "Apache-2.0"
 
@@ -26,12 +27,14 @@
 
 [[models]]
     name = "dummy-online"
+    role = "synthesis"
     primary_language = "en"
     supported_languages = ["en"]
     supported_devices = ["none"]
 
 [[models]]
     name = "dummy-local"
+    role = "synthesis"
     # Keeps the legacy `provider` key covered: every published backend.toml
     # declares it, and the daemon still echoes it back on `POST /v1/load`.
     provider = "local_dummy"

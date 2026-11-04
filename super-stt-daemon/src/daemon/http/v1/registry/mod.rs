@@ -53,7 +53,7 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
 }
 
 impl RegistryHost for SuperSTTDaemon {
-    type Product = super_stt_registry_types::Stt;
+    type Product = super_voice_registry_types::Voice;
     type Events = EventBus;
 
     fn daemon(&self) -> Daemon {
@@ -104,6 +104,8 @@ version = "1.0.0"
 kind = "subprocess"
 entrypoint = "voxtral"
 contract = "v1"
+id = "app.test.voxtral"
+product = "super-voice"
 description = "Test backend."
 "#,
         )

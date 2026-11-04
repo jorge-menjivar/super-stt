@@ -40,8 +40,9 @@ name = "Fixture OpenAI"
 version = "1.0.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.openai"
 description = "Test backend."
 license = "Apache-2.0"
 
@@ -93,6 +94,7 @@ type = "integer"
 
 [[models]]
 name = "kokoro-1"
+role = "synthesis"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]

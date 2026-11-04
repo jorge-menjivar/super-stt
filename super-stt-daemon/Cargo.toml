@@ -57,7 +57,7 @@
     strum_macros.workspace = true
     super-engine-daemon = { workspace = true, features = ["beeper"] }
     super-engine-forge.workspace = true
-    super-stt-registry-types = { path = "../super-stt-registry-types" }
+    super-voice-registry-types = { path = "../super-voice-registry-types" }
     # Shared crate
     super-stt-shared = {
         path = "../super-stt-shared",

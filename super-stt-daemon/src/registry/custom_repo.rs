@@ -18,7 +18,7 @@ pub async fn resolve(
     client: &dyn ForgeClient,
     repo_url: &str,
 ) -> Result<IndexBackend, ResolveError> {
-    super_engine_daemon::registry::custom_repo::resolve::<super_stt_registry_types::Stt>(
+    super_engine_daemon::registry::custom_repo::resolve::<super_voice_registry_types::Voice>(
         client, repo_url,
     )
     .await

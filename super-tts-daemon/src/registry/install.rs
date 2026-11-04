@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use super_engine_daemon::registry::install as engine;
 pub use super_engine_daemon::registry::install::{Pipeline, PipelineError};
-use super_tts_registry_types::Tts;
 use super_tts_shared::registry::events::{InstallError, InstallPhase};
+use super_voice_registry_types::Voice;
 
 use crate::registry::compat::Selection;
 use crate::registry::index_schema::IndexBackend;
@@ -26,7 +26,7 @@ pub async fn run<F>(
 where
     F: Fn(InstallPhase, Option<(u64, Option<u64>)>) + Send + Sync,
 {
-    engine::run::<Tts, F>(p, entry, selection).await
+    engine::run::<Voice, F>(p, entry, selection).await
 }
 
 /// Install from a staged local directory. See
@@ -42,7 +42,7 @@ pub async fn run_local<F>(
 where
     F: Fn(InstallPhase, Option<(u64, Option<u64>)>) + Send + Sync,
 {
-    engine::run_local::<Tts, F>(p, entry, src_dir).await
+    engine::run_local::<Voice, F>(p, entry, src_dir).await
 }
 
 /// Remove the directory that used to serve `source`. See
@@ -52,5 +52,5 @@ pub async fn retire_previous_dir(
     source: &str,
     keep: &Path,
 ) -> Option<PathBuf> {
-    engine::retire_previous_dir::<Tts>(backends_dir, source, keep).await
+    engine::retire_previous_dir::<Voice>(backends_dir, source, keep).await
 }

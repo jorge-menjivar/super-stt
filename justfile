@@ -69,7 +69,7 @@ service_dst := systemd_unit_dir / service_file
 # Named as a list rather than reached with `--workspace --exclude` so the
 # macOS gates say what they cover, and so a new portable crate has to be added
 # deliberately rather than silently skipped.
-macos_members := '-p super-stt-daemon -p super-stt-cli -p super-stt-shared -p super-stt-registry-types -p super-stt-install -p super-stt-app'
+macos_members := '-p super-stt-daemon -p super-stt-cli -p super-stt-shared -p super-voice-registry-types -p super-stt-install -p super-stt-app'
 
 # macOS ships as one app bundle, `Super STT.app`: the settings app is its
 # executable, and the daemon and the CLI sit beside it in Contents/MacOS. The
@@ -253,8 +253,7 @@ doctest-macos *args:
 
 # Verify the generated TOML schemas are current
 schema-check:
-    cargo test -p super-stt-registry-types --features schema
-    cargo test -p super-tts-registry-types --features schema
+    cargo test -p super-voice-registry-types --features schema
 
 # Measure code coverage over the whole workspace (requires cargo-llvm-cov).
 # --remap-path-prefix keeps report paths relative, and tests/ is excluded so
@@ -752,10 +751,10 @@ check-wit-sync:
     [ "$fail" -eq 0 ]
 
 # Regenerate the JSON Schemas for backend.toml and registry.toml from the
-# canonical Rust types in super-stt-registry-types. CI fails when the
+# canonical Rust types in super-voice-registry-types. CI fails when the
 # committed schemas are stale, so run this after changing those types.
 gen-schemas:
-    cargo run -p super-stt-registry-types --features schema --bin gen_schemas
+    cargo run -p super-voice-registry-types --features schema --bin gen_schemas
 
 # Write docs/protocol/openapi.json from the daemon's live /v1 router. The file
 # is not committed: CI generates it the same way on every push and publishes

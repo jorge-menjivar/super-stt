@@ -7,7 +7,7 @@
 use serde_json::{Value, json};
 
 fn backend_validator() -> jsonschema::Validator {
-    jsonschema::validator_for(&super_stt_registry_types::schema::backend_schema())
+    jsonschema::validator_for(&super_voice_registry_types::schema::backend_schema())
         .expect("backend schema compiles")
 }
 
@@ -23,11 +23,16 @@ fn toml_to_json(text: &str) -> Value {
 #[test]
 fn accepts_every_in_repo_backend_toml() {
     let v = backend_validator();
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap()
-        .join("super-stt-daemon/tests/fixtures");
-    let entries = std::fs::read_dir(&dir).expect("daemon test fixtures directory");
+        .unwrap();
+    let dirs = [
+        root.join("super-stt-daemon/tests/fixtures"),
+        root.join("super-tts-daemon/tests/fixtures"),
+    ];
+    let entries = dirs
+        .iter()
+        .flat_map(|dir| std::fs::read_dir(dir).expect("daemon test fixtures directory"));
 
     let mut checked = 0;
     for entry in entries.flatten() {
@@ -52,9 +57,9 @@ fn accepts_every_in_repo_backend_toml() {
     }
 
     assert!(
-        checked > 0,
-        "no backend manifests found under {} — this test would pass while validating nothing",
-        dir.display()
+        checked >= dirs.len(),
+        "found {checked} backend manifests under {dirs:?}, fewer than one a daemon — this test \
+         would pass while validating nothing"
     );
 }
 
@@ -106,7 +111,7 @@ const ENTRIES_STILL_WITHOUT_AN_ID: &[&str] = &["deepgram", "voxtral"];
 
 #[test]
 fn accepts_registry_toml() {
-    let v = jsonschema::validator_for(&super_stt_registry_types::schema::registry_schema())
+    let v = jsonschema::validator_for(&super_voice_registry_types::schema::registry_schema())
         .expect("registry schema compiles");
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -145,83 +150,70 @@ fn wasm_base() -> Value {
     json!({
         "backend": { "id": "app.test.y", "source": "github.com/x/y", "name": "Y",
                       "version": "1.0.0", "kind": "wasm", "entrypoint": "y.wasm",
-                      "contract": "v1", "license": "Apache-2.0",
+                      "contract": "v1", "product": "super-voice", "license": "Apache-2.0",
                       "description": "Y backend." },
         "assets": { "wasm": "y.wasm" }
     })
 }
 
-/// A model entry that declares `role`, the field v2 introduced.
-fn post_processor_model() -> Value {
+/// A model entry of `role`.
+fn model(role: &str) -> Value {
     json!({
-        "name": "cleanup", "role": "post_processor", "primary_language": "en",
+        "name": "m1", "role": role, "primary_language": "en",
         "supported_languages": ["en"], "supported_devices": ["cpu"]
     })
 }
 
-/// The schema is contract-aware the same way the parser is: `role` is
-/// accepted under `contract = "v2"` and refused under `"v1"`, and the
-/// refusal names the field so an editor points at the right line. This is
-/// the schema half of `Manifest::parse`'s `FieldRequiresContract`.
+/// Every model declares its role, and each of the three validates. A model
+/// without one is refused at the model, so an editor points at the right
+/// line. The schema half of `Manifest::parse` requiring the key.
 #[test]
-fn the_schema_gates_role_on_contract_v2() {
+fn the_schema_requires_each_model_to_declare_its_role() {
     let v = backend_validator();
+    for role in ["transcription", "post_processor", "synthesis"] {
+        let mut manifest = wasm_base();
+        manifest["models"] = json!([model(role)]);
+        let errors: Vec<String> = v.iter_errors(&manifest).map(|e| e.to_string()).collect();
+        assert!(
+            errors.is_empty(),
+            "role = {role} must validate: {errors:#?}"
+        );
+    }
 
-    let mut v2 = wasm_base();
-    v2["backend"]["contract"] = json!("v2");
-    v2["models"] = json!([post_processor_model()]);
-    let errors: Vec<String> = v.iter_errors(&v2).map(|e| e.to_string()).collect();
-    assert!(
-        errors.is_empty(),
-        "role under v2 must validate: {errors:#?}"
-    );
-
-    let mut v1 = wasm_base();
-    v1["models"] = json!([post_processor_model()]);
+    let mut without = wasm_base();
+    let mut m = model("transcription");
+    m.as_object_mut().unwrap().remove("role");
+    without["models"] = json!([m]);
     let at: Vec<String> = v
-        .iter_errors(&v1)
+        .iter_errors(&without)
         .map(|e| e.instance_path().to_string())
         .collect();
-    assert!(!at.is_empty(), "role under v1 must be refused");
     assert!(
-        at.iter().any(|path| path.ends_with("/role")),
-        "the refusal should point at the field: {at:#?}"
-    );
-
-    // A v1 manifest that stays within v1 is untouched by the rule.
-    let mut plain = wasm_base();
-    plain["models"] = json!([{
-        "name": "m1", "primary_language": "en",
-        "supported_languages": ["en"], "supported_devices": ["cpu"]
-    }]);
-    assert!(
-        v.is_valid(&plain),
-        "a v1 manifest without v2 fields stays valid"
+        at.iter().any(|path| path.ends_with("/models/0")),
+        "a model without a role must be refused at the model: {at:#?}"
     );
 }
 
-/// `[backend].product` takes `super-stt` and nothing else, and v4 requires
+/// `[backend].product` takes `super-voice` and nothing else, and v1 requires
 /// it. The schema half of `Manifest::parse`'s `OtherProduct` and
 /// `FieldRequiredByContract`.
 #[test]
-fn the_schema_takes_only_super_stt_and_v4_requires_it() {
+fn the_schema_takes_only_super_voice_and_requires_it() {
     let v = backend_validator();
+    assert!(v.is_valid(&wasm_base()), "a Super Voice manifest validates");
 
-    let mut tts = wasm_base();
-    tts["backend"]["product"] = json!("super-tts");
-    assert!(!v.is_valid(&tts), "a Super TTS manifest is refused");
+    for other in ["super-stt", "super-tts"] {
+        let mut manifest = wasm_base();
+        manifest["backend"]["product"] = json!(other);
+        assert!(!v.is_valid(&manifest), "a {other} manifest is refused");
+    }
 
-    let mut v4 = wasm_base();
-    v4["backend"]["contract"] = json!("v4");
-    assert!(!v.is_valid(&v4), "v4 requires the product");
-    v4["backend"]["product"] = json!("super-stt");
-    let errors: Vec<String> = v.iter_errors(&v4).map(|e| e.to_string()).collect();
-    assert!(
-        errors.is_empty(),
-        "v4 naming Super STT validates: {errors:#?}"
-    );
-
-    assert!(v.is_valid(&wasm_base()), "v1 may leave the product out");
+    let mut without = wasm_base();
+    without["backend"]
+        .as_object_mut()
+        .unwrap()
+        .remove("product");
+    assert!(!v.is_valid(&without), "v1 requires the product");
 }
 
 /// Every generation the parser knows is one the schema offers, and nothing
@@ -229,9 +221,9 @@ fn the_schema_takes_only_super_stt_and_v4_requires_it() {
 /// must not drift from `Contract::ALL`.
 #[test]
 fn the_schema_offers_exactly_the_known_contracts() {
-    use super_stt_registry_types::manifest::Contract;
-    use super_stt_registry_types::product::Generation;
-    let schema = super_stt_registry_types::schema::backend_schema();
+    use super_voice_registry_types::manifest::Contract;
+    use super_voice_registry_types::product::Generation;
+    let schema = super_voice_registry_types::schema::backend_schema();
     // Documented variants come out of schemars as a `oneOf` of `const`s.
     let offered: Vec<Value> = schema["definitions"]["Contract"]["oneOf"]
         .as_array()
@@ -248,8 +240,8 @@ fn the_schema_offers_exactly_the_known_contracts() {
 /// while the real one slips through.
 #[test]
 fn contract_rule_field_names_exist() {
-    use super_stt_registry_types::manifest::CONTRACT_FIELDS;
-    let schema = super_stt_registry_types::schema::backend_schema();
+    use super_voice_registry_types::manifest::CONTRACT_FIELDS;
+    let schema = super_voice_registry_types::schema::backend_schema();
     let defs = schema["definitions"].as_object().expect("definitions");
     for field in CONTRACT_FIELDS {
         // A row naming a table the schema builder cannot map would generate a
@@ -277,37 +269,19 @@ fn contract_rule_field_names_exist() {
     }
 }
 
-/// `[[models]].prepare_files` is a v4 field. The schema half of
-/// `Manifest::parse`'s `FieldRequiresContract` for it.
+/// `[[models]].prepare_files` is a v1 field. The schema half of
+/// `Manifest::parse` taking it.
 #[test]
-fn the_schema_gates_prepare_files_on_contract_v4() {
+fn the_schema_accepts_prepare_files_under_v1() {
     let v = backend_validator();
-    let model = json!({
-        "name": "m1", "primary_language": "en",
-        "supported_languages": ["en"], "supported_devices": ["cpu"],
-        "prepare_files": ["m/config.json"],
-        "files": [{ "url": "https://h/config.json", "destination": "m/config.json" }]
-    });
-
-    let mut v4 = wasm_base();
-    v4["backend"]["contract"] = json!("v4");
-    v4["backend"]["product"] = json!("super-stt");
-    v4["models"] = json!([model.clone()]);
-    let errors: Vec<String> = v.iter_errors(&v4).map(|e| e.to_string()).collect();
+    let mut m = model("transcription");
+    m["prepare_files"] = json!(["m/config.json"]);
+    m["files"] = json!([{ "url": "https://h/config.json", "destination": "m/config.json" }]);
+    let mut manifest = wasm_base();
+    manifest["models"] = json!([m]);
+    let errors: Vec<String> = v.iter_errors(&manifest).map(|e| e.to_string()).collect();
     assert!(
         errors.is_empty(),
-        "prepare_files under v4 must validate: {errors:#?}"
-    );
-
-    let mut v3 = wasm_base();
-    v3["backend"]["contract"] = json!("v3");
-    v3["models"] = json!([model]);
-    let at: Vec<String> = v
-        .iter_errors(&v3)
-        .map(|e| e.instance_path().to_string())
-        .collect();
-    assert!(
-        at.iter().any(|path| path.ends_with("/prepare_files")),
-        "prepare_files under v3 must be refused at the field: {at:#?}"
+        "prepare_files under v1 must validate: {errors:#?}"
     );
 }

@@ -30,7 +30,7 @@ pub async fn download_files(
         items,
         tracker,
         starting_file_index,
-        super_tts_registry_types::Tts::USER_AGENT,
+        super_voice_registry_types::Voice::USER_AGENT,
     )
     .await
 }

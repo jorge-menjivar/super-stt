@@ -475,7 +475,7 @@ impl SpeechEngine {
             .definition
             .product
             .voice_kinds
-            .contains(&super_tts_registry_types::manifest::VoiceKind::Cloned)
+            .contains(&super_voice_registry_types::manifest::VoiceKind::Cloned)
         {
             return;
         }
@@ -1382,7 +1382,7 @@ pub(crate) fn check_voice(
     definition: &crate::tts_models::ModelDefinition,
     voice: &str,
 ) -> Result<(), SpeakError> {
-    use super_tts_registry_types::manifest::VoiceKind;
+    use super_voice_registry_types::manifest::VoiceKind;
 
     let kind = if voice.starts_with("voice:") {
         VoiceKind::Cloned

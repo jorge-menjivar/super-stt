@@ -107,7 +107,7 @@ impl SuperSTTDaemon {
 mod tests {
     use std::sync::Arc;
 
-    use super_stt_registry_types::manifest::{Device, ModelRole};
+    use super_voice_registry_types::manifest::{Device, ModelRole};
 
     use crate::daemon::types::{LoadedModel, SuperSTTDaemon, test_daemon};
     use crate::stt_models::ModelDefinition;
@@ -175,10 +175,9 @@ mod tests {
             processing_interval: std::time::Duration::from_secs(1),
             supported_devices: vec![Device::None],
             realtime: false,
-            product: super_stt_registry_types::manifest::SttModel {
-                force_preview_support: false,
-                role: ModelRole::PostProcessor,
-            },
+            product: super_voice_registry_types::manifest::VoiceModel::new(
+                ModelRole::PostProcessor,
+            ),
             provider: None,
         };
         let info = ModelInfoData::new(

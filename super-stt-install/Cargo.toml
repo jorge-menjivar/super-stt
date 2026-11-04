@@ -11,7 +11,7 @@
     dirs.workspace = true
     log.workspace = true
     super-engine-installer.workspace = true
-    super-stt-registry-types = { path = "../super-stt-registry-types" }
+    super-voice-registry-types = { path = "../super-voice-registry-types" }
 
 # The end-to-end test builds a release tarball and serves it from a mocked
 # GitHub.

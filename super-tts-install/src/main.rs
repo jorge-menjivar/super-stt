@@ -3,11 +3,11 @@
 //! `super_engine_installer`'s; what is here is what makes it Super TTS's.
 
 use super_engine_installer::Installer;
-use super_tts_registry_types::product::{SUPER_TTS, Tts};
+use super_voice_registry_types::product::{SUPER_TTS, Voice};
 
 static INSTALLER: Installer = Installer {
     product: &SUPER_TTS,
-    user_agent: Tts::USER_AGENT,
+    user_agent: Voice::USER_AGENT,
     wrapper_usage: "e.g. \"tts speak 'hello'\", or bind it to a keyboard shortcut.",
     // No shortcut of its own: this daemon's gesture is "speak what I have
     // selected", and until text acquisition exists there is no command worth

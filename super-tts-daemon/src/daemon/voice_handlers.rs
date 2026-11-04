@@ -17,8 +17,8 @@
 //! build has it, and `voice:<uuid>` is refused outright by a model that does
 //! not clone.
 
-use super_tts_registry_types::manifest::VoiceKind;
 use super_tts_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
+use super_voice_registry_types::manifest::VoiceKind;
 
 impl crate::daemon::types::SuperTTSDaemon {
     /// Route the four per-model voice commands, keeping their destructuring out

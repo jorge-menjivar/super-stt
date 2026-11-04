@@ -25,6 +25,8 @@ version = "{version}"
 kind = "wasm"
 entrypoint = "{wasm_file}"
 contract = "v1"
+product = "super-voice"
+id = "app.test.dummy"
 description = "Test backend."
 license = "Apache-2.0"
 
@@ -33,6 +35,7 @@ wasm = "{wasm_file}"
 
 [[models]]
 name = "m-1"
+role = "transcription"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]

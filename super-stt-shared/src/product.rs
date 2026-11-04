@@ -6,7 +6,7 @@
 //! [`SUPER_STT`] is defined in `super-stt-registry-types`, where the
 //! installer can reach it; the tests of what Super STT shipped live here.
 
-pub use super_stt_registry_types::product::SUPER_STT;
+pub use super_voice_registry_types::product::SUPER_STT;
 
 #[cfg(test)]
 mod tests {

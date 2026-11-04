@@ -12,7 +12,7 @@ pub use super_engine_spec::registry::{
     Compatibility, IndexStale, InstallAccepted, InstallRequest, RefreshResponse, RegistryOption,
     RegistrySecret, SelectedAsset, UpdateRequest, UpdateResponse, events,
 };
-pub use super_stt_registry_types::index::IndexModel as RegistryModel;
+pub use super_voice_registry_types::index::IndexModel as RegistryModel;
 
 /// The registry listing, with Super STT's model fields.
 pub type RegistryListResponse = super_engine_spec::registry::RegistryListResponse<RegistryBackend>;
@@ -35,4 +35,4 @@ pub struct UninstallResponse {
     pub was_post_processor: bool,
 }
 
-pub use super_stt_registry_types::{is_safe_component, is_safe_relative_path};
+pub use super_voice_registry_types::{is_safe_component, is_safe_relative_path};

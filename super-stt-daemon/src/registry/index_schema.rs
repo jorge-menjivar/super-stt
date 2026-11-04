@@ -8,7 +8,7 @@
 pub use super_engine_daemon::registry::index::{
     MinClientStatus, check_min_client, retain_safe_backends,
 };
-pub use super_stt_registry_types::index::{
+pub use super_voice_registry_types::index::{
     Index, IndexAsset, IndexAssets, IndexBackend, IndexModel, IndexOption, IndexSecret, IndexStale,
     IndexSubprocessAsset, id_from_source,
 };

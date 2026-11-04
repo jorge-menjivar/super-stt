@@ -12,7 +12,7 @@
 
 /// Name of the option that carries a backend's configurable endpoint, from the
 /// crate the daemon, the indexer, and the catalog synthesis all share.
-pub(crate) const OPTION_NAME: &str = super_stt_registry_types::manifest::BASE_URL_OPTION;
+pub(crate) const OPTION_NAME: &str = super_voice_registry_types::manifest::BASE_URL_OPTION;
 
 /// Deriving the endpoint: `super_engine_daemon::wasm::base_url`, shared with
 /// Super TTS.

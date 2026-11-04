@@ -20,8 +20,8 @@ pub(crate) use super_engine_daemon::devices::{
     parse_device_preference,
 };
 use super_engine_daemon::devices::{device_rejection, device_switch_message, switch_is_satisfied};
-use super_stt_registry_types::manifest::Device;
 use super_stt_shared::models::protocol::{Command, DaemonResponse, DaemonStatusEvent, ErrorCode};
+use super_voice_registry_types::manifest::Device;
 
 /// The pipeline stage a device command addresses. Each has its own selected
 /// backend, its own loaded slot and its own reload path; everything between
@@ -708,9 +708,11 @@ mod tests {
             processing_interval: std::time::Duration::from_secs(1),
             supported_devices: devices,
             realtime: false,
-            product: super_stt_registry_types::manifest::SttModel {
+            product: super_voice_registry_types::manifest::VoiceModel {
                 force_preview_support: true,
-                role: super_stt_registry_types::manifest::ModelRole::Transcription,
+                ..super_voice_registry_types::manifest::VoiceModel::new(
+                    super_voice_registry_types::manifest::ModelRole::Transcription,
+                )
             },
             provider: None,
         }

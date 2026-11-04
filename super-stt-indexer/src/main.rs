@@ -4,7 +4,7 @@
 //! STT's.
 
 use super_engine_indexer::Indexer;
-use super_stt_registry_types::Stt;
+use super_voice_registry_types::Voice;
 
 /// Entries that predate the `id` requirement, and the migration backlog.
 ///
@@ -22,13 +22,13 @@ const GRANDFATHERED: &[&str] = &["deepgram", "voxtral"];
 
 const INDEXER: Indexer = Indexer {
     name: "super-stt-indexer",
-    user_agent: Stt::USER_AGENT,
+    user_agent: Voice::USER_AGENT,
     grandfathered: GRANDFATHERED,
 };
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
-    super_engine_indexer::main::<Stt>(&INDEXER).await
+    super_engine_indexer::main::<Voice>(&INDEXER).await
 }
 
 #[cfg(test)]

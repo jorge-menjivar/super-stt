@@ -7,7 +7,6 @@
     "super-stt-daemon",
     "super-stt-indexer",
     "super-stt-install",
-    "super-stt-registry-types",
     "super-stt-shared",
     "super-tts-app",
     "super-tts-cli",
@@ -15,8 +14,8 @@
     "super-tts-daemon",
     "super-tts-indexer",
     "super-tts-install",
-    "super-tts-registry-types",
     "super-tts-shared",
+    "super-voice-registry-types",
   ]
   # The mock WASM backend fixtures build for wasm32-wasip2, not the host target
   # (the daemon's wasm_mock.rs / wasm_mock_realtime.rs load them) — keep them
@@ -37,15 +36,14 @@
     "super-stt-consent",
     "super-stt-daemon",
     "super-stt-install",
-    "super-stt-registry-types",
     "super-stt-shared",
     "super-tts-app",
     "super-tts-cli",
     "super-tts-consent",
     "super-tts-daemon",
     "super-tts-install",
-    "super-tts-registry-types",
     "super-tts-shared",
+    "super-voice-registry-types",
   ]
 
   [workspace.package]

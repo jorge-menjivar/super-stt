@@ -228,7 +228,7 @@ async fn stream_installer_events<R: tokio::io::AsyncRead + Unpin>(reader: R, tx:
 /// Build the (per-run directory, installer-binary path) for one apply-flow
 /// run under `base` (`cache_dir()/self-update`, shared across runs). The
 /// directory name embeds this process's pid plus 8 random bytes (via
-/// `super_tts_registry_types::verify::random_hex_suffix`, the same
+/// `super_voice_registry_types::verify::random_hex_suffix`, the same
 /// unpredictable-name pattern `super-tts-install`'s own `StagingGuard` uses
 /// for its staging directory) so a same-UID process can neither predict nor
 /// pre-create/race it.
@@ -244,7 +244,7 @@ fn installer_run_paths(base: &Path, asset_name: &str) -> (PathBuf, PathBuf) {
     let name = format!(
         "{}-{}",
         std::process::id(),
-        super_tts_registry_types::verify::random_hex_suffix(8)
+        super_voice_registry_types::verify::random_hex_suffix(8)
     );
     let dir = base.join(name);
     let bin = dir.join(asset_name);
@@ -312,19 +312,19 @@ async fn create_run_dir(dir: &Path) -> Result<(), String> {
 
 /// Hash `bin` (off the async runtime, since hashing is sync `std::io`) and
 /// compare it against `expected_hex` (case-insensitive; see
-/// `super_tts_registry_types::verify::sha256_matches`). On mismatch, deletes
+/// `super_voice_registry_types::verify::sha256_matches`). On mismatch, deletes
 /// `bin` — a corrupted or tampered-with installer binary must never be
 /// chmod'd executable or spawned — and returns an error describing why.
 async fn verify_installer_checksum(bin: &Path, expected_hex: &str) -> Result<(), String> {
     let path = bin.to_path_buf();
     let actual = tokio::task::spawn_blocking(move || {
-        super_tts_registry_types::verify::file_sha256_hex(&path)
+        super_voice_registry_types::verify::file_sha256_hex(&path)
     })
     .await
     .map_err(|e| format!("checksum task panicked: {e}"))?
     .map_err(|e| format!("hash {}: {e}", bin.display()))?;
 
-    if super_tts_registry_types::verify::sha256_matches(&actual, expected_hex) {
+    if super_voice_registry_types::verify::sha256_matches(&actual, expected_hex) {
         return Ok(());
     }
 
@@ -343,7 +343,7 @@ async fn verify_installer_checksum(bin: &Path, expected_hex: &str) -> Result<(),
 /// below) — keep the two in step per that function's own doc comment.
 async fn download_installer(url: &str, dest: &Path, tx: &mut Tx) -> Result<(), String> {
     let client =
-        super_engine_forge::http::download_client(super_tts_registry_types::Tts::USER_AGENT);
+        super_engine_forge::http::download_client(super_voice_registry_types::Voice::USER_AGENT);
     let mut resp = client
         .get(url)
         .send()
@@ -528,7 +528,7 @@ mod tests {
         let dir = tmp.path();
         let bin = dir.join("installer-bin");
         std::fs::write(&bin, b"hello world").unwrap();
-        let good = super_tts_registry_types::verify::file_sha256_hex(&bin).unwrap();
+        let good = super_voice_registry_types::verify::file_sha256_hex(&bin).unwrap();
 
         assert!(verify_installer_checksum(&bin, &good).await.is_ok());
         assert!(bin.exists(), "a matching checksum must not delete the file");

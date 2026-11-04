@@ -33,11 +33,14 @@ version = "1.0.0"
 kind = "wasm"
 entrypoint = "whisper.wasm"
 contract = "v1"
+id = "app.test.whisper"
+product = "super-voice"
 description = "Test backend."
 license = "Apache-2.0"
 
 [[models]]
 name = "whisper-1"
+role = "transcription"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]

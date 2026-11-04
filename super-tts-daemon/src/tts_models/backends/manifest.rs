@@ -5,7 +5,7 @@
 //! shared with Super STT. This module re-exports both.
 
 pub use super_engine_daemon::backends::validate_runtime;
-pub use super_tts_registry_types::manifest::*;
+pub use super_voice_registry_types::manifest::*;
 
 #[cfg(test)]
 mod tests {
@@ -22,8 +22,9 @@ name = "OpenAI"
 version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.openai"
 description = "Test backend."
 
 [[secrets]]
@@ -51,8 +52,9 @@ name = "OpenAI"
 version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.openai"
 description = "Test backend."
 
 [[secrets]]
@@ -74,8 +76,9 @@ name = "Mistral"
 version = "0.2.0"
 kind = "wasm"
 entrypoint = "mistral.wasm"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.mistral"
 description = "Test backend."
 
 [capabilities]
@@ -94,8 +97,9 @@ name = "OpenAI"
 version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.openai"
 description = "Test backend."
 "#;
         let m = Manifest::parse(toml_src).expect("parse");
@@ -111,8 +115,9 @@ name = "Mistral"
 version = "0.2.0"
 kind = "wasm"
 entrypoint = "mistral.wasm"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.mistral"
 description = "Test backend."
 
 [capabilities]
@@ -120,6 +125,7 @@ websocket = true
 
 [[models]]
 name = "eleven-flash-v2-realtime"
+role = "synthesis"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -139,12 +145,14 @@ name = "Mistral"
 version = "0.1.0"
 kind = "wasm"
 entrypoint = "mistral.wasm"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.mistral"
 description = "Test backend."
 
 [[models]]
 name = "piper-mini-latest"
+role = "synthesis"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -165,8 +173,9 @@ name = "OpenAI"
 version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.openai"
 description = "Test backend."
 
 [[options]]
@@ -212,8 +221,9 @@ name = "Y"
 version = "1.0.0"
 kind = "subprocess"
 entrypoint = "/usr/bin/python3"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.y"
 description = "Test backend."
 "#,
         )

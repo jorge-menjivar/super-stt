@@ -558,10 +558,12 @@ async fn list_backends_catalog_and_option_override() {
             supported_languages: vec!["en".to_string()],
             estimated_vram_bytes: 0,
             processing_interval: Duration::from_secs(1),
-            supported_devices: vec![super_tts_registry_types::manifest::Device::None],
+            supported_devices: vec![super_voice_registry_types::manifest::Device::None],
             realtime: false,
             provider: None,
-            product: super_tts_registry_types::manifest::TtsModel::default(),
+            product: super_voice_registry_types::manifest::VoiceModel::new(
+                super_voice_registry_types::manifest::ModelRole::Synthesis,
+            ),
         }],
         // A manifest may not declare a default for `base_url`, so the catalog's
         // effective value starts unset and only the override fills it in.
@@ -673,7 +675,7 @@ fn fixture_backend(
         source,
         name,
         model_name,
-        vec![super_tts_registry_types::manifest::Device::None],
+        vec![super_voice_registry_types::manifest::Device::None],
     )
 }
 
@@ -690,7 +692,7 @@ fn fixture_backend_local(
         source,
         name,
         model_name,
-        vec![super_tts_registry_types::manifest::Device::Cpu],
+        vec![super_voice_registry_types::manifest::Device::Cpu],
     )
 }
 
@@ -699,7 +701,7 @@ fn fixture_backend_devices(
     source: &str,
     name: &str,
     model_name: &str,
-    supported_devices: Vec<super_tts_registry_types::manifest::Device>,
+    supported_devices: Vec<super_voice_registry_types::manifest::Device>,
 ) -> crate::tts_models::backends::DiscoveredBackend {
     use crate::tts_models::ModelDefinition;
     use crate::tts_models::backends::DiscoveredBackend;
@@ -729,7 +731,9 @@ fn fixture_backend_devices(
             supported_devices,
             realtime: false,
             provider: None,
-            product: super_tts_registry_types::manifest::TtsModel::default(),
+            product: super_voice_registry_types::manifest::VoiceModel::new(
+                super_voice_registry_types::manifest::ModelRole::Synthesis,
+            ),
         }],
     }
 }
@@ -992,10 +996,12 @@ async fn seed_recording_model(daemon: &SuperTTSDaemon, name: &str, source: &str)
         supported_languages: vec!["en".to_string()],
         estimated_vram_bytes: 0,
         processing_interval: Duration::from_secs(1),
-        supported_devices: vec![super_tts_registry_types::manifest::Device::None],
+        supported_devices: vec![super_voice_registry_types::manifest::Device::None],
         realtime: false,
         provider: None,
-        product: super_tts_registry_types::manifest::TtsModel::default(),
+        product: super_voice_registry_types::manifest::VoiceModel::new(
+            super_voice_registry_types::manifest::ModelRole::Synthesis,
+        ),
     };
     let info = ModelInfoData::new(name, source, true, true, Duration::from_secs(1));
     let reconfigured: SeenContexts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1014,7 +1020,7 @@ fn backend_with_option(
     source: &str,
     option: &str,
 ) -> crate::tts_models::backends::DiscoveredBackend {
-    use super_tts_registry_types::manifest::{Opt, OptionType};
+    use super_voice_registry_types::manifest::{Opt, OptionType};
 
     let mut backend = fixture_backend("opts", source, "Opts", "m");
     backend.options = vec![Opt {
@@ -1498,8 +1504,8 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
         "Kokoro",
         "kokoro-82m",
         vec![
-            super_tts_registry_types::manifest::Device::Cpu,
-            super_tts_registry_types::manifest::Device::Gpu,
+            super_voice_registry_types::manifest::Device::Cpu,
+            super_voice_registry_types::manifest::Device::Gpu,
         ],
     )];
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
@@ -1710,7 +1716,7 @@ async fn set_model_device_on_the_device_in_use_reloads_nothing() {
         .as_mut()
         .expect("seeded")
         .definition
-        .supported_devices = vec![super_tts_registry_types::manifest::Device::Cpu];
+        .supported_devices = vec![super_voice_registry_types::manifest::Device::Cpu];
 
     let response = daemon
         .handle_set_model_device("kokoro-82m".to_string(), "cpu".to_string())
@@ -1739,7 +1745,7 @@ async fn set_model_device_on_the_device_in_use_reloads_nothing() {
 /// nothing.
 #[tokio::test]
 async fn device_lists_answer_per_model_and_per_backend() {
-    use super_tts_registry_types::manifest::Device;
+    use super_voice_registry_types::manifest::Device;
     let daemon = test_daemon().await;
     let source = "github.com/super-tts/mixed";
     let mut backend = fixture_backend_devices("mixed", source, "Mixed", "local", vec![Device::Cpu]);
@@ -1828,8 +1834,8 @@ async fn the_global_default_does_not_override_a_models_own_device() {
         "Kokoro",
         "kokoro-82m",
         vec![
-            super_tts_registry_types::manifest::Device::Cpu,
-            super_tts_registry_types::manifest::Device::Gpu,
+            super_voice_registry_types::manifest::Device::Cpu,
+            super_voice_registry_types::manifest::Device::Gpu,
         ],
     )];
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
@@ -2228,13 +2234,13 @@ async fn list_model_voices_follows_what_the_setter_accepts() {
     let source = "github.com/super-tts/kokoro";
     let mut backend = fixture_backend_local("kokoro", source, "Kokoro", "kokoro-82m");
     backend.models[0].product.voices = vec![
-        super_tts_registry_types::manifest::VoiceEntry {
+        super_voice_registry_types::manifest::VoiceEntry {
             id: "af_bella".to_string(),
             label: Some("Bella (American, female)".to_string()),
             language: None,
             tags: Vec::new(),
         },
-        super_tts_registry_types::manifest::VoiceEntry {
+        super_voice_registry_types::manifest::VoiceEntry {
             id: "am_adam".to_string(),
             label: Some("Adam (American, male)".to_string()),
             language: None,
@@ -2277,7 +2283,7 @@ async fn setting_a_voice_the_model_does_not_have_is_refused() {
     let daemon = test_daemon().await;
     let source = "github.com/super-tts/kokoro";
     let mut backend = fixture_backend_local("kokoro", source, "Kokoro", "kokoro-82m");
-    backend.models[0].product.voices = vec![super_tts_registry_types::manifest::VoiceEntry {
+    backend.models[0].product.voices = vec![super_voice_registry_types::manifest::VoiceEntry {
         id: "af_bella".to_string(),
         label: Some("Bella".to_string()),
         language: None,
@@ -2313,7 +2319,7 @@ async fn a_stored_voice_survives_until_it_is_cleared() {
     let daemon = test_daemon().await;
     let source = "github.com/super-tts/kokoro";
     let mut backend = fixture_backend_local("kokoro", source, "Kokoro", "kokoro-82m");
-    backend.models[0].product.voices = vec![super_tts_registry_types::manifest::VoiceEntry {
+    backend.models[0].product.voices = vec![super_voice_registry_types::manifest::VoiceEntry {
         id: "af_bella".to_string(),
         label: Some("Bella".to_string()),
         language: None,
@@ -2367,7 +2373,7 @@ async fn a_model_with_no_default_reports_no_voice() {
     let source = "github.com/super-tts/kokoro";
     let mut backend = fixture_backend_local("kokoro", source, "Kokoro", "kokoro-82m");
     backend.models[0].product.voice_kinds =
-        vec![super_tts_registry_types::manifest::VoiceKind::Cloned];
+        vec![super_voice_registry_types::manifest::VoiceKind::Cloned];
     *daemon.backends.write().await = vec![backend];
 
     let response = daemon

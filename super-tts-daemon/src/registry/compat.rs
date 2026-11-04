@@ -14,7 +14,7 @@ use crate::registry::index_schema::IndexBackend;
 /// `super_engine_daemon::registry::compat::select`.
 #[must_use]
 pub fn select(host: &Host, entry: &IndexBackend) -> Selection {
-    super_engine_daemon::registry::compat::select::<super_tts_registry_types::Tts>(
+    super_engine_daemon::registry::compat::select::<super_voice_registry_types::Voice>(
         &super::DAEMON,
         host,
         entry,

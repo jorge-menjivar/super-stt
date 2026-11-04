@@ -1,9 +1,9 @@
 [package]
-    name = "super-stt-registry-types"
+    name = "super-voice-registry-types"
     version.workspace = true
     authors.workspace = true
     edition.workspace = true
-    description = "Super STT's backend contract, on top of super-engine-spec"
+    description = "Super Voice's backend contract, on top of super-engine-spec"
     license = "GPL-3.0-only"
 
 [[bin]]
@@ -17,6 +17,7 @@
     serde_json.workspace = true
     super-engine-protocol.workspace = true
     super-engine-spec.workspace = true
+    thiserror.workspace = true
     utoipa = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -26,7 +27,7 @@
 [features]
     schema = ["dep:schemars", "super-engine-spec/schema"]
     # Derive `utoipa::ToSchema` on the index leaves the daemon re-exports as its
-    # `/registry/backends` response shapes (see `super_stt_shared::registry`), so
+    # `/registry/backends` response shapes (see each daemon's `shared::registry`), so
     # they carry their own definition into the generated OpenAPI document rather
     # than being re-described there. Separate from `schema`, which is schemars
     # for the backend.toml / registry.toml JSON Schemas.

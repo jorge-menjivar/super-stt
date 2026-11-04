@@ -23,7 +23,7 @@
     super-engine-client.workspace = true
     super-engine-protocol.workspace = true
     super-engine-spec.workspace = true
-    super-stt-registry-types = { path = "../super-stt-registry-types" }
+    super-voice-registry-types = { path = "../super-voice-registry-types" }
     thiserror.workspace = true
     tokio = {
         workspace = true,
@@ -61,7 +61,7 @@
     openapi = [
         "dep:utoipa",
         "super-engine-protocol/openapi",
-        "super-stt-registry-types/openapi",
+        "super-voice-registry-types/openapi",
     ]
 
 [lints]

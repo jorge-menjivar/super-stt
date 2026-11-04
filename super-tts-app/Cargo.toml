@@ -46,7 +46,7 @@
     slab = "0.4"
     slotmap = "1.1"
     super-engine-forge.workspace = true
-    super-tts-registry-types = { path = "../super-tts-registry-types" }
+    super-voice-registry-types = { path = "../super-voice-registry-types" }
     # Workspace dependencies
     super-tts-shared = { path = "../super-tts-shared" }
     tokio.workspace = true
