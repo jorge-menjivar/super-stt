@@ -1,7 +1,7 @@
 # `/tts/pipeline`
 
 The ordered **stages** an utterance passes through on its way from text to
-audio. Super TTS has exactly one:
+audio. Text to speech has exactly one:
 
 ```
 text ──▶ stage 1: synthesis ──▶ audio out

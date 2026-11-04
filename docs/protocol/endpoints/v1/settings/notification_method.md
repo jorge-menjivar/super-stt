@@ -67,10 +67,10 @@ per failure, bracketed so it cannot be read as transcript, and it never carries
 backend text:
 
 ```
-[Super STT: no model loaded]
-[Super STT: could not start recording]
-[Super STT: recording failed]
-[Super STT: transcription failed]
+[Super Voice: no model loaded]
+[Super Voice: could not start recording]
+[Super Voice: recording failed]
+[Super Voice: transcription failed]
 ```
 
 ## Auth

@@ -5,7 +5,7 @@ settings UI can show the user whether keyboard simulation actually
 reaches their focused window. The method itself is read / set via
 [`/settings/write_method`](../write_method.md).
 
-The string typed is `Super STT input test 123`.
+The string typed is `Super Voice input test 123`.
 
 The text goes to whatever window holds keyboard focus on the daemon
 host at the moment of the call — the daemon cannot target a specific

@@ -201,7 +201,7 @@ fn restart_instruction() -> String {
 fn describe_connection_failure(e: NewConError) -> anyhow::Error {
     if matches!(e, NewConError::NoPermission) {
         let exe = std::env::current_exe().map_or_else(
-            |_| "the Super STT daemon".to_string(),
+            |_| "the Super Voice daemon".to_string(),
             |p| p.display().to_string(),
         );
         #[cfg(target_os = "macos")]

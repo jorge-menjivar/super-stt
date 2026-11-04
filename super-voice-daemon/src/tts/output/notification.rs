@@ -25,7 +25,7 @@ const NOTIFY_IFACE: &str = "org.freedesktop.Notifications";
 
 /// Sent as the notification's `app_name`, which is where the user learns who
 /// this bubble is from. The summary is free to name the failure instead.
-const APP_NAME: &str = "Super TTS";
+const APP_NAME: &str = "Super Voice";
 /// Installed into `share/icons/hicolor/scalable/apps` by the justfile.
 const APP_ICON: &str = "super-tts-app";
 /// 0 = low, 1 = normal, 2 = critical.

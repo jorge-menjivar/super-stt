@@ -43,7 +43,7 @@ pub(crate) async fn get_update(State(s): State<AppState>) -> impl IntoResponse {
     post,
     path = "/update/check",
     tag = "update",
-    summary = "Check for a Super STT update now",
+    summary = "Check for a Super Voice update now",
     description = "\
 Runs the check immediately rather than waiting for the daemon's own schedule, and \
 answers with the result — the same shape `GET /update` reports. Works whether or not \

@@ -2693,7 +2693,7 @@ async fn record_with_no_model_types_a_notice_in_write_mode() {
 
     assert_eq!(resp.status, "error");
     assert_eq!(resp.error_code, Some(ErrorCode::ModelNotLoaded));
-    assert_eq!(*buf.lock().unwrap(), "[Super STT: no model loaded]");
+    assert_eq!(*buf.lock().unwrap(), "[Super Voice: no model loaded]");
     // Capture must never have started.
     assert!(
         !*daemon.busy.read().await,
@@ -2745,7 +2745,7 @@ async fn write_method_test_types_the_documented_string_and_recaches() {
         .await;
 
     assert_eq!(resp.status, "success");
-    assert_eq!(*buf.lock().unwrap(), "Super STT input test 123");
+    assert_eq!(*buf.lock().unwrap(), "Super Voice input test 123");
     // The configured method (`auto` by default) and the backend that actually
     // typed are reported separately — the whole point of the endpoint.
     assert_eq!(resp.write_method.as_deref(), Some("auto"));

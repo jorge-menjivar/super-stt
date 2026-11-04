@@ -88,7 +88,7 @@ impl SuperSTTDaemon {
     ///
     /// Returns an error if the secrets file exists and cannot be read.
     pub async fn new() -> Result<Self> {
-        info!("Initializing Super STT Daemon...");
+        info!("Initializing the Super Voice daemon...");
 
         // Before anything else that could fail: a daemon that cannot read the
         // file must not start, or its first write would replace a file it

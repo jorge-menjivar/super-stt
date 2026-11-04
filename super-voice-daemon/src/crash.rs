@@ -94,8 +94,8 @@ impl crate::daemon::types::SuperSTTDaemon {
             .lock()
             .await
             .send(
-                "Super Voice restarted after a crash",
-                "It stopped unexpectedly and started again. Its log has the details.",
+                "Restarted after a crash",
+                "Super Voice stopped unexpectedly and started again. Its log has the details.",
             )
             .await;
         if let Err(e) = sent {
@@ -150,7 +150,7 @@ mod tests {
             let sent = sent.lock().unwrap();
             assert_eq!(sent.len(), shown, "{method:?}");
             if let Some((summary, _)) = sent.first() {
-                assert_eq!(summary, "Super Voice restarted after a crash");
+                assert_eq!(summary, "Restarted after a crash");
             }
         }
     }

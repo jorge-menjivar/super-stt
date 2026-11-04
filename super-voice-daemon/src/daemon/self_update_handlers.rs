@@ -51,7 +51,7 @@ impl SuperSTTDaemon {
                     let mut notifier = self.notifier.lock().await;
                     let sent = notifier
                         .send_with_actions(
-                            &format!("Super STT {tag} is available"),
+                            &format!("Super Voice {tag} is available"),
                             "Open Super STT to install the update.",
                             &[(
                                 crate::output::notification::OPEN_APP_ACTION_KEY,
