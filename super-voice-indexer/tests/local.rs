@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The `super-tts-indexer` binary, end to end: that it is wired to
+//! The `super-voice-indexer` binary, end to end: that it is wired to
 //! `super_engine_indexer` and indexes a staged backend.
 //!
 //! What the indexer does is `super-engine-indexer`'s, and tested there; this
-//! is only that Super TTS's binary runs it.
+//! is only that Super STT's binary runs it.
 
 use std::process::Command;
 
-const BIN: &str = env!("CARGO_BIN_EXE_super-tts-indexer");
+const BIN: &str = env!("CARGO_BIN_EXE_super-voice-indexer");
 
 /// `[0x00, 0x61, 0x73, 0x6d]` is the WebAssembly magic number — a valid,
 /// tiny stand-in for a real `.wasm` artifact. Its SHA-256 is fixed, so the
@@ -24,8 +24,9 @@ name = "{name}"
 version = "{version}"
 kind = "wasm"
 entrypoint = "{wasm_file}"
-product = "super-tts"
 contract = "v1"
+product = "super-voice"
+id = "app.test.dummy"
 description = "Test backend."
 license = "Apache-2.0"
 
@@ -34,6 +35,7 @@ wasm = "{wasm_file}"
 
 [[models]]
 name = "m-1"
+role = "transcription"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]

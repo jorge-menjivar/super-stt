@@ -64,6 +64,8 @@ version = "1.0.0"
 kind = "wasm"
 entrypoint = "mock.wasm"
 contract = "v1"
+product = "super-voice"
+id = "app.test.mock-realtime"
 description = "Realtime transport fixture."
 license = "GPL-3.0-only"
 
@@ -72,6 +74,7 @@ websocket = true
 
 [[models]]
 name = "{REALTIME_MODEL}"
+role = "transcription"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["cpu"]

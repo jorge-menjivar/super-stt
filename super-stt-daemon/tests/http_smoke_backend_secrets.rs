@@ -43,6 +43,8 @@ version = "1.0.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+id = "app.test.openai"
+product = "super-voice"
 description = "Test backend."
 license = "Apache-2.0"
 
@@ -57,6 +59,7 @@ required = true
 
 [[models]]
 name = "whisper-1"
+role = "transcription"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]

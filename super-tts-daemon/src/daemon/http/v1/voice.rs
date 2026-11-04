@@ -137,7 +137,7 @@ pub(crate) async fn list_voices(State(s): State<AppState>) -> Response {
 /// What the loaded model can do with a cloned voice. `None` when nothing is
 /// loaded — the library is still readable, it just cannot be spoken with yet.
 async fn active_model_support(s: &AppState) -> Option<VoiceModelSupport> {
-    use super_tts_registry_types::manifest::VoiceKind;
+    use super_voice_registry_types::manifest::VoiceKind;
 
     let guard = s.daemon.model.read().await;
     let def = &guard.as_ref()?.definition;

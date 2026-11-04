@@ -259,6 +259,8 @@ version = "1.0.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+id = "app.test.y"
+product = "super-voice"
 description = "Installed at 1.0.0, so the catalog can offer something newer."
 license = "Apache-2.0"
 
@@ -267,6 +269,7 @@ allowed_hosts = ["api.openai.com"]
 
 [[models]]
 name = "whisper-1"
+role = "transcription"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]

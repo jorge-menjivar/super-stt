@@ -6,11 +6,11 @@
 mod shortcut;
 
 use super_engine_installer::Installer;
-use super_stt_registry_types::product::{SUPER_STT, Stt};
+use super_voice_registry_types::product::{SUPER_STT, Voice};
 
 static INSTALLER: Installer = Installer {
     product: &SUPER_STT,
-    user_agent: Stt::USER_AGENT,
+    user_agent: Voice::USER_AGENT,
     wrapper_usage: "Used by keyboard shortcuts (e.g. Super+Space → \"stt record --write\").",
     after_install: Some(shortcut::after_install),
 };

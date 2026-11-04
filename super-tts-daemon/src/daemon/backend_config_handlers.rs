@@ -2,9 +2,9 @@
 
 use crate::daemon::types::SuperTTSDaemon;
 use log::{info, warn};
-use super_tts_registry_types::manifest::Opt;
 use super_tts_shared::models::backends::{BackendInfo, BackendModel, BackendOption, BackendSecret};
 use super_tts_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_registry_types::manifest::Opt;
 
 /// Fold an optional reload-failure warning into a success message, so a failed
 /// post-write model reload is surfaced to the caller instead of swallowed.

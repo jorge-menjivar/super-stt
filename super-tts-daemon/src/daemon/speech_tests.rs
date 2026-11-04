@@ -4,7 +4,7 @@
 use super::{SpeakError, check_voice};
 use crate::tts_models::ModelDefinition;
 use std::time::Duration;
-use super_tts_registry_types::manifest::{Device, TtsModel, VoiceEntry, VoiceKind};
+use super_voice_registry_types::manifest::{Device, VoiceEntry, VoiceKind, VoiceModel};
 
 /// A model declaring `kinds` and the preset ids in `voices`.
 fn model(kinds: Vec<VoiceKind>, voices: &[&str]) -> ModelDefinition {
@@ -19,7 +19,7 @@ fn model(kinds: Vec<VoiceKind>, voices: &[&str]) -> ModelDefinition {
         supported_devices: vec![Device::Cpu],
         realtime: false,
         provider: None,
-        product: TtsModel {
+        product: VoiceModel {
             voice_kinds: kinds,
             voices: voices
                 .iter()
@@ -30,7 +30,7 @@ fn model(kinds: Vec<VoiceKind>, voices: &[&str]) -> ModelDefinition {
                     tags: Vec::new(),
                 })
                 .collect(),
-            ..TtsModel::default()
+            ..VoiceModel::new(super_voice_registry_types::manifest::ModelRole::Synthesis)
         },
     }
 }

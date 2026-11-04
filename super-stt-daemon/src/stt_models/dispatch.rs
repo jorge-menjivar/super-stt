@@ -231,11 +231,13 @@ mod tests {
             supported_languages: vec!["en".to_string()],
             estimated_vram_bytes: 0,
             processing_interval: Duration::from_secs(1),
-            supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
+            supported_devices: vec![super_voice_registry_types::manifest::Device::Cpu],
             realtime: false,
-            product: super_stt_registry_types::manifest::SttModel {
+            product: super_voice_registry_types::manifest::VoiceModel {
                 force_preview_support: true,
-                role: super_stt_registry_types::manifest::ModelRole::Transcription,
+                ..super_voice_registry_types::manifest::VoiceModel::new(
+                    super_voice_registry_types::manifest::ModelRole::Transcription,
+                )
             },
             provider: None,
         };

@@ -7212,8 +7212,8 @@ dependencies = [
  "strum_macros",
  "super-engine-forge",
  "super-stt-daemon",
- "super-stt-registry-types",
  "super-stt-shared",
+ "super-voice-registry-types",
  "tempfile",
  "tokio",
  "urlencoding",
@@ -7284,8 +7284,8 @@ dependencies = [
  "super-engine-daemon",
  "super-engine-forge",
  "super-engine-test-daemon",
- "super-stt-registry-types",
  "super-stt-shared",
+ "super-voice-registry-types",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -7301,18 +7301,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-stt-indexer"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "serde_json",
- "super-engine-indexer",
- "super-stt-registry-types",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "super-stt-install"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -7324,23 +7312,9 @@ dependencies = [
  "ring",
  "serde_json",
  "super-engine-installer",
- "super-stt-registry-types",
+ "super-voice-registry-types",
  "tar",
  "tokio",
-]
-
-[[package]]
-name = "super-stt-registry-types"
-version = "0.3.0-beta.2"
-dependencies = [
- "jsonschema",
- "schemars",
- "serde",
- "serde_json",
- "super-engine-protocol",
- "super-engine-spec",
- "toml 1.1.0+spec-1.1.0",
- "utoipa",
 ]
 
 [[package]]
@@ -7364,7 +7338,7 @@ dependencies = [
  "super-engine-client",
  "super-engine-protocol",
  "super-engine-spec",
- "super-stt-registry-types",
+ "super-voice-registry-types",
  "thiserror 2.0.21",
  "tokio",
  "utoipa",
@@ -7394,8 +7368,8 @@ dependencies = [
  "slab",
  "slotmap",
  "super-engine-forge",
- "super-tts-registry-types",
  "super-tts-shared",
+ "super-voice-registry-types",
  "tempfile",
  "tokio",
  "toml 1.1.0+spec-1.1.0",
@@ -7459,8 +7433,8 @@ dependencies = [
  "super-engine-daemon",
  "super-engine-forge",
  "super-engine-test-daemon",
- "super-tts-registry-types",
  "super-tts-shared",
+ "super-voice-registry-types",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -7474,18 +7448,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-tts-indexer"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "serde_json",
- "super-engine-indexer",
- "super-tts-registry-types",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "super-tts-install"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -7495,24 +7457,9 @@ dependencies = [
  "ring",
  "serde_json",
  "super-engine-installer",
- "super-tts-registry-types",
+ "super-voice-registry-types",
  "tar",
  "tokio",
-]
-
-[[package]]
-name = "super-tts-registry-types"
-version = "0.3.0-beta.2"
-dependencies = [
- "jsonschema",
- "schemars",
- "serde",
- "serde_json",
- "super-engine-protocol",
- "super-engine-spec",
- "thiserror 2.0.21",
- "toml 1.1.0+spec-1.1.0",
- "utoipa",
 ]
 
 [[package]]
@@ -7533,11 +7480,38 @@ dependencies = [
  "super-engine-client",
  "super-engine-protocol",
  "super-engine-spec",
- "super-tts-registry-types",
+ "super-voice-registry-types",
  "thiserror 2.0.21",
  "tokio",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "super-voice-indexer"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "super-engine-indexer",
+ "super-voice-registry-types",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "super-voice-registry-types"
+version = "0.3.0-beta.2"
+dependencies = [
+ "jsonschema",
+ "schemars",
+ "serde",
+ "serde_json",
+ "super-engine-protocol",
+ "super-engine-spec",
+ "thiserror 2.0.21",
+ "toml 1.1.0+spec-1.1.0",
+ "utoipa",
 ]
 
 [[package]]

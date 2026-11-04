@@ -63,7 +63,8 @@ name = "Fixture OpenAI"
 version = "1.0.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
-contract = "v2"
+contract = "v1"
+product = "super-voice"
 id = "app.super-stt.openai"
 description = "Test backend."
 license = "Apache-2.0"
@@ -92,12 +93,14 @@ default = "us-east-1"
 
 [[models]]
 name = "whisper-1"
+role = "transcription"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]
 
 [[models]]
 name = "whisper-local"
+role = "transcription"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["cpu", "gpu"]
@@ -132,7 +135,8 @@ name = "Fixture Text Cleanup"
 version = "1.0.0"
 kind = "wasm"
 entrypoint = "textclean.wasm"
-contract = "v2"
+contract = "v1"
+product = "super-voice"
 id = "app.super-stt.textclean"
 description = "Post-processing only."
 license = "GPL-3.0-only"

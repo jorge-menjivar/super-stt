@@ -53,7 +53,7 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
 }
 
 impl RegistryHost for SuperTTSDaemon {
-    type Product = super_tts_registry_types::Tts;
+    type Product = super_voice_registry_types::Voice;
     type Events = EventBus;
 
     fn daemon(&self) -> Daemon {
@@ -103,8 +103,9 @@ name = "Piper"
 version = "1.0.0"
 kind = "subprocess"
 entrypoint = "piper"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.piper"
 description = "Test backend."
 "#,
         )

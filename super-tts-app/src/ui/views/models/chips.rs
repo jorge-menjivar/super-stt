@@ -182,7 +182,7 @@ pub(super) fn backend_supports_cpu(backend: &crate::daemon::backends::BackendInf
 /// whose whole job is disclosing where audio goes.
 pub(super) fn backend_has_user_url(backend: &crate::daemon::backends::BackendInfo) -> bool {
     backend.options.iter().any(|o| {
-        o.name == super_tts_registry_types::manifest::BASE_URL_OPTION
+        o.name == super_voice_registry_types::manifest::BASE_URL_OPTION
             && o.value.as_ref().is_some_and(|v| !v.trim().is_empty())
     })
 }
@@ -801,7 +801,7 @@ mod update_offer_tests {
         // Mirrors what the daemon computes, so the fixture cannot claim an
         // update the daemon would not report.
         let update_available = installed
-            .is_some_and(|i| super_tts_registry_types::version::update_available(i, latest));
+            .is_some_and(|i| super_voice_registry_types::version::update_available(i, latest));
         RegistryBackend {
             id: "y".to_string(),
             backend_id: None,

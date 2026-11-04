@@ -821,9 +821,12 @@ mod tests {
         );
 
         let opted_in = DiscoveredBackend {
-            capabilities: super_stt_registry_types::manifest::Capabilities {
+            capabilities: super_voice_registry_types::manifest::Capabilities {
                 websocket: false,
-                product: super_stt_registry_types::manifest::SttCapabilities { context: true },
+                product: super_voice_registry_types::manifest::VoiceCapabilities {
+                    context: true,
+                    ..Default::default()
+                },
             },
             ..backend
         };
@@ -867,9 +870,12 @@ mod tests {
         let backend = DiscoveredBackend {
             secrets: Vec::new(),
             options: Vec::new(),
-            capabilities: super_stt_registry_types::manifest::Capabilities {
+            capabilities: super_voice_registry_types::manifest::Capabilities {
                 websocket: false,
-                product: super_stt_registry_types::manifest::SttCapabilities { context: true },
+                product: super_voice_registry_types::manifest::VoiceCapabilities {
+                    context: true,
+                    ..Default::default()
+                },
             },
             ..openai_backend(source, Vec::new(), None)
         };
@@ -949,9 +955,12 @@ mod tests {
         let backend = DiscoveredBackend {
             secrets: Vec::new(),
             options: Vec::new(),
-            capabilities: super_stt_registry_types::manifest::Capabilities {
+            capabilities: super_voice_registry_types::manifest::Capabilities {
                 websocket: false,
-                product: super_stt_registry_types::manifest::SttCapabilities { context: true },
+                product: super_voice_registry_types::manifest::VoiceCapabilities {
+                    context: true,
+                    ..Default::default()
+                },
             },
             ..openai_backend(source, Vec::new(), None)
         };

@@ -24,5 +24,5 @@ pub use super_engine_daemon::registry::install_dir_name;
 pub const DAEMON: super_engine_daemon::registry::Daemon = super_engine_daemon::registry::Daemon {
     product: &super_tts_shared::SUPER_TTS,
     version: env!("CARGO_PKG_VERSION"),
-    user_agent: super_tts_registry_types::Tts::USER_AGENT,
+    user_agent: super_voice_registry_types::Voice::USER_AGENT,
 };

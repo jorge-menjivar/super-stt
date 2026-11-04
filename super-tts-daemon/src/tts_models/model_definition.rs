@@ -8,5 +8,6 @@
 
 /// Fully resolved description of a single model served by a backend. See
 /// `super_engine_daemon::backends::ModelDefinition`.
-pub type ModelDefinition =
-    super_engine_daemon::backends::ModelDefinition<super_tts_registry_types::manifest::TtsModel>;
+pub type ModelDefinition = super_engine_daemon::backends::ModelDefinition<
+    super_voice_registry_types::manifest::VoiceModel,
+>;

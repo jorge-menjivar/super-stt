@@ -49,12 +49,14 @@ name = "Mock"
 version = "0.0.0"
 kind = "subprocess"
 entrypoint = "mock-backend"
-contract = "v2"
+contract = "v1"
+product = "super-voice"
 id = "app.super-stt.mock"
 description = "Test backend."
 
 [[models]]
 name = "mock"
+role = "transcription"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
@@ -72,6 +74,7 @@ supported_devices = ["cpu"]
 # backend's own progress reaches the card.
 [[models]]
 name = "mock-builds-kernels"
+role = "transcription"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
@@ -81,6 +84,7 @@ supported_devices = ["cpu"]
 # load says why.
 [[models]]
 name = "mock-dies-on-load"
+role = "transcription"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
@@ -440,13 +444,14 @@ name = "Mock"
 version = "0.0.0"
 kind = "subprocess"
 entrypoint = "mock-backend"
-contract = "v4"
-product = "super-stt"
+contract = "v1"
+product = "super-voice"
 id = "app.super-stt.mock"
 description = "Test backend."
 
 [[models]]
 name = "{model}"
+role = "transcription"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]

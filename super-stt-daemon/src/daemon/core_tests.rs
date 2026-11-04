@@ -555,11 +555,13 @@ async fn list_backends_catalog_and_option_override() {
             supported_languages: vec!["en".to_string()],
             estimated_vram_bytes: 0,
             processing_interval: Duration::from_secs(1),
-            supported_devices: vec![super_stt_registry_types::manifest::Device::None],
+            supported_devices: vec![super_voice_registry_types::manifest::Device::None],
             realtime: false,
-            product: super_stt_registry_types::manifest::SttModel {
+            product: super_voice_registry_types::manifest::VoiceModel {
                 force_preview_support: true,
-                role: super_stt_registry_types::manifest::ModelRole::Transcription,
+                ..super_voice_registry_types::manifest::VoiceModel::new(
+                    super_voice_registry_types::manifest::ModelRole::Transcription,
+                )
             },
             provider: None,
         }],
@@ -616,7 +618,7 @@ async fn list_backends_catalog_and_option_override() {
 /// slider rather than a free-text field.
 #[tokio::test]
 async fn the_catalog_lists_an_options_bounds() {
-    use super_stt_registry_types::manifest::OptionType;
+    use super_voice_registry_types::manifest::OptionType;
 
     let daemon = test_daemon().await;
     let source = "github.com/x/opts";
@@ -703,7 +705,7 @@ fn fixture_backend(
         source,
         name,
         model_name,
-        vec![super_stt_registry_types::manifest::Device::None],
+        vec![super_voice_registry_types::manifest::Device::None],
     )
 }
 
@@ -720,7 +722,7 @@ fn fixture_backend_local(
         source,
         name,
         model_name,
-        vec![super_stt_registry_types::manifest::Device::Cpu],
+        vec![super_voice_registry_types::manifest::Device::Cpu],
     )
 }
 
@@ -729,7 +731,7 @@ fn fixture_backend_devices(
     source: &str,
     name: &str,
     model_name: &str,
-    supported_devices: Vec<super_stt_registry_types::manifest::Device>,
+    supported_devices: Vec<super_voice_registry_types::manifest::Device>,
 ) -> crate::stt_models::backends::DiscoveredBackend {
     use crate::stt_models::ModelDefinition;
     use crate::stt_models::backends::DiscoveredBackend;
@@ -758,9 +760,11 @@ fn fixture_backend_devices(
             processing_interval: Duration::from_secs(1),
             supported_devices,
             realtime: false,
-            product: super_stt_registry_types::manifest::SttModel {
+            product: super_voice_registry_types::manifest::VoiceModel {
                 force_preview_support: true,
-                role: super_stt_registry_types::manifest::ModelRole::Transcription,
+                ..super_voice_registry_types::manifest::VoiceModel::new(
+                    super_voice_registry_types::manifest::ModelRole::Transcription,
+                )
             },
             provider: None,
         }],
@@ -976,8 +980,8 @@ async fn each_stage_lists_only_the_models_carrying_its_role() {
         .models
         .push(crate::stt_models::model_definition::ModelDefinition {
             name: "tidy".to_string(),
-            product: super_stt_registry_types::manifest::SttModel {
-                role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
+            product: super_voice_registry_types::manifest::VoiceModel {
+                role: super_voice_registry_types::manifest::ModelRole::PostProcessor,
                 ..backend.models[0].product.clone()
             },
             ..backend.models[0].clone()
@@ -1073,11 +1077,13 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) ->
         supported_languages: vec!["en".to_string()],
         estimated_vram_bytes: 0,
         processing_interval: Duration::from_secs(1),
-        supported_devices: vec![super_stt_registry_types::manifest::Device::None],
+        supported_devices: vec![super_voice_registry_types::manifest::Device::None],
         realtime: false,
-        product: super_stt_registry_types::manifest::SttModel {
+        product: super_voice_registry_types::manifest::VoiceModel {
             force_preview_support: true,
-            role: super_stt_registry_types::manifest::ModelRole::Transcription,
+            ..super_voice_registry_types::manifest::VoiceModel::new(
+                super_voice_registry_types::manifest::ModelRole::Transcription,
+            )
         },
         provider: None,
     };
@@ -1098,7 +1104,7 @@ fn backend_with_option(
     source: &str,
     option: &str,
 ) -> crate::stt_models::backends::DiscoveredBackend {
-    use super_stt_registry_types::manifest::{Opt, OptionType};
+    use super_voice_registry_types::manifest::{Opt, OptionType};
 
     let mut backend = fixture_backend("opts", source, "Opts", "m");
     backend.options = vec![Opt {
@@ -1385,8 +1391,8 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
         "Whisper",
         "large",
         vec![
-            super_stt_registry_types::manifest::Device::Cpu,
-            super_stt_registry_types::manifest::Device::Gpu,
+            super_voice_registry_types::manifest::Device::Cpu,
+            super_voice_registry_types::manifest::Device::Gpu,
         ],
     )];
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
@@ -1502,7 +1508,7 @@ async fn model_device_refuses_a_model_the_stage_cannot_run() {
     let mut backend = fixture_backend_local("both", source, "Both", "whisper");
     let mut cleanup = backend.models[0].clone();
     cleanup.name = "cleanup".to_string();
-    cleanup.product.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
+    cleanup.product.role = super_voice_registry_types::manifest::ModelRole::PostProcessor;
     backend.models.push(cleanup);
     *daemon.backends.write().await = vec![backend];
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
@@ -1611,7 +1617,7 @@ async fn set_model_device_on_the_device_in_use_reloads_nothing() {
         .as_mut()
         .unwrap()
         .definition
-        .supported_devices = vec![super_stt_registry_types::manifest::Device::Cpu];
+        .supported_devices = vec![super_voice_registry_types::manifest::Device::Cpu];
 
     let response = daemon
         .handle_set_model_device(
@@ -1641,7 +1647,7 @@ async fn set_model_device_on_the_device_in_use_reloads_nothing() {
 #[tokio::test]
 async fn device_lists_answer_per_model_and_per_stage() {
     use crate::daemon::device_management::PipelineStage;
-    use super_stt_registry_types::manifest::{Device, ModelRole};
+    use super_voice_registry_types::manifest::{Device, ModelRole};
     let daemon = test_daemon().await;
     let source = "github.com/super-stt/mixed";
     let mut backend = fixture_backend_devices("mixed", source, "Mixed", "local", vec![Device::Cpu]);
@@ -1714,11 +1720,11 @@ async fn set_post_processor_device_when_not_loaded_only_records_the_preference()
         "Cleanup",
         "cleanup",
         vec![
-            super_stt_registry_types::manifest::Device::Cpu,
-            super_stt_registry_types::manifest::Device::Gpu,
+            super_voice_registry_types::manifest::Device::Cpu,
+            super_voice_registry_types::manifest::Device::Gpu,
         ],
     );
-    backend.models[0].product.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
+    backend.models[0].product.role = super_voice_registry_types::manifest::ModelRole::PostProcessor;
     *daemon.backends.write().await = vec![backend];
     daemon.config.write().await.post_processor.source = source.to_string();
 
@@ -1887,7 +1893,7 @@ async fn a_post_processor_load_announces_itself_as_stage_two() {
 #[tokio::test]
 async fn selecting_a_post_processor_announces_its_load_as_stage_two() {
     use crate::daemon::events::Topic;
-    use super_stt_registry_types::manifest::ModelRole;
+    use super_voice_registry_types::manifest::ModelRole;
 
     let daemon = test_daemon().await;
     let source = "github.com/super-stt/textclean";
@@ -2055,7 +2061,7 @@ async fn every_stage_reports_its_model_slot_alike() {
     let mut backend = fixture_backend_local("mixed", source, "Mixed", "transcribe");
     let mut cleanup = backend.models[0].clone();
     cleanup.name = "cleanup".to_string();
-    cleanup.product.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
+    cleanup.product.role = super_voice_registry_types::manifest::ModelRole::PostProcessor;
     backend.models.push(cleanup);
     *daemon.backends.write().await = vec![backend];
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
@@ -2294,7 +2300,7 @@ async fn unloading_the_post_processor_announces_only_when_one_was_loaded() {
 /// the `dir` holds no component, so resolution succeeds and instantiation
 /// fails — which is what lets a test drive the failure paths of a reload.
 fn fixture_post_processor(source: &str) -> crate::stt_models::backends::DiscoveredBackend {
-    use super_stt_registry_types::manifest::{Device, ModelRole};
+    use super_voice_registry_types::manifest::{Device, ModelRole};
     let mut backend = fixture_backend_devices(
         "cleanup",
         source,
@@ -2456,11 +2462,13 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
         supported_languages: vec!["en".to_string()],
         estimated_vram_bytes: 0,
         processing_interval: Duration::from_secs(1),
-        supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
+        supported_devices: vec![super_voice_registry_types::manifest::Device::Cpu],
         realtime: false,
-        product: super_stt_registry_types::manifest::SttModel {
+        product: super_voice_registry_types::manifest::VoiceModel {
             force_preview_support: true,
-            role: super_stt_registry_types::manifest::ModelRole::Transcription,
+            ..super_voice_registry_types::manifest::VoiceModel::new(
+                super_voice_registry_types::manifest::ModelRole::Transcription,
+            )
         },
         provider: None,
     };
@@ -2510,11 +2518,13 @@ async fn seed_post_processor_named(
         supported_languages: vec!["en".to_string()],
         estimated_vram_bytes: 0,
         processing_interval: Duration::from_secs(1),
-        supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
+        supported_devices: vec![super_voice_registry_types::manifest::Device::Cpu],
         realtime: false,
-        product: super_stt_registry_types::manifest::SttModel {
+        product: super_voice_registry_types::manifest::VoiceModel {
             force_preview_support: true,
-            role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
+            ..super_voice_registry_types::manifest::VoiceModel::new(
+                super_voice_registry_types::manifest::ModelRole::PostProcessor,
+            )
         },
         provider: None,
     };

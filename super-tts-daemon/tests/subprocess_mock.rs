@@ -41,12 +41,14 @@ name = "Mock"
 version = "0.0.0"
 kind = "subprocess"
 entrypoint = "mock-backend"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.super-tts-piper"
 description = "Test backend."
 
 [[models]]
 name = "mock"
+role = "synthesis"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
@@ -57,6 +59,7 @@ supported_devices = ["cpu"]
 # subprocess backends at once, so the name is only ambiguous under a test.
 [[models]]
 name = "mock-options"
+role = "synthesis"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
@@ -65,6 +68,7 @@ supported_devices = ["cpu"]
 # A third, for the same reason.
 [[models]]
 name = "mock-reconfigure"
+role = "synthesis"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
@@ -310,12 +314,14 @@ name = "Mock"
 version = "0.0.0"
 kind = "subprocess"
 entrypoint = "mock-backend"
-product = "super-tts"
+product = "super-voice"
 contract = "v1"
+id = "app.test.super-tts-piper"
 description = "Test backend."
 
 [[models]]
 name = "{model}"
+role = "synthesis"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]

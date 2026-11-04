@@ -9,7 +9,7 @@ on:
     - cron: '0 */6 * * *'    # every 6 hours
   push:
     branches: [main]
-    paths: ['registry/registry.toml', 'super-stt-registry-types/**']
+    paths: ['registry/registry.toml', 'super-voice-registry-types/**']
   workflow_dispatch:
 
 permissions:
@@ -23,5 +23,5 @@ jobs:
   build:
     uses: super-libre/super-engine/.github/workflows/build-index.yml@3cd940dfbf7c41153dc684e66c272d69cc78b88a
     with:
-      indexer: super-stt-indexer
-      registry-types: super-stt-registry-types
+      indexer: super-voice-indexer
+      registry-types: super-voice-registry-types

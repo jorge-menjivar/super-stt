@@ -112,10 +112,13 @@ mod tests {
     kind       = "subprocess"
     entrypoint = "y"
     contract   = "v1"
+    id = "app.test.y"
+    product = "super-voice"
     description = "Test backend."
 
 [[models]]
     name                = "m"
+    role = "transcription"
     primary_language    = "en"
     supported_languages = ["en"]
     supported_devices   = ["cpu"]

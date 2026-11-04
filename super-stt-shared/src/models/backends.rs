@@ -108,7 +108,7 @@ pub struct BackendModel {
     ///
     /// Delete the field once no supported client requires the key.
     ///
-    /// [`IndexModel::provider`]: super_stt_registry_types::index::IndexModel::provider
+    /// [`IndexModel::provider`]: super_voice_registry_types::index::IndexModel::provider
     #[serde(default, skip_deserializing)]
     pub provider: String,
     /// Devices the model can be loaded onto. Non-empty `snake_case` values

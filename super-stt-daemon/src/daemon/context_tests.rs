@@ -14,9 +14,9 @@ use crate::stt_models::transcribe::{
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use super_stt_registry_types::manifest::{Capabilities, Device, ModelRole, SttCapabilities};
 use super_stt_shared::models::contexts::{DictationContext, MAX_PROMPT_CHARS};
 use super_stt_shared::models::protocol::ErrorCode;
+use super_voice_registry_types::manifest::{Capabilities, Device, ModelRole, VoiceCapabilities};
 
 fn coding() -> DictationContext {
     DictationContext {
@@ -340,7 +340,10 @@ fn context_capable(source: &str) -> DiscoveredBackend {
         options: Vec::new(),
         capabilities: Capabilities {
             websocket: false,
-            product: SttCapabilities { context: true },
+            product: VoiceCapabilities {
+                context: true,
+                ..Default::default()
+            },
         },
         models: Vec::new(),
     }
@@ -357,9 +360,9 @@ fn definition(name: &str, source: &str, role: ModelRole) -> ModelDefinition {
         processing_interval: Duration::from_secs(1),
         supported_devices: vec![Device::None],
         realtime: false,
-        product: super_stt_registry_types::manifest::SttModel {
+        product: super_voice_registry_types::manifest::VoiceModel {
             force_preview_support: true,
-            role: role,
+            ..super_voice_registry_types::manifest::VoiceModel::new(role)
         },
         provider: None,
     }

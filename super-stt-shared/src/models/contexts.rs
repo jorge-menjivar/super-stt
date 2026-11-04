@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// The ceiling is the request header it is delivered as. Matches the backend
 /// option cap for the same reason — see `MAX_OPTION_CHARS` in
-/// `super-stt-registry-types` — and is far longer than any dictation
+/// `super-voice-registry-types` — and is far longer than any dictation
 /// instruction anyone writes.
 pub const MAX_PROMPT_CHARS: usize = 4000;
 

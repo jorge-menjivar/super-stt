@@ -36,7 +36,8 @@ name = "Mock STT"
 version = "1.0.0"
 kind = "wasm"
 entrypoint = "mock.wasm"
-contract = "v2"
+contract = "v1"
+product = "super-voice"
 id = "app.super-stt.mock"
 description = "A backend that answers, so a transcript can come back."
 license = "GPL-3.0-only"
@@ -46,6 +47,7 @@ allowed_hosts = []
 
 [[models]]
 name = "echo-stt"
+role = "transcription"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["cpu"]
