@@ -163,7 +163,7 @@
     # The path and response-key contract tests check the client against the
     # OpenAPI document the daemon builds from its router. Taken from the crate
     # rather than a file so the tests need nothing generated first.
-    super-stt-daemon = { path = "../super-stt-daemon" }
+    super-voice-daemon = { path = "../super-voice-daemon" }
     # Test directories that remove themselves.
     tempfile = "3.27.0"
 

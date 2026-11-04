@@ -22,7 +22,7 @@
 - Rust edition `2024`; 4-space indent.
 - Format before pushing: `cargo fmt --all`.
 - Lint before pushing: `just check`.
-- Modules use snake_case; crates/binaries use kebab-case (e.g., `super-stt-daemon`).
+- Modules use snake_case; crates/binaries use kebab-case (e.g., `super-voice-daemon`).
 - Format TOML with Taplo (`taplo.toml`) when editing manifests.
 
 ## Testing Guidelines

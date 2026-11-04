@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Shared harness for the tests that spawn a real `super-stt-daemon`: the
+//! Shared harness for the tests that spawn a real `super-voice-daemon`: the
 //! daemon itself is `super_engine_test_daemon`'s, shared with Super TTS, and
 //! the backend fixtures are here.
 //!
@@ -15,9 +15,9 @@ pub use super_engine_test_daemon::{Method, StatusCode, TestDaemon, shutdown};
 use super_stt_shared::product::SUPER_VOICE;
 
 /// The daemon binary under test.
-pub const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
+pub const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-voice-daemon");
 
-/// A `super-stt-daemon` to start, in a home of its own named after `label`.
+/// A `super-voice-daemon` to start, in a home of its own named after `label`.
 /// See `super_engine_test_daemon` for the home and the test switches.
 pub fn daemon(label: &str) -> super_engine_test_daemon::Builder {
     TestDaemon::build(&SUPER_VOICE, DAEMON_BIN, label)

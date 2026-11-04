@@ -11,8 +11,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use super_stt_daemon::stt_models::transcribe::{ModelInfoData, Transcribe};
-use super_stt_daemon::stt_models::wasm::WasmBackend;
+use super_voice_daemon::stt_models::transcribe::{ModelInfoData, Transcribe};
+use super_voice_daemon::stt_models::wasm::WasmBackend;
 
 /// Path to the prebuilt mock component (`just build-mock-wasm-backend`).
 fn mock_component() -> Option<PathBuf> {

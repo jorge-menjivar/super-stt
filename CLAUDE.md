@@ -12,5 +12,5 @@ This is a Rust workspace with 4 main crates:
 
 - **super-stt-app**: Desktop application used to configure and manage Super STT.
 - **super-stt-applet**: COSMIC desktop environment extension/applet that has visualization capabilities.
-- **super-stt-daemon**: Background service that loads and runs ML models
+- **super-voice-daemon**: Background service that loads and runs ML models
 - **super-stt-shared**: Common types, protocol definitions, and utilities

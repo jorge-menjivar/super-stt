@@ -17,7 +17,7 @@
   registered through Carbon's RegisterEventHotKey, which asks for neither.
 
   Like the daemon's agent it ships inside the app bundle and is registered
-  with SMAppService; see super-stt-daemon/launchd/ for what that means for
+  with SMAppService; see super-voice-daemon/launchd/ for what that means for
   this file. One placeholder is substituted by `just bundle-macos` before the
   bundle is signed:
 
@@ -39,7 +39,7 @@
       Super STT then activates this invisible listener instead of launching
       the settings app. From Contents/Helpers it is a process of its own.
       The daemon trusts first-party binaries there as it does beside itself;
-      see `bundle_helpers_dir` in super-stt-daemon's auth/consent.rs.
+      see `bundle_helpers_dir` in super-voice-daemon's auth/consent.rs.
     -->
     <key>BundleProgram</key>
     <string>Contents/Helpers/super-stt-cli</string>

@@ -36,10 +36,10 @@ fn locate_daemon_bin() -> PathBuf {
         .parent()
         .expect("cli bin parent dir")
         .to_path_buf();
-    let candidate = dir.join("super-stt-daemon");
+    let candidate = dir.join("super-voice-daemon");
     assert!(
         candidate.exists(),
-        "expected the daemon binary at {} — run `cargo build -p super-stt-daemon` first",
+        "expected the daemon binary at {} — run `cargo build -p super-voice-daemon` first",
         candidate.display()
     );
     candidate

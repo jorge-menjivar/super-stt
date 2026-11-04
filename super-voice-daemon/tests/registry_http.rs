@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! HTTP integration tests for the `/registry/*` endpoints.
 //!
-//! These tests spawn the real `super-stt-daemon` binary and wire it to a
+//! These tests spawn the real `super-voice-daemon` binary and wire it to a
 //! mockito HTTP server in place of the live registry, so the whole surface is
 //! exercised without reaching the published catalog:
 //!

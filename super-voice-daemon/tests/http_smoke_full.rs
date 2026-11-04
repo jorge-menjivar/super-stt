@@ -93,7 +93,7 @@ async fn start_daemon_with_auto_approve_timer() -> (TestDaemon, PathBuf) {
         )
         .env(
             "RUST_LOG",
-            "info,super_stt_daemon::daemon::http_server=debug",
+            "info,super_voice_daemon::daemon::http_server=debug",
         )
         .start()
         .await;

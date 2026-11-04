@@ -1,7 +1,7 @@
 app_name := 'super-stt-app'
-daemon_bin_name := 'super-stt-daemon'
-# systemd unit name (matches super-stt-daemon/systemd/super-stt.service)
-service_name := 'super-stt'
+daemon_bin_name := 'super-voice-daemon'
+# systemd unit name (matches super-voice-daemon/systemd/super-voice.service)
+service_name := 'super-voice'
 cli_name := 'super-stt-cli'
 consent_name := 'super-voice-consent'
 wrapper_name := 'stt'
@@ -69,7 +69,7 @@ service_dst := systemd_unit_dir / service_file
 # Named as a list rather than reached with `--workspace --exclude` so the
 # macOS gates say what they cover, and so a new portable crate has to be added
 # deliberately rather than silently skipped.
-macos_members := '-p super-stt-daemon -p super-stt-cli -p super-stt-shared -p super-voice-registry-types -p super-stt-install -p super-stt-app'
+macos_members := '-p super-voice-daemon -p super-stt-cli -p super-stt-shared -p super-voice-registry-types -p super-stt-install -p super-stt-app'
 
 # macOS ships as one app bundle, `Super STT.app`: the settings app is its
 # executable, and the daemon and the CLI sit beside it in Contents/MacOS. The
@@ -87,13 +87,13 @@ macos_resources := 'super-stt-app' / 'resources' / 'macos'
 # A per-user LaunchAgent, not a root-owned LaunchDaemon: the daemon needs the
 # user's GUI session to type, notify, and prompt for consent. It ships inside
 # the bundle, and launchd loads it from there once it is registered; see
-# super-stt-daemon/launchd/.
+# super-voice-daemon/launchd/.
 launchd_label := 'ai.menjivar.super-stt'
 
 # Code-signing identifier prefix for local macOS builds. See `codesign-macos`.
 macos_sign_prefix := 'ai.menjivar.super-stt'
 launchd_plist_file := launchd_label + '.plist'
-launchd_plist_src := 'super-stt-daemon' / 'launchd' / launchd_plist_file
+launchd_plist_src := 'super-voice-daemon' / 'launchd' / launchd_plist_file
 # Where the agents were installed before the bundle existed, as loose plists
 # pointing at /usr/local/bin. Only `install-macos` and `uninstall-macos` still
 # look here, to retire them.
@@ -175,15 +175,15 @@ test-macos *args:
 # otherwise (see audit Tier 1 #8). `-D warnings` also catches feature-conditional
 # unused imports.
 check-features:
-    RUSTFLAGS="-D warnings" cargo check -p super-stt-daemon --no-default-features --features subprocess-backends
-    RUSTFLAGS="-D warnings" cargo check -p super-stt-daemon --no-default-features --features wasm-backends
-    RUSTFLAGS="-D warnings" cargo check -p super-stt-daemon --no-default-features
+    RUSTFLAGS="-D warnings" cargo check -p super-voice-daemon --no-default-features --features subprocess-backends
+    RUSTFLAGS="-D warnings" cargo check -p super-voice-daemon --no-default-features --features wasm-backends
+    RUSTFLAGS="-D warnings" cargo check -p super-voice-daemon --no-default-features
     # Compile (don't run) the subprocess transport integration test + its
     # mock_backend fixture so a refactor breaking SubprocessBackend can't pass CI
     # green. Running it needs a systemd --user session (SUPER_VOICE_TEST_SUBPROCESS=1)
     # that hosted runners lack — unlike the WASM mock it can't run hermetically —
     # but compiling it keeps it from bit-rotting (audit 2 Tier 2 #13).
-    RUSTFLAGS="-D warnings" cargo test -p super-stt-daemon --features test-fixtures --no-run --test subprocess_mock
+    RUSTFLAGS="-D warnings" cargo test -p super-voice-daemon --features test-fixtures --no-run --test subprocess_mock
     RUSTFLAGS="-D warnings" cargo check -p super-tts-daemon --no-default-features --features subprocess-backends
     RUSTFLAGS="-D warnings" cargo check -p super-tts-daemon --no-default-features --features wasm-backends
     RUSTFLAGS="-D warnings" cargo check -p super-tts-daemon --no-default-features
@@ -254,7 +254,7 @@ test-install-e2e channel="stable":
 
 # Load every committed old-config fixture against the current config types.
 config-compat *args:
-    cargo test -p super-stt-daemon --lib config {{ args }}
+    cargo test -p super-voice-daemon --lib config {{ args }}
 
 # Run doctests
 doctest *args:
@@ -626,7 +626,7 @@ run-daemon *args:
     # signed — the binary reverts to ad-hoc, with its mtime rolled back to
     # the deps artifact's, and macOS quietly drops every grant again.
 
-    exec env RUST_BACKTRACE=full RUST_LOG=super_stt_daemon=debug \
+    exec env RUST_BACKTRACE=full RUST_LOG=super_voice_daemon=debug \
         "$exe" -v
 
 # Run the CLI for testing purposes (talks to the running daemon over the HTTP socket)
@@ -728,14 +728,14 @@ build-consent: linux-only-gui
 # tests/wasm_mock.rs loads to exercise the daemon's WasmBackend orchestration.
 # Requires: rustup target add wasm32-wasip2
 build-mock-wasm-backend:
-    cargo build --manifest-path super-stt-daemon/tests/fixtures/mock-wasm-backend/Cargo.toml --target wasm32-wasip2 --release
+    cargo build --manifest-path super-voice-daemon/tests/fixtures/mock-wasm-backend/Cargo.toml --target wasm32-wasip2 --release
     cargo build --manifest-path super-tts-daemon/tests/fixtures/mock-wasm-backend/Cargo.toml --target wasm32-wasip2 --release
 
 # Build the generic mock REALTIME WASM backend fixture (wasm32-wasip2) that
 # tests/wasm_mock_realtime.rs loads to exercise the daemon's realtime
 # orchestration (ws-server.handle). Requires: rustup target add wasm32-wasip2
 build-mock-wasm-realtime-backend:
-    cargo build --manifest-path super-stt-daemon/tests/fixtures/mock-wasm-realtime-backend/Cargo.toml --target wasm32-wasip2 --release
+    cargo build --manifest-path super-voice-daemon/tests/fixtures/mock-wasm-realtime-backend/Cargo.toml --target wasm32-wasip2 --release
     cargo build --manifest-path super-tts-daemon/tests/fixtures/mock-wasm-realtime-backend/Cargo.toml --target wasm32-wasip2 --release
 
 # Copy the canonical WIT (realtime.wit + deps) into every backend that bundles it.
@@ -779,7 +779,7 @@ gen-schemas:
 # (`just openapi-serve` does so for you). Starts no daemon and reads no
 # secrets file — the document is built from the route registrations themselves.
 openapi:
-    cargo run -q -p super-stt-daemon --bin gen_openapi
+    cargo run -q -p super-voice-daemon --bin gen_openapi
 
 # Write tts/docs/protocol/openapi.json from the TTS daemon's /v1 router. Unlike
 # Super STT's, this one is committed: the TTS settings app's path-contract
@@ -1180,9 +1180,9 @@ install-daemon:
     # theme are all config / `POST /v1` state), so a flag appended to
     # ExecStart is rejected by clap before the listener binds and the unit
     # crash-loops under Restart=always. `every_shipped_execstart_parses`
-    # (super-stt-daemon/src/cli_tests.rs) fails if one is reintroduced here.
+    # (super-voice-daemon/src/cli_tests.rs) fails if one is reintroduced here.
     echo "Installing systemd user unit..."
-    sudo install -Dm0644 super-stt-daemon/systemd/{{ service_file }} {{ service_dst }}
+    sudo install -Dm0644 super-voice-daemon/systemd/{{ service_file }} {{ service_dst }}
 
     # A unit left in ~/.config/systemd/user by an older install takes
     # precedence over the packaged one — remove it or systemd keeps

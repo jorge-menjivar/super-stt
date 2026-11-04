@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! `super-stt-app --notify <title> <body>`: post one banner to Notification
 //! Center as Super STT, then exit. The daemon runs this; see
-//! `super-stt-daemon/src/output/notification_center.rs`.
+//! `super-voice-daemon/src/output/notification_center.rs`.
 //!
 //! Notification Center serves only an app bundle's own executable. The
 //! daemon lives beside this binary in `Contents/MacOS` and has the app as its

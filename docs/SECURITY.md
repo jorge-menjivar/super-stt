@@ -156,10 +156,10 @@ access to configure and no `stt` group.
 Debug builds automatically use relaxed security for development convenience:
 ```bash
 # Debug build - automatically skips process authentication
-cargo run --bin super-stt-daemon
+cargo run --bin super-voice-daemon
 
 # Release build - enforces full security model
-cargo run --release --bin super-stt-daemon
+cargo run --release --bin super-voice-daemon
 ```
 
 ## Threat Model
@@ -190,7 +190,7 @@ cargo run --release --bin super-stt-daemon
 ### Suspicious Activity
 Check daemon logs for unauthorized access attempts:
 ```bash
-journalctl --user -u super-stt -f
+journalctl --user -u super-voice -f
 ```
 
 ### Revoke Access
@@ -203,8 +203,8 @@ Or stop the daemon (below) to drop all in-memory sessions.
 
 ### Emergency Shutdown
 ```bash
-systemctl --user stop super-stt
-systemctl --user disable super-stt
+systemctl --user stop super-voice
+systemctl --user disable super-voice
 ```
 
 ## Security Testing and Verification
@@ -258,7 +258,7 @@ After=sound.target
 
 [Service]
 Type=simple
-ExecStart=super-stt-daemon
+ExecStart=super-voice-daemon
 Restart=on-failure
 RestartSec=5
 

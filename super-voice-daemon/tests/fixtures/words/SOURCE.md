@@ -16,7 +16,7 @@ FrequencyWords, from OpenSubtitles2018.
 
 ## Use
 
-`super-stt-daemon/src/output/stitch_simulation_tests.rs` samples words by
+`super-voice-daemon/src/output/stitch_simulation_tests.rs` samples words by
 their counts to generate the passages it cuts into windows and stitches. Words
 that are not purely alphabetic (the contraction pieces `'s` and `'t`) are
 skipped when the list is loaded.

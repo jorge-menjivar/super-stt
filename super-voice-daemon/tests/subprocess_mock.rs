@@ -5,12 +5,12 @@
 //! session, so it is gated behind `SUPER_VOICE_TEST_SUBPROCESS=1` and skipped on
 //! hosted CI runners.
 //!
-//! Run: `SUPER_VOICE_TEST_SUBPROCESS=1` cargo test -p super-stt-daemon \
+//! Run: `SUPER_VOICE_TEST_SUBPROCESS=1` cargo test -p super-voice-daemon \
 //!        --features test-fixtures --test `subprocess_mock` -- --nocapture
 #![cfg(all(feature = "subprocess-backends", feature = "test-fixtures"))]
 
-use super_stt_daemon::stt_models::subprocess::SubprocessBackend;
-use super_stt_daemon::stt_models::transcribe::Transcribe;
+use super_voice_daemon::stt_models::subprocess::SubprocessBackend;
+use super_voice_daemon::stt_models::transcribe::Transcribe;
 
 /// Install the process-wide rustls crypto provider.
 ///
@@ -311,9 +311,9 @@ async fn a_backends_load_progress_reaches_the_tracker() {
 
     let (dir, _cleanup) = seed_backend_dir("kernels");
     let tracker = std::sync::Arc::new(
-        super_stt_daemon::download_progress::DownloadProgressTracker::new(
+        super_voice_daemon::download_progress::DownloadProgressTracker::new(
             "mock-builds-kernels".to_string(),
-            super_stt_daemon::download_progress::StageSlot {
+            super_voice_daemon::download_progress::StageSlot {
                 source: "github.com/jorge-menjivar/super-stt-voxtral".to_string(),
                 stage: 1,
             },
@@ -382,7 +382,7 @@ async fn a_changed_option_reaches_a_running_subprocess() {
         "the spawn value must arrive first"
     );
 
-    processor.reconfigure(super_stt_daemon::stt_models::transcribe::BackendContext {
+    processor.reconfigure(super_voice_daemon::stt_models::transcribe::BackendContext {
         headers: vec![(option, "casual".to_string())],
         user_allowed_hosts: Vec::new(),
     });

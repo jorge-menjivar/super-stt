@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  The macOS counterpart to systemd/super-stt.service.
+  The macOS counterpart to systemd/super-voice.service.
 
   A LaunchAgent, not a LaunchDaemon, and that is not a packaging preference:
   a LaunchDaemon runs in the system context with no window server and no
@@ -28,7 +28,7 @@
       wherever the bundle is now.
     -->
     <key>BundleProgram</key>
-    <string>Contents/MacOS/super-stt-daemon</string>
+    <string>Contents/MacOS/super-voice-daemon</string>
 
     <!--
       Only argv[0], and there must never be anything after it: the daemon
@@ -37,12 +37,12 @@
       unknown argument and exits 2 before the listener binds, and `KeepAlive`
       below turns that into a permanent crash loop with no socket for the app
       or the CLI to reach. `every_shipped_program_arguments_parses`
-      (super-stt-daemon/src/cli_tests.rs) reads this file and fails if one is
+      (super-voice-daemon/src/cli_tests.rs) reads this file and fails if one is
       reintroduced.
     -->
     <key>ProgramArguments</key>
     <array>
-        <string>super-stt-daemon</string>
+        <string>super-voice-daemon</string>
     </array>
 
     <key>RunAtLoad</key>

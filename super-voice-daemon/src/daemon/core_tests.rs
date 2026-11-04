@@ -796,7 +796,7 @@ async fn get_gpu_info_returns_success_array() {
 /// Real-hardware check: the daemon reports a non-empty, well-formed GPU
 /// inventory. Ignored by default because CI runners have no GPU — run it on
 /// a machine that does:
-///   cargo test -p super-stt-daemon --all-features `gpu_info_reports_real_hardware` -- --ignored --nocapture
+///   cargo test -p super-voice-daemon --all-features `gpu_info_reports_real_hardware` -- --ignored --nocapture
 #[tokio::test]
 #[ignore = "requires a real GPU (NVML/sysfs); run with --ignored"]
 async fn gpu_info_reports_real_hardware() {

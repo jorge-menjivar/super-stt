@@ -34,7 +34,7 @@ use tokio::net::UnixStream;
 
 /// `ResourceLimits::development().max_requests_per_minute` — the build the
 /// test daemon runs. Kept in sync with
-/// `super-stt-daemon/src/resource_management/mod.rs`.
+/// `super-voice-daemon/src/resource_management/mod.rs`.
 const DEV_PER_MINUTE: usize = 300;
 
 async fn start_daemon() -> (TestDaemon, PathBuf) {
