@@ -11,7 +11,7 @@
       "name": "GPL-3.0-only",
       "identifier": "GPL-3.0-only"
     },
-    "version": "0.1.0"
+    "version": "0.3.0-beta.2"
   },
   "servers": [
     {
@@ -672,7 +672,7 @@
           "backends"
         ],
         "summary": "List a backend's secrets (scope: secrets)",
-        "description": "Every credential this backend declares, with whether each is currently set. **Values are never returned** — not here, not anywhere. They live in the system keyring, and the only operations are write and clear.\n\nCall this to decide what a configuration screen must ask for: a `required` secret that is not `configured` is the reason a model will refuse to load.\n\nThis is a separate scope from `settings` precisely because it is the credential surface: a token granted `settings` cannot reach it.",
+        "description": "Every credential this backend declares, with whether each is currently set. **Values are never returned** — not here, not anywhere. They live in the daemon's secrets file, and the only operations are write and clear.\n\nCall this to decide what a configuration screen must ask for: a `required` secret that is not `configured` is the reason a model will refuse to load.\n\nThis is a separate scope from `settings` precisely because it is the credential surface: a token granted `settings` cannot reach it.",
         "operationId": "list_backend_secrets",
         "parameters": [
           {
@@ -841,7 +841,7 @@
           "backends"
         ],
         "summary": "Store a secret (scope: secrets)",
-        "description": "Writes the credential to the system keyring, replacing whatever was there. It cannot be read back afterwards; only replaced or cleared.\n\nIf the stage is currently running a model from this backend, the daemon reloads it so the new credential is used at once — a key rotated while a model is loaded takes effect without the user knowing a reload was needed.",
+        "description": "Writes the credential to the daemon's secrets file, replacing whatever was there. It cannot be read back afterwards; only replaced or cleared.\n\nIf the stage is currently running a model from this backend, the daemon reloads it so the new credential is used at once — a key rotated while a model is loaded takes effect without the user knowing a reload was needed.",
         "operationId": "set_backend_secret",
         "parameters": [
           {
@@ -935,8 +935,8 @@
               }
             }
           },
-          "503": {
-            "description": "The keyring could not be written (`keyring_unavailable`).",
+          "500": {
+            "description": "The secrets file could not be written (`secrets_write_failed`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -959,7 +959,7 @@
           "backends"
         ],
         "summary": "Clear a secret (scope: secrets)",
-        "description": "Removes the stored credential from the keyring, returning the secret to unset. A backend that requires it will refuse to load until one is stored again.\n\nThis is the operation to reach for when a user disconnects an account: the value is gone from the keyring, not merely ignored.",
+        "description": "Removes the stored credential from the secrets file, returning the secret to unset. A backend that requires it will refuse to load until one is stored again.\n\nThis is the operation to reach for when a user disconnects an account: the value is gone from the secrets file, not merely ignored.",
         "operationId": "delete_backend_secret",
         "parameters": [
           {
@@ -1033,8 +1033,8 @@
               }
             }
           },
-          "503": {
-            "description": "The keyring could not be written (`keyring_unavailable`).",
+          "500": {
+            "description": "The secrets file could not be written (`secrets_write_failed`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -6569,11 +6569,11 @@
             "items": {
               "$ref": "#/components/schemas/BackendSecret"
             },
-            "description": "Sensitive values (API keys, etc.) stored in the system keyring."
+            "description": "Sensitive values (API keys, etc.) stored in the daemon's secrets file."
           },
           "source": {
             "type": "string",
-            "description": "Repo id the backend was installed from, e.g.\n`github.com/super-tts/openai`. Used as the daemon's keyring account\nkey and option key."
+            "description": "Repo id the backend was installed from, e.g.\n`github.com/super-tts/openai`. The key the daemon stores its\nsecrets and options under."
           },
           "version": {
             "type": "string",
@@ -6796,7 +6796,7 @@
       },
       "BackendSecret": {
         "type": "object",
-        "description": "A sensitive value the backend requires, stored in the system keyring.",
+        "description": "A sensitive value the backend requires, stored in the daemon's secrets\nfile.",
         "required": [
           "name"
         ],
@@ -6813,7 +6813,7 @@
           },
           "name": {
             "type": "string",
-            "description": "`snake_case` identifier (the keyring account suffix; the backend reads\nit as `x-tts-secret-<name>`)."
+            "description": "`snake_case` identifier; the backend reads it as `x-tts-secret-<name>`."
           },
           "required": {
             "type": "boolean"
@@ -7137,7 +7137,16 @@
             "allOf": [
               {
                 "type": "object",
-                "description": "The per-model fields Super TTS's index carries beside `name` and\n`supported_devices`: none yet."
+                "description": "The per-model fields Super Voice's index carries beside `name` and\n`supported_devices`: the model's role, as its manifest spells it, so a\nclient can tell what a backend's models are for before installing it.",
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "description": "`transcription`, `post_processor` or `synthesis`."
+                  }
+                }
               },
               {
                 "type": "object",
@@ -7996,7 +8005,7 @@
         "properties": {
           "value": {
             "type": "string",
-            "description": "The credential itself. Written to the system keyring, never returned by\nany endpoint. Empty is refused — clear a secret with `DELETE`."
+            "description": "The credential itself. Written to the daemon's secrets file, never returned by\nany endpoint. Empty is refused — clear a secret with `DELETE`."
           }
         }
       },

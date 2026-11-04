@@ -781,6 +781,32 @@ gen-schemas:
 openapi:
     cargo run -q -p super-stt-daemon --bin gen_openapi
 
+# Write tts/docs/protocol/openapi.json from the TTS daemon's /v1 router. Unlike
+# Super STT's, this one is committed: the TTS settings app's path-contract
+# tests read it. Run it after changing a TTS route.
+[doc("Regenerate the committed TTS OpenAPI document")]
+openapi-tts:
+    cargo run -q -p super-tts-daemon --bin gen_openapi
+
+# Fails when the committed TTS OpenAPI document no longer matches the router.
+# Regenerates in place and restores the file on exit, so a failing check never
+# leaves the tree modified.
+[doc("Check the committed TTS OpenAPI document is current")]
+openapi-tts-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    spec=tts/docs/protocol/openapi.json
+    before=$(mktemp)
+    cp "$spec" "$before"
+    trap 'cp "$before" "$spec"; rm -f "$before"' EXIT
+    cargo run -q -p super-tts-daemon --bin gen_openapi >/dev/null
+    if ! diff -u "$before" "$spec"; then
+        echo >&2
+        echo "tts/docs/protocol/openapi.json is stale. Run 'just openapi-tts' and commit it." >&2
+        exit 1
+    fi
+    echo "tts/docs/protocol/openapi.json is current"
+
 # Browse the protocol spec locally. Regenerates it first so what you read is
 # what the router currently serves, then serves docs/protocol/ over HTTP —
 # the pages fetch openapi.json, which a file:// origin would block.

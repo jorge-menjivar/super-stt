@@ -333,6 +333,12 @@ jobs:
       - name: Generate the OpenAPI document
         run: just openapi
 
+      # Super TTS's document is committed, under tts/, until the two daemons
+      # are one: the TTS settings app's path-contract tests read it. A route
+      # change that leaves it stale fails here.
+      - name: Check the TTS OpenAPI document is current
+        run: just openapi-tts-check
+
       - name: Assemble the site
         run: |
           set -euo pipefail
