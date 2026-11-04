@@ -131,6 +131,11 @@ pub async fn run() -> Result<()> {
     // first guarantees the supervisor sees every shutdown signal.
     let mut shutdown_rx = daemon.shutdown_tx.subscribe();
 
+    // Held until the process exits. `serve` drops its copy once the socket is
+    // gone, while the backends are still stopping below; a new daemon must not
+    // start, and spawn a backend under the same instance name, before they are
+    // down. See `InstanceLock`.
+    let _held = instance.clone();
     let listener_handle = match spawn_http_listener(&daemon, instance).await {
         Ok(h) => h,
         Err(e) => {
