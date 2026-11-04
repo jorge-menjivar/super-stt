@@ -1,34 +1,33 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! End-to-end tests for every CLI subcommand.
+//! End-to-end tests for `voice speak`, text to speech's commands.
 //!
 //! All of them are hermetic: the daemon comes up with no backends, so `speak`
-//! is refused before anything reaches an audio device, and none of the others
-//! touch one either. They run as part of the default `cargo test` flow:
+//! is refused before anything reaches an audio device. They run as part of the
+//! default `cargo test` flow:
 //!
-//! - `ping`   → `GET  /v1/ping`       : liveness, prints the daemon's reply.
-//! - `status` → `GET  /v1/status`     : prints `Model:` / `Device:` / `State:`.
-//! - `speak`  → `POST /v1/tts/speak`      : text from arguments or from stdin.
-//! - `stop`   → `POST /v1/tts/speak/stop` : idempotent against an idle daemon.
-//! - `logout` → local token file only    : forgets the cached session token.
+//! - `speak`      → `POST /v1/tts/speak`      : text from arguments or from stdin.
+//! - `speak stop` → `POST /v1/tts/speak/stop` : idempotent against an idle daemon.
+//!
+//! `ping`, `status` and `logout` are the daemon's, and `cmd_basic.rs` covers them.
 //!
 //! The CLI keeps its token in the test daemon's home, never the developer's
 //! state directory, and the daemon runs with `SUPER_VOICE_AUTO_APPROVE=1` (it
 //! auto-approves `/auth/request`, so no consent popup is spawned).
 //!
 //! ```bash
-//! cargo test -p super-tts-cli --test cmd_basic -- --nocapture
+//! cargo test -p super-voice-cli --test cmd_basic -- --nocapture
 //! ```
 
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use super_engine_test_daemon::TestDaemon;
-use super_tts_shared::product::SUPER_VOICE;
+use super_stt_shared::product::SUPER_VOICE;
 
-const CLI_BIN: &str = env!("CARGO_BIN_EXE_super-tts-cli");
+const CLI_BIN: &str = env!("CARGO_BIN_EXE_super-voice-cli");
 
 /// Locate the daemon binary next to the CLI binary's target dir. `cargo
-/// test -p super-tts-cli` builds the daemon as a workspace dependency, so
+/// test -p super-voice-cli` builds the daemon as a workspace dependency, so
 /// they share the same `target/<profile>/` slot.
 fn locate_daemon_bin() -> PathBuf {
     let dir = PathBuf::from(CLI_BIN)
@@ -93,48 +92,6 @@ fn run_cli(daemon: &TestDaemon, args: &[&str]) -> (i32, String, String) {
     (status.code().unwrap_or(-1), stdout, stderr)
 }
 
-/// `ping` must reach the daemon, auto-mint a token (auto-approve), and
-/// print the daemon's liveness reply with a clean exit.
-#[test]
-fn ping_reports_daemon_alive() {
-    let daemon = spawn_daemon();
-    let (code, stdout, stderr) = run_cli(&daemon, &["ping"]);
-    assert_eq!(
-        code, 0,
-        "ping should exit 0; stdout=`{stdout}` stderr=`{stderr}`"
-    );
-    let out = stdout.to_lowercase();
-    assert!(
-        out.contains("pong") || out.contains("running") || out.contains("alive"),
-        "ping should print a liveness reply; stdout=`{stdout}` stderr=`{stderr}`"
-    );
-}
-
-/// `status` must print the documented `Model:` and `Device:` lines. With
-/// no backend installed the daemon is idle, so the model line reports
-/// `(none loaded)` — but both labels are always present.
-#[test]
-fn status_reports_model_and_device() {
-    let daemon = spawn_daemon();
-    let (code, stdout, stderr) = run_cli(&daemon, &["status"]);
-    assert_eq!(
-        code, 0,
-        "status should exit 0; stdout=`{stdout}` stderr=`{stderr}`"
-    );
-    assert!(
-        stdout.contains("Model:"),
-        "status should print a Model: line; stdout=`{stdout}` stderr=`{stderr}`"
-    );
-    assert!(
-        stdout.contains("Device:"),
-        "status should print a Device: line; stdout=`{stdout}` stderr=`{stderr}`"
-    );
-    assert!(
-        stdout.contains("State:  idle"),
-        "an idle daemon should report State: idle; stdout=`{stdout}` stderr=`{stderr}`"
-    );
-}
-
 /// `speak` reaches `POST /v1/tts/speak` and surfaces the daemon's refusal when no
 /// model is loaded — the routing is the subject, not the audio. A hermetic
 /// daemon has no backends, so this is the reachable end of the path.
@@ -153,7 +110,7 @@ fn speak_routes_to_the_daemon_and_surfaces_its_refusal() {
     );
 }
 
-/// Text on stdin is what makes `... | super-tts-cli speak` work, which is how a
+/// Text on stdin is what makes `... | voice speak` work, which is how a
 /// shell pipeline reaches the daemon without a client of its own. It must route
 /// the same way as trailing arguments rather than silently speaking nothing.
 #[test]
@@ -203,10 +160,10 @@ fn speak_reads_text_from_stdin_when_no_arguments_are_given() {
 /// no utterance id and the CLI says so with a zero exit. A user cancelling on a
 /// keypress should not get an error for having won the race.
 #[test]
-fn stop_is_idempotent_when_idle() {
+fn speak_stop_is_idempotent_when_idle() {
     let daemon = spawn_daemon();
     for attempt in 1..=2 {
-        let (code, stdout, stderr) = run_cli(&daemon, &["stop"]);
+        let (code, stdout, stderr) = run_cli(&daemon, &["speak", "stop"]);
         assert_eq!(
             code, 0,
             "stop attempt {attempt} on an idle daemon should exit 0; \
@@ -218,48 +175,4 @@ fn stop_is_idempotent_when_idle() {
              stdout=`{stdout}` stderr=`{stderr}`"
         );
     }
-}
-
-/// `logout` is local-only — it deletes the CLI's token file and never
-/// contacts the daemon. No daemon needed.
-#[test]
-fn logout_clears_cached_token() {
-    let state = tempfile::tempdir().expect("a state directory");
-    let token = state.path().join("super-voice/clients/super-tts-cli.json");
-    std::fs::create_dir_all(token.parent().unwrap()).expect("create the clients directory");
-    std::fs::write(&token, r#"{"token":"t","requested":[],"granted":[]}"#)
-        .expect("plant a token file");
-
-    // logout ignores the socket, but `--socket` is a global flag so passing
-    // a throwaway path keeps `run_cli` uniform.
-    let throwaway = std::env::temp_dir().join(format!(
-        "tts-cli-logout-{}-{}.sock",
-        std::process::id(),
-        next_uniq()
-    ));
-    let mut child = Command::new(CLI_BIN)
-        .env("XDG_STATE_HOME", state.path())
-        .args(["--socket", throwaway.to_str().unwrap(), "logout"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn cli logout");
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    if let Some(mut h) = child.stdout.take() {
-        let _ = h.read_to_string(&mut stdout);
-    }
-    if let Some(mut h) = child.stderr.take() {
-        let _ = h.read_to_string(&mut stderr);
-    }
-    let code = child.wait().expect("wait cli").code().unwrap_or(-1);
-    assert_eq!(
-        code, 0,
-        "logout should exit 0; stdout=`{stdout}` stderr=`{stderr}`"
-    );
-    assert!(
-        stdout.contains("Cached session token removed"),
-        "logout should confirm the token was forgotten; stdout=`{stdout}` stderr=`{stderr}`"
-    );
-    assert!(!token.exists(), "logout must delete the token file");
 }

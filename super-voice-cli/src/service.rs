@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `stt service`: register, unregister, or report on the app bundle's two
+//! `voice service`: register, unregister, or report on the app bundle's two
 //! `LaunchAgent`s, the daemon and the shortcut listener.
 //!
 //! The settings app registers them the first time it is opened, which is all
 //! someone who drags Super STT into Applications needs. This is for the rest:
 //! the justfile's install and uninstall, and anyone stopping the daemon from
 //! a terminal. It works only as the CLI inside the bundle — through `stt`, or
-//! `Super STT.app/Contents/MacOS/super-stt-cli` — because `ServiceManagement`
+//! `Super STT.app/Contents/MacOS/super-voice-cli` — because `ServiceManagement`
 //! finds the agents through the calling executable's bundle.
 
 use anyhow::{Result, bail};

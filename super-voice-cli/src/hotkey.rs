@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `stt hotkey` — a global keyboard shortcut that starts and stops a
+//! `voice hotkey` — a global keyboard shortcut that starts and stops a
 //! recording, for macOS.
 //!
 //! On Linux the desktop environment owns global shortcuts (Wayland gives no
 //! client a system-wide key grab), and it is the DE that runs
-//! `stt record --write` when the key is pressed. macOS has no equivalent place
+//! `voice record --write` when the key is pressed. macOS has no equivalent place
 //! to bind a key to a command, so this subcommand stands in for the DE: a
 //! long-running client that owns one shortcut and, on each press, does exactly
-//! what `stt record --write` does, through the same function. The daemon never
+//! what `voice record --write` does, through the same function. The daemon never
 //! learns anything about input.
 //!
 //! Registration goes through Carbon's `RegisterEventHotKey`, by way of the
@@ -34,8 +34,8 @@ use super_stt_shared::daemon::session::{self, AppId};
 /// as the app itself. The daemon binds each session to the path that
 /// obtained it, so sharing `stt`'s keychain entry would have each revoke the
 /// other's session every time it was used.
-const APP_ID: AppId = session::app_id("super-stt-hotkey");
-const APP_NAME: &str = "Super STT Shortcut";
+const APP_ID: AppId = session::app_id("super-voice-hotkey");
+const APP_NAME: &str = "Super Voice Shortcut";
 
 /// ⌃⌥Space. The obvious candidates are taken: ⌘Space is Spotlight, ⌃Space
 /// switches input sources, and ⌥Space is the `ChatGPT` app's default.
@@ -46,7 +46,7 @@ pub fn command() -> Command {
         .about("Listen for a global shortcut that starts and stops recording (macOS)")
         .long_about(
             "Listen for a global shortcut that starts and stops recording.\n\n\
-             Runs until stopped. Each press does what `stt record --write` does: \
+             Runs until stopped. Each press does what `voice record --write` does: \
              starts a recording, or stops the one in progress and types the result \
              into the focused window. The Super STT app runs this as a \
              LaunchAgent so it is available from login.",
@@ -95,7 +95,7 @@ pub fn check(binding: &str) -> Result<()> {
 /// the daemon lives on worker threads instead.
 pub fn run(socket_path: PathBuf, binding: &str) -> Result<()> {
     let mtm = MainThreadMarker::new()
-        .ok_or_else(|| anyhow!("`stt hotkey` must run on the process's main thread"))?;
+        .ok_or_else(|| anyhow!("`voice hotkey` must run on the process's main thread"))?;
 
     let hotkey = parse_binding(binding)?;
     // Held for the life of the process: dropping the manager unregisters the

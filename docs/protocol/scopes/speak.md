@@ -59,8 +59,8 @@ that utterance and starts yours. There is no "already speaking" error to handle,
 which is deliberate — "speak this instead" is the common intent. To implement a
 speak/silence toggle, read `busy` on
 [`GET /status`](../endpoints/v1/status.md) (the `status` scope) and route to
-`/tts/speak/stop` when it is `true`. The `super-tts-cli` `speak` and `stop`
-subcommands are the two halves.
+`/tts/speak/stop` when it is `true`. `voice speak` and `voice speak stop` are
+the two halves.
 
 ## A typical speaking session
 

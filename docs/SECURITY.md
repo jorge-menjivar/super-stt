@@ -212,9 +212,8 @@ journalctl --user -u super-voice -f
 Authorization is per-client consent tokens, not group membership. Forget the
 cached token (forcing the client to re-request consent on its next call) with:
 ```bash
-stt logout
+voice logout
 ```
-The text-to-speech CLI has the same command, `super-tts-cli logout`.
 Or stop the daemon (below) to drop all in-memory sessions.
 
 ### Emergency Shutdown

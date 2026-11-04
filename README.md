@@ -42,17 +42,18 @@ cd super-stt
 just install
 ```
 
-Either way you get the daemon, the `stt` CLI, a consent helper, the desktop app, and (on COSMIC) the panel applet, wired up as a `systemctl --user` service. Everything installs system-wide (root-owned, so the installer asks for sudo), while the daemon itself runs unprivileged in your user session. On COSMIC the installer offers to bind Super+Space → `stt record --write` for you. GPU acceleration comes from the model you run (see [Models](#-models)).
+Either way you get the daemon, the `voice` CLI, a consent helper, the desktop app, and (on COSMIC) the panel applet, wired up as a `systemctl --user` service. Everything installs system-wide (root-owned, so the installer asks for sudo), while the daemon itself runs unprivileged in your user session. On COSMIC the installer offers to bind Super+Space → `voice record --write` for you. GPU acceleration comes from the model you run (see [Models](#-models)).
 
 ## ⌨️ Using it
 
 ```bash
-stt record --write # Record and transcribes. Types the result after silence is detected or you run the command again.
+voice record --write # Record and transcribes. Types the result after silence is detected or you run the command again.
+voice speak "Hello" # Speak text with the loaded speech model. `voice speak stop` stops it.
 ```
 
-Bind `stt record --write` to a key combo. Super+Space is the convention (the COSMIC installer does this for you; on other desktops add a custom shortcut for `stt record --write`). When you trigger it:
+Bind `voice record --write` to a key combo. Super+Space is the convention (the COSMIC installer does this for you; on other desktops add a custom shortcut for `voice record --write`). When you trigger it:
 
-1. `stt` asks the running daemon to start transcribing from your mic.
+1. `voice` asks the running daemon to start transcribing from your mic.
 2. You speak; the daemon transcribes your audio.
 3. When you stop (on silence or a second trigger), it types the transcription into the focused app.
 
@@ -76,7 +77,7 @@ Two settings shape a session. Both live in the desktop app under **Settings** (o
 | **Manual Only**                | Stops only on a second shortcut press                 |
 
 ```bash
-stt record --write --stop-mode manual_only
+voice record --write --stop-mode manual_only
 ```
 
 **Write method** - how text is injected: **Auto** (default) picks the first method the session supports: the built-in Wayland virtual keyboard, then the XDG Desktop Portal, then ydotool. Force a specific one in Settings if auto-detection picks wrong.
@@ -151,7 +152,7 @@ This is a snapshot. The app always shows the current catalog, published live at 
 
 ## 🩺 Troubleshooting
 
-- **`stt: command not found`**: binaries are installed system-wide and are on `PATH` by default — restart your terminal so it rehashes, and check the installer finished without errors.
+- **`voice: command not found`**: binaries are installed system-wide and are on `PATH` by default — restart your terminal so it rehashes, and check the installer finished without errors.
 - **Daemon won't start / misbehaves**: check `journalctl --user -u super-voice -n 50`.
 - **Transcriptions seem less accurate than they should be**: your microphone input volume may be set too high or too low. Adjust the mic volume in your system sound settings and try again.
 - **Typing doesn't work in some apps**: [`ydotool`](https://github.com/ReimuNotMoe/ydotool) types reliably across virtually all apps. Install it via your package manager, then try it out first by running `sudo ydotoold --socket-path="$HOME/.ydotool_socket" --socket-own="$(id -u):$(id -g)"` in a terminal and setting the write method to **ydotool** in Settings. If that fixes typing, make it permanent by enabling the service (e.g. `systemctl --user enable --now ydotool`).

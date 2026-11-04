@@ -2,9 +2,9 @@ app_name := 'super-stt-app'
 daemon_bin_name := 'super-voice-daemon'
 # systemd unit name (matches super-voice-daemon/systemd/super-voice.service)
 service_name := 'super-voice'
-cli_name := 'super-stt-cli'
+cli_name := 'super-voice-cli'
 consent_name := 'super-voice-consent'
-wrapper_name := 'stt'
+wrapper_name := 'voice'
 
 # The COSMIC applet Super STT shares with Super TTS. It lives in its own repo,
 # super-libre/super-cosmic-applet, whose releases the installer installs.
@@ -69,7 +69,7 @@ service_dst := systemd_unit_dir / service_file
 # Named as a list rather than reached with `--workspace --exclude` so the
 # macOS gates say what they cover, and so a new portable crate has to be added
 # deliberately rather than silently skipped.
-macos_members := '-p super-voice-daemon -p super-stt-cli -p super-stt-shared -p super-voice-registry-types -p super-stt-install -p super-stt-app'
+macos_members := '-p super-voice-daemon -p super-voice-cli -p super-stt-shared -p super-voice-registry-types -p super-stt-install -p super-stt-app'
 
 # macOS ships as one app bundle, `Super STT.app`: the settings app is its
 # executable, and the daemon and the CLI sit beside it in Contents/MacOS. The
@@ -106,10 +106,10 @@ launchd_domain := 'gui/' + shell('id -u')
 launchd_target := launchd_domain + '/' + launchd_label
 
 # The global-shortcut listener (`stt hotkey`), a second LaunchAgent beside the
-# daemon's. See super-stt-cli/launchd/.
+# daemon's. See super-voice-cli/launchd/.
 hotkey_label := launchd_label + '.hotkey'
 hotkey_plist_file := hotkey_label + '.plist'
-hotkey_plist_src := 'super-stt-cli' / 'launchd' / hotkey_plist_file
+hotkey_plist_src := 'super-voice-cli' / 'launchd' / hotkey_plist_file
 hotkey_plist_dst := launchd_agent_dir / hotkey_plist_file
 hotkey_target := launchd_domain + '/' + hotkey_label
 
@@ -427,7 +427,7 @@ bundle-macos:
     cp target/release/{{ app_name }} target/release/{{ daemon_bin_name }} \
         target/release/{{ cli_name }} "$contents/MacOS/"
     # A second CLI for the shortcut agent, which must not run from
-    # Contents/MacOS; see super-stt-cli/launchd/.
+    # Contents/MacOS; see super-voice-cli/launchd/.
     cp target/release/{{ cli_name }} "$contents/Helpers/"
 
     cp {{ launchd_plist_src }} "$contents/Library/LaunchAgents/"
@@ -1025,7 +1025,7 @@ install-macos:
     echo "Creating wrapper script at {{ wrapper_dst }}"
     wrapper_tmp=$(mktemp)
     echo '#!/bin/bash' > "$wrapper_tmp"
-    echo '# Super STT convenience wrapper — runs the CLI inside the app bundle.' >> "$wrapper_tmp"
+    echo '# Super Voice convenience wrapper — runs the CLI inside the app bundle.' >> "$wrapper_tmp"
     echo '' >> "$wrapper_tmp"
     echo 'exec "{{ macos_bundle_cli }}" "$@"' >> "$wrapper_tmp"
     sudo install -d -m0755 {{ bin_dir }}
@@ -1159,8 +1159,8 @@ install-daemon:
     # launching the stale ~/.local/bin binary.
     rm -f "$HOME/.config/systemd/user/{{ service_file }}"
 
-    # Create the `stt` convenience wrapper (for keyboard shortcuts like
-    # `stt record --write`). Note: we deliberately do NOT use `sg stt
+    # Create the `voice` convenience wrapper (for keyboard shortcuts like
+    # `voice record --write`). Note: we deliberately do NOT use `sg stt
     # -c "..."` here. Changing the GID of the daemon (or its CLI
     # peers) breaks `/proc/<pid>/exe` readlinks across the daemon ↔
     # client boundary — the kernel's `__ptrace_may_access` check
@@ -1172,8 +1172,8 @@ install-daemon:
     echo "Creating wrapper script at {{ wrapper_dst }}"
     wrapper_tmp=$(mktemp)
     echo '#!/bin/bash' > "$wrapper_tmp"
-    echo '# Super STT convenience wrapper — invokes super-stt-cli directly.' >> "$wrapper_tmp"
-    echo '# Used by keyboard shortcuts (e.g. Super+Space → "stt record --write").' >> "$wrapper_tmp"
+    echo '# Super Voice convenience wrapper — invokes super-voice-cli directly.' >> "$wrapper_tmp"
+    echo '# Used by keyboard shortcuts (e.g. Super+Space → "voice record --write").' >> "$wrapper_tmp"
     echo '' >> "$wrapper_tmp"
     echo 'exec {{ cli_dst }} "$@"' >> "$wrapper_tmp"
     sudo install -m755 "$wrapper_tmp" {{ wrapper_dst }}
@@ -1190,10 +1190,10 @@ install-daemon:
 
         if [[ ! "$add_shortcut" =~ ^[Nn]$ ]]; then
             mkdir -p "$COSMIC_SHORTCUTS_DIR"
-            stt_command="{{ bin_dir }}/stt record --write"
+            stt_command="{{ bin_dir }}/voice record --write"
 
             if [ -f "$COSMIC_SHORTCUTS_FILE" ] && [ -s "$COSMIC_SHORTCUTS_FILE" ]; then
-                if ! grep -q "Super STT" "$COSMIC_SHORTCUTS_FILE"; then
+                if ! grep -q "Super Voice" "$COSMIC_SHORTCUTS_FILE"; then
                     if ! (grep -q 'key: "space"' "$COSMIC_SHORTCUTS_FILE" && grep -A5 -B5 'key: "space"' "$COSMIC_SHORTCUTS_FILE" | grep -q 'Super'); then
                         cp "$COSMIC_SHORTCUTS_FILE" "$COSMIC_SHORTCUTS_FILE.backup"
                         temp_file=$(mktemp)
@@ -1207,7 +1207,7 @@ install-daemon:
                         echo '            Super,' >> "$temp_file"
                         echo '        ],' >> "$temp_file"
                         echo '        key: "space",' >> "$temp_file"
-                        echo '        description: Some("Super STT"),' >> "$temp_file"
+                        echo '        description: Some("Super Voice"),' >> "$temp_file"
                         echo "    ): Spawn(\"$stt_command\")," >> "$temp_file"
                         echo '}' >> "$temp_file"
                         mv "$temp_file" "$COSMIC_SHORTCUTS_FILE"
@@ -1221,7 +1221,7 @@ install-daemon:
                 echo '            Super,' >> "$COSMIC_SHORTCUTS_FILE"
                 echo '        ],' >> "$COSMIC_SHORTCUTS_FILE"
                 echo '        key: "space",' >> "$COSMIC_SHORTCUTS_FILE"
-                echo '        description: Some("Super STT"),' >> "$COSMIC_SHORTCUTS_FILE"
+                echo '        description: Some("Super Voice"),' >> "$COSMIC_SHORTCUTS_FILE"
                 echo "    ): Spawn(\"$stt_command\")," >> "$COSMIC_SHORTCUTS_FILE"
                 echo '}' >> "$COSMIC_SHORTCUTS_FILE"
             fi
@@ -1233,7 +1233,7 @@ install-daemon:
     echo "✓ Convenience shortcut 'stt' created"
     echo ""
     echo "🚀 Ready to use!"
-    echo "-- stt record --write         # Record, transcribe, and type result"
+    echo "-- voice record --write         # Record, transcribe, and type result"
 
     # Reload user systemd and enable service
     echo "Reloading user systemd..."
@@ -1268,7 +1268,7 @@ install:
         exit 1
     fi
 
-# Configure COSMIC keyboard shortcut for Super STT
+# Configure COSMIC keyboard shortcut for Super Voice
 setup-cosmic-shortcut:
     #!/usr/bin/env bash
     # Check if we're on COSMIC desktop
@@ -1281,7 +1281,7 @@ setup-cosmic-shortcut:
     COSMIC_SHORTCUTS_FILE="$COSMIC_SHORTCUTS_DIR/custom"
 
     # Ask user if they want to add the shortcut
-    echo -n "Add keyboard shortcut (Super+Space) for Super STT? [Y/n]: "
+    echo -n "Add keyboard shortcut (Super+Space) for Super Voice? [Y/n]: "
     read -r add_shortcut
 
     if [[ "$add_shortcut" =~ ^[Nn]$ ]]; then
@@ -1291,13 +1291,13 @@ setup-cosmic-shortcut:
     # Create the shortcuts directory if it doesn't exist
     mkdir -p "$COSMIC_SHORTCUTS_DIR"
 
-    # Use the full path to the stt wrapper for reliability
-    stt_command="{{ bin_dir }}/stt record --write"
+    # Use the full path to the voice wrapper for reliability
+    stt_command="{{ bin_dir }}/voice record --write"
 
     # Check if shortcuts file exists and has content
     if [ -f "$COSMIC_SHORTCUTS_FILE" ] && [ -s "$COSMIC_SHORTCUTS_FILE" ]; then
         # File exists with content, check if our shortcut is already there
-        if grep -q "Super STT" "$COSMIC_SHORTCUTS_FILE"; then
+        if grep -q "Super Voice" "$COSMIC_SHORTCUTS_FILE"; then
             exit 0
         fi
 
@@ -1322,7 +1322,7 @@ setup-cosmic-shortcut:
             echo '            Super,' >> "$temp_file"
             echo '        ],' >> "$temp_file"
             echo '        key: "space",' >> "$temp_file"
-            echo '        description: Some("Super STT"),' >> "$temp_file"
+            echo '        description: Some("Super Voice"),' >> "$temp_file"
             echo "    ): Spawn(\"$stt_command\")," >> "$temp_file"
             echo '}' >> "$temp_file"
         else
@@ -1333,7 +1333,7 @@ setup-cosmic-shortcut:
             echo '            Super,' >> "$temp_file"
             echo '        ],' >> "$temp_file"
             echo '        key: "space",' >> "$temp_file"
-            echo '        description: Some("Super STT"),' >> "$temp_file"
+            echo '        description: Some("Super Voice"),' >> "$temp_file"
             echo "    ): Spawn(\"$stt_command\")," >> "$temp_file"
             echo '}' >> "$temp_file"
         fi
@@ -1381,7 +1381,7 @@ install-all:
     echo ""
     echo "⚙️  Quick Setup Tips:"
     echo "-- If you're on COSMIC, the daemon installer already offered to set up Super+Space shortcut"
-    echo "-- For other desktop environments, add a keyboard shortcut for: stt record --write"
+    echo "-- For other desktop environments, add a keyboard shortcut for: voice record --write"
     echo "-- Recommended shortcuts: Super+Space, Ctrl+Alt+S, or F12"
 
 # Uninstall the app

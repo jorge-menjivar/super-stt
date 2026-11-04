@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! End-to-end tests for the CLI's non-recording subcommands: `ping`,
-//! `status`, `stop`, and `logout`.
+//! End-to-end tests for the CLI's commands that need no microphone: `ping`,
+//! `status`, `record stop`, and `logout`.
 //!
 //! Complements `cmd_record_toggle.rs` (which covers the `record` toggle
 //! path and is `#[ignore]`'d because it needs a real microphone). These
@@ -8,8 +8,8 @@
 //! run as part of the default `cargo test` flow:
 //!
 //! - `ping`   → `GET  /v1/ping`            : liveness, prints the daemon's reply.
-//! - `status` → `GET  /v1/status`          : prints `Model:` / `Device:` lines.
-//! - `stop`   → `POST /v1/stt/transcribe/stop` : idempotent against an idle daemon.
+//! - `status`      → `GET  /v1/status`              : both features' `Model:` / `Device:` / `State:` lines.
+//! - `record stop` → `POST /v1/stt/transcribe/stop` : idempotent against an idle daemon.
 //! - `logout` → local token file only         : forgets the cached session token.
 //!
 //! The CLI keeps its token in the test daemon's home, never the developer's
@@ -17,7 +17,7 @@
 //! auto-approves `/auth/request`, so no consent popup is spawned).
 //!
 //! ```bash
-//! cargo test -p super-stt-cli --test cmd_basic -- --nocapture
+//! cargo test -p super-voice-cli --test cmd_basic -- --nocapture
 //! ```
 
 use std::io::Read;
@@ -26,10 +26,10 @@ use std::process::{Command, Stdio};
 use super_engine_test_daemon::TestDaemon;
 use super_stt_shared::product::SUPER_VOICE;
 
-const CLI_BIN: &str = env!("CARGO_BIN_EXE_super-stt-cli");
+const CLI_BIN: &str = env!("CARGO_BIN_EXE_super-voice-cli");
 
 /// Locate the daemon binary next to the CLI binary's target dir. `cargo
-/// test -p super-stt-cli` builds the daemon as a workspace dependency, so
+/// test -p super-voice-cli` builds the daemon as a workspace dependency, so
 /// they share the same `target/<profile>/` slot.
 fn locate_daemon_bin() -> PathBuf {
     let dir = PathBuf::from(CLI_BIN)
@@ -103,11 +103,11 @@ fn ping_reports_daemon_alive() {
     );
 }
 
-/// `status` must print the documented `Model:` and `Device:` lines. With
-/// no backend installed the daemon is idle, so the model line reports
-/// `(none loaded)` — but both labels are always present.
+/// `status` must print each feature's `Model:`, `Device:` and `State:` lines.
+/// With no backend installed the daemon is idle, so each model line reports
+/// `(none loaded)` — but every label is always present.
 #[test]
-fn status_reports_model_and_device() {
+fn status_reports_each_features_model_and_device() {
     let daemon = spawn_daemon();
     let (code, stdout, stderr) = run_cli(&daemon, &["status"]);
     assert_eq!(
@@ -122,16 +122,27 @@ fn status_reports_model_and_device() {
         stdout.contains("Device:"),
         "status should print a Device: line; stdout=`{stdout}` stderr=`{stderr}`"
     );
+    for feature in ["Speech to text", "Text to speech"] {
+        assert!(
+            stdout.contains(feature),
+            "status should report {feature}; stdout=`{stdout}`"
+        );
+    }
+    assert_eq!(
+        stdout.matches("State:  idle").count(),
+        2,
+        "both features of an idle daemon are idle; stdout=`{stdout}`"
+    );
 }
 
-/// `stop` against an idle daemon is idempotent: the daemon answers
+/// `record stop` against an idle daemon is idempotent: the daemon answers
 /// `200 { message: "No recording in progress" }` and the CLI surfaces that
 /// message verbatim with a zero exit. This is the path the toggle hotkey
 /// relies on when the user double-presses after audio failed to start.
 #[test]
-fn stop_is_idempotent_when_idle() {
+fn record_stop_is_idempotent_when_idle() {
     let daemon = spawn_daemon();
-    let (code, stdout, stderr) = run_cli(&daemon, &["stop"]);
+    let (code, stdout, stderr) = run_cli(&daemon, &["record", "stop"]);
     assert_eq!(
         code, 0,
         "stop on idle daemon should exit 0; stdout=`{stdout}` stderr=`{stderr}`"
@@ -147,7 +158,9 @@ fn stop_is_idempotent_when_idle() {
 #[test]
 fn logout_clears_cached_token() {
     let state = tempfile::tempdir().expect("a state directory");
-    let token = state.path().join("super-voice/clients/super-stt-cli.json");
+    let token = state
+        .path()
+        .join("super-voice/clients/super-voice-cli.json");
     std::fs::create_dir_all(token.parent().unwrap()).expect("create the clients directory");
     std::fs::write(&token, r#"{"token":"t","requested":[],"granted":[]}"#)
         .expect("plant a token file");

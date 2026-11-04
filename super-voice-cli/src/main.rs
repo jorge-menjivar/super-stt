@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Super STT CLI — talks to the daemon over the HTTP protocol on a Unix socket.
+//! `voice`: Super Voice's command-line client. Talks to the daemon over the
+//! HTTP protocol on its Unix socket.
+//!
+//! Each feature's commands are under its own subcommand — `voice record` for
+//! speech to text, `voice speak` for text to speech — and what the daemon has
+//! once is at the top: `ping`, `status`, `logout`.
 //!
 //! Auth flow is delegated to `super_stt_shared::daemon::session`, the
 //! shared client-side session helper. Each client (CLI, settings app,
 //! applet) keeps its token in a file of its own, named by its `AppId`; the
-//! CLI's is `$XDG_STATE_HOME/super-voice/clients/super-stt-cli.json`.
+//! CLI's is `$XDG_STATE_HOME/super-voice/clients/super-voice-cli.json`. One
+//! token serves both features.
 //!
 //! `session::with_token` handles cache-hit, consent-popup-on-miss, and
 //! `invalid_session` retry transparently — handlers below just write
@@ -16,6 +22,7 @@
 
 use anyhow::{Context, Result, anyhow};
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
+use std::io::Read;
 use std::path::PathBuf;
 use super_stt_shared::daemon::http_client::{self, TranscribeOptions};
 use super_stt_shared::daemon::session::{self, AppId};
@@ -26,9 +33,10 @@ mod hotkey;
 #[cfg(target_os = "macos")]
 mod service;
 
-const APP_ID: AppId = super_stt_shared::daemon::session::app_id("super-stt-cli");
-const APP_NAME: &str = "Super STT CLI";
-const SCOPES: &[&str] = &["transcribe", "status"];
+const APP_ID: AppId = super_stt_shared::daemon::session::app_id("super-voice-cli");
+const APP_NAME: &str = "Super Voice CLI";
+/// Both features' commands run on one token, so it asks for both.
+const SCOPES: &[&str] = &["transcribe", "speak", "status"];
 
 fn main() -> Result<()> {
     // The CLI previously had no logging at all; initialize it like the other
@@ -80,6 +88,11 @@ async fn dispatch(matches: &ArgMatches, socket_path: PathBuf) -> Result<()> {
                 .await
                 .context("status failed")
         }
+        Some(("record", sub)) if matches!(sub.subcommand(), Some(("stop", _))) => {
+            run_with_token(socket_path.clone(), |t| cmd_stop(socket_path.clone(), t))
+                .await
+                .context("stop failed")
+        }
         Some(("record", sub)) => {
             let write = sub.get_flag("write");
             let wait = sub.get_flag("wait");
@@ -90,10 +103,20 @@ async fn dispatch(matches: &ArgMatches, socket_path: PathBuf) -> Result<()> {
             .await
             .context("record failed")
         }
-        Some(("stop", _)) => {
-            run_with_token(socket_path.clone(), |t| cmd_stop(socket_path.clone(), t))
-                .await
-                .context("stop failed")
+        Some(("speak", sub)) if matches!(sub.subcommand(), Some(("stop", _))) => {
+            run_with_token(socket_path.clone(), |t| {
+                cmd_speak_stop(socket_path.clone(), t)
+            })
+            .await
+            .context("stop failed")
+        }
+        Some(("speak", sub)) => {
+            let text = read_text(sub)?;
+            run_with_token(socket_path.clone(), |t| {
+                cmd_speak(socket_path.clone(), t, text.clone())
+            })
+            .await
+            .context("speak failed")
         }
         Some(("logout", _)) => cmd_logout(),
         _ => {
@@ -107,9 +130,9 @@ async fn dispatch(matches: &ArgMatches, socket_path: PathBuf) -> Result<()> {
 /// tests can parse the arguments the hotkey `LaunchAgent` is installed with.
 fn build_cli() -> Command {
     platform_subcommands(
-        Command::new("super-stt-cli")
+        Command::new("voice")
         .version(env!("CARGO_PKG_VERSION"))
-        .about("Super STT command-line client (HTTP protocol)")
+        .about("Super Voice: speech to text and text to speech")
         .arg(
             Arg::new("socket")
                 .long("socket")
@@ -118,10 +141,12 @@ fn build_cli() -> Command {
                 .global(true),
         )
         .subcommand(Command::new("ping").about("Check that the daemon is reachable"))
-        .subcommand(Command::new("status").about("Print daemon state (model + device)"))
+        .subcommand(Command::new("status").about("Print each feature's model, device and state"))
         .subcommand(
             Command::new("record")
-                .about("Start a daemon-mic recording")
+                .about("Start a recording, or stop the one in progress")
+                .args_conflicts_with_subcommands(true)
+                .subcommand(Command::new("stop").about("Stop the recording in progress"))
                 .arg(
                     Arg::new("write")
                         .short('w')
@@ -148,7 +173,21 @@ fn build_cli() -> Command {
                         )),
                 ),
         )
-        .subcommand(Command::new("stop").about("Stop an in-flight daemon-mic recording"))
+        .subcommand(
+            Command::new("speak")
+                .about("Speak text with the active model")
+                .args_conflicts_with_subcommands(true)
+                .subcommand(Command::new("stop").about("Stop the speech now playing"))
+                .arg(
+                    Arg::new("text")
+                        .help("The text to speak; omit to read it from stdin. To speak the word \"stop\", put `--` before it")
+                        .num_args(0..)
+                        .trailing_var_arg(true),
+                ), // No --voice/--language/--speed/--instructions: how the
+                   // machine speaks is the user's configuration, not a flag on the
+                   // thing that makes it talk. Set a voice with the settings app
+                   // or `POST /tts/pipeline/{stage}/model/{model}/voice`.
+        )
         .subcommand(
             Command::new("logout")
                 .about("Forget the cached session token (forces re-consent next call)"),
@@ -163,7 +202,7 @@ fn platform_subcommands(cli: Command) -> Command {
 }
 
 /// Nothing to add on Linux: the desktop environment binds the shortcut there
-/// and runs `stt record --write` itself, and systemd runs the daemon.
+/// and runs `voice record --write` itself, and systemd runs the daemon.
 #[cfg(not(target_os = "macos"))]
 fn platform_subcommands(cli: Command) -> Command {
     cli
@@ -218,12 +257,19 @@ async fn cmd_status(
     socket_path: PathBuf,
     token: String,
 ) -> super_stt_shared::daemon::http_client::HttpResult<()> {
-    let stt = http_client::status(socket_path, &token).await?.stt;
-    println!(
-        "Model:  {}",
-        stt.current_model.as_deref().unwrap_or("(none loaded)")
-    );
-    println!("Device: {}", stt.device);
+    let status = http_client::status(socket_path, &token).await?;
+    for (feature, part, at_work) in [
+        ("Speech to text", &status.stt, "recording"),
+        ("Text to speech", &status.tts, "speaking"),
+    ] {
+        println!("{feature}");
+        println!(
+            "  Model:  {}",
+            part.current_model.as_deref().unwrap_or("(none loaded)")
+        );
+        println!("  Device: {}", part.device);
+        println!("  State:  {}", if part.busy { at_work } else { "idle" });
+    }
     Ok(())
 }
 
@@ -296,6 +342,69 @@ async fn cmd_stop(
     Ok(())
 }
 
+/// The text to speak: the trailing arguments, or all of stdin when none were
+/// given. Reading stdin is what makes `... | voice speak` work, which is how a
+/// shell pipeline reaches the daemon without a client of its own.
+fn read_text(sub: &ArgMatches) -> Result<String> {
+    let words: Vec<&str> = sub
+        .get_many::<String>("text")
+        .map(|v| v.map(String::as_str).collect())
+        .unwrap_or_default();
+    if !words.is_empty() {
+        return Ok(words.join(" "));
+    }
+    let mut buf = String::new();
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .context("reading text from stdin")?;
+    if buf.trim().is_empty() {
+        return Err(anyhow!("no text given: pass it as arguments or on stdin"));
+    }
+    Ok(buf)
+}
+
+async fn cmd_speak(
+    socket_path: PathBuf,
+    token: String,
+    text: String,
+) -> super_stt_shared::daemon::http_client::HttpResult<()> {
+    // Not a toggle: a second `speak` deliberately preempts the first, which is
+    // what "say this instead" means. Use `speak stop` to fall silent.
+    let resp = super_tts_shared::daemon::http_client::speak(socket_path, &token, &text).await?;
+    if resp.status != "success" {
+        return Err(http_client::HttpError::Other(
+            resp.message.unwrap_or_else(|| "speak failed".to_string()),
+        ));
+    }
+    // The daemon answers once the utterance is queued, while the device is
+    // still playing it out, so the id is all there is to report.
+    if let Some(id) = resp.utterance_id {
+        println!("Speaking ({id}).");
+    } else {
+        println!("Speaking.");
+    }
+    Ok(())
+}
+
+async fn cmd_speak_stop(
+    socket_path: PathBuf,
+    token: String,
+) -> super_stt_shared::daemon::http_client::HttpResult<()> {
+    let resp = super_tts_shared::daemon::http_client::speak_stop(socket_path, &token).await?;
+    if resp.status != "success" {
+        return Err(http_client::HttpError::Other(
+            resp.message.unwrap_or_else(|| "stop failed".to_string()),
+        ));
+    }
+    // Stopping when nothing is speaking is a success, not an error — so say
+    // which of the two happened rather than claiming to have stopped something.
+    match resp.utterance_id {
+        Some(id) => println!("Stopped ({id})."),
+        None => println!("Nothing was speaking."),
+    }
+    Ok(())
+}
+
 fn cmd_logout() -> Result<()> {
     session::forget(APP_ID).map_err(|e| anyhow!(e))?;
     println!("Cached session token removed. Next invocation will trigger re-consent.");
@@ -320,6 +429,68 @@ mod tests {
                 "CLI requests scope `{scope}` that is not in scopes::known_scopes"
             );
         }
+    }
+
+    /// `stop` belongs to a feature: `voice record stop` and `voice speak stop`.
+    #[test]
+    fn each_feature_has_its_own_stop() {
+        for feature in ["record", "speak"] {
+            let matches = super::build_cli()
+                .try_get_matches_from(["voice", feature, "stop"])
+                .expect("parses");
+            let (name, sub) = matches.subcommand().expect("a subcommand");
+            assert_eq!(name, feature);
+            assert!(
+                matches!(sub.subcommand(), Some(("stop", _))),
+                "{feature} stop"
+            );
+        }
+        assert!(
+            super::build_cli()
+                .try_get_matches_from(["voice", "stop"])
+                .is_err(),
+            "a bare `stop` would not say which feature to stop"
+        );
+    }
+
+    /// Words after `speak` are the text, and `--` lets the text be the word
+    /// "stop".
+    #[test]
+    fn speak_takes_its_text_from_the_rest_of_the_line() {
+        let text = |args: &[&str]| {
+            let matches = super::build_cli()
+                .try_get_matches_from(args)
+                .expect("parses");
+            let (_, sub) = matches.subcommand().expect("speak");
+            assert!(
+                sub.subcommand().is_none(),
+                "{args:?} is text, not a subcommand"
+            );
+            sub.get_many::<String>("text")
+                .expect("text")
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        assert_eq!(text(&["voice", "speak", "hello", "there"]), "hello there");
+        assert_eq!(text(&["voice", "speak", "please", "stop"]), "please stop");
+        assert_eq!(text(&["voice", "speak", "--", "stop"]), "stop");
+    }
+
+    /// The binding the installer writes parses, and a recording's flags do
+    /// not go with `record stop`.
+    #[test]
+    fn record_takes_its_flags_or_stop() {
+        let matches = super::build_cli()
+            .try_get_matches_from(["voice", "record", "--write"])
+            .expect("the COSMIC binding parses");
+        let (_, sub) = matches.subcommand().expect("record");
+        assert!(sub.get_flag("write"));
+        assert!(
+            super::build_cli()
+                .try_get_matches_from(["voice", "record", "--write", "stop"])
+                .is_err()
+        );
     }
 
     /// The hotkey `LaunchAgent`'s arguments must parse. launchd restarts the
