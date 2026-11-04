@@ -149,35 +149,35 @@
     # `just pin-engine <rev>`.
     super-engine-client      = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "37c6b556da757b8f8d79aa7de459aab923d2717b",
+      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
     }
     super-engine-daemon      = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "37c6b556da757b8f8d79aa7de459aab923d2717b",
+      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
     }
     super-engine-forge       = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "37c6b556da757b8f8d79aa7de459aab923d2717b",
+      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
     }
     super-engine-indexer     = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "37c6b556da757b8f8d79aa7de459aab923d2717b",
+      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
     }
     super-engine-installer   = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "37c6b556da757b8f8d79aa7de459aab923d2717b",
+      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
     }
     super-engine-protocol    = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "37c6b556da757b8f8d79aa7de459aab923d2717b",
+      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
     }
     super-engine-spec        = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "37c6b556da757b8f8d79aa7de459aab923d2717b",
+      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
     }
     super-engine-test-daemon = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "37c6b556da757b8f8d79aa7de459aab923d2717b",
+      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
     }
     thiserror                = "2.0"
     tokio                    = {

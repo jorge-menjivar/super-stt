@@ -43,11 +43,11 @@
 use crate::daemon::http::state::AppState;
 use crate::daemon::types::SuperSTTDaemon;
 use anyhow::Result;
-use std::path::PathBuf;
 use std::sync::Arc;
 use super_engine_daemon::auth::consent::ConsentDialog;
 use super_engine_daemon::auth::{Auth, AuthConfig};
 use super_engine_daemon::http::server::{Listeners, serve};
+use super_engine_daemon::instance::InstanceLock;
 use super_stt_shared::SUPER_STT;
 use tokio::sync::broadcast;
 
@@ -55,9 +55,10 @@ use tokio::sync::broadcast;
 /// and auto-approves every `auth_request`. Intended for tests / CI only.
 pub const AUTO_APPROVE_ENV: &str = "SUPER_STT_AUTO_APPROVE";
 
-/// Spawn the HTTP server on the dedicated Unix socket, and on the loopback
-/// TCP port when `[http.tcp]` turns it on. Returns once the listeners are
-/// bound; the actual accept loop runs in a background task.
+/// Spawn the HTTP server on the Unix socket `instance` locks, and on the
+/// loopback TCP port when `[http.tcp]` turns it on. Returns once the listeners
+/// are bound; the actual accept loop runs in a background task, which holds
+/// `instance` until it has removed the socket on shutdown.
 ///
 /// Returns the [`JoinHandle`](tokio::task::JoinHandle) of the spawned
 /// accept-loop task so the caller can supervise it: if the task ends before
@@ -71,13 +72,13 @@ pub const AUTO_APPROVE_ENV: &str = "SUPER_STT_AUTO_APPROVE";
 /// can't be created or bound.
 pub async fn start_http_server(
     daemon: Arc<SuperSTTDaemon>,
-    socket_path: PathBuf,
+    instance: InstanceLock,
     shutdown_tx: broadcast::Sender<()>,
 ) -> Result<tokio::task::JoinHandle<()>> {
     let tcp = daemon.config.read().await.http.tcp.clone();
     let resource_manager = Arc::clone(&daemon.resource_manager);
     let listeners = Listeners {
-        socket_path,
+        instance,
         tcp: tcp.bind_addr(),
         allowed_origins: tcp.allowed_origins.clone(),
     };
