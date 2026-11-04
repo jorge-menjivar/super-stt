@@ -30,7 +30,7 @@ impl AppModel {
             self.fetch_current_model(),
             // The accelerator stage 1 is actually on, which is a property of
             // the model it is running rather than of the backend filling the
-            // stage — so it comes off the model slot, not off `/pipeline/1`.
+            // stage — so it comes off the model slot, not off `/stt/pipeline/1`.
             Task::perform(get_stage_model(STT_STAGE), |result| match result {
                 Ok(slot) => {
                     let device = slot.running_device().map(ToString::to_string);

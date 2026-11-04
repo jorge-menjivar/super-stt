@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/model/{model}/device` — the device a model runs on.
+//! `/stt/pipeline/{stage}/model/{model}/device` — the device a model runs on.
 //!
 //! Contract: `docs/protocol/endpoints/v1/pipeline.md` (the device verb).
 //!
@@ -36,7 +36,7 @@ pub enum PipelineStage {
 }
 
 impl PipelineStage {
-    /// The stage's 1-based position, as `/pipeline/{stage}` spells it — and
+    /// The stage's 1-based position, as `/stt/pipeline/{stage}` spells it — and
     /// as the `stage` field of the events and download reports it emits.
     #[must_use]
     pub fn position(self) -> u32 {
@@ -118,7 +118,7 @@ impl SuperSTTDaemon {
         }
     }
 
-    /// `GET /pipeline/{stage}/model/{model}/device` — the device `model`
+    /// `GET /stt/pipeline/{stage}/model/{model}/device` — the device `model`
     /// prefers, what it resolved to, and what this install can offer it.
     pub(crate) async fn handle_get_model_device(
         &self,
@@ -134,7 +134,7 @@ impl SuperSTTDaemon {
         self.model_device_response(stage, &target, message).await
     }
 
-    /// `GET /pipeline/{stage}/model/{model}/device/list` — the devices this
+    /// `GET /stt/pipeline/{stage}/model/{model}/device/list` — the devices this
     /// install can offer `model` on this host, on their own.
     pub(crate) async fn handle_list_model_devices(
         &self,
@@ -152,7 +152,7 @@ impl SuperSTTDaemon {
             .with_message(format!("Devices available to {model} listed"))
     }
 
-    /// `GET /pipeline/{stage}/device/list` — the devices the backend selected
+    /// `GET /stt/pipeline/{stage}/device/list` — the devices the backend selected
     /// for `stage` can be run on here: the union over the models it serves
     /// for that stage of what this install can offer each.
     ///
@@ -167,7 +167,7 @@ impl SuperSTTDaemon {
                 ErrorCode::InvalidBackend,
                 &format!(
                     "No backend is selected for stage {position}, so there is no backend \
-                     to list devices for. Select one with POST /pipeline/{position}."
+                     to list devices for. Select one with POST /stt/pipeline/{position}."
                 ),
             );
         };
@@ -198,7 +198,7 @@ impl SuperSTTDaemon {
             ))
     }
 
-    /// `POST /pipeline/{stage}/model/{model}/device` — run `model` on
+    /// `POST /stt/pipeline/{stage}/model/{model}/device` — run `model` on
     /// `device`. Reloads it when it is the model loaded in `stage`; otherwise
     /// only records the choice, which its next load picks up.
     pub(crate) async fn handle_set_model_device(
@@ -295,7 +295,7 @@ impl SuperSTTDaemon {
     ///
     /// The path names a stage, not a backend, so the model is looked up in
     /// the backend filling that stage — the same resolution `POST
-    /// /pipeline/{stage}/model` performs for an omitted `source`. A role
+    /// /stt/pipeline/{stage}/model` performs for an omitted `source`. A role
     /// mismatch is refused here, before anything is stored: a post-processor
     /// asked about through stage 1 is a wrong model of the pipeline, not a
     /// model with a device.
@@ -314,7 +314,7 @@ impl SuperSTTDaemon {
                 ErrorCode::InvalidBackend,
                 &format!(
                     "No backend is selected for stage {position}, so there is nothing to \
-                     resolve the model against. Select one with POST /pipeline/{position}."
+                     resolve the model against. Select one with POST /stt/pipeline/{position}."
                 ),
             ));
         };
@@ -339,7 +339,7 @@ impl SuperSTTDaemon {
                 ErrorCode::InvalidModel,
                 &format!(
                     "Model {model} is {is}, not a stage {position} model. Address it \
-                     through /pipeline/{other}/model/{model}/device instead."
+                     through /stt/pipeline/{other}/model/{model}/device instead."
                 ),
             ));
         }

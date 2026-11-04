@@ -556,7 +556,7 @@ processing_interval_ms = 1000
 | `supported_devices`      | array of string | yes      | Whether the model can use an accelerator at all — which accelerator an installed build actually targets is a property of the [asset](#assets), not the model. Non-empty, drawn from `["cpu", "gpu", "none"]`. `"cuda"` and `"metal"` are accepted input spellings for `"gpu"`; the daemon normalizes them and never emits them. `"none"` is the sentinel for remote/online models and must be the only entry when present. |
 | `estimated_vram_bytes`   | integer         | no       | Conservative GPU memory estimate. Default `0`; use `0` for cloud models. |
 | `processing_interval_ms` | integer         | no       | Suggested minimum interval between streaming passes, in ms.      |
-| `realtime`               | bool            | no       | When `true`, the model is driven over the consumer-facing WebSocket endpoint (`GET /v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`. Requires `[capabilities] websocket = true`. Default `false`. For a synthesis model it is **reserved**: the transport works, but no session payload is defined yet. |
+| `realtime`               | bool            | no       | When `true`, the model is driven over the consumer-facing WebSocket endpoint (`GET /v1/stt/transcribe/realtime`) rather than batch `POST /v1/transcribe`. Requires `[capabilities] websocket = true`. Default `false`. For a synthesis model it is **reserved**: the transport works, but no session payload is defined yet. |
 | `force_preview_support`  | bool            | no       | **Speech to text only.** Force live previews onto a model that has none of its own: while its microphone is open, the daemon re-transcribes a sliding window of the capture every `processing_interval_ms` and shows the result. Each pass is a full transcription the final pass repeats, and for an online model a billed request whose output is discarded, so it is off unless the manifest turns it on. Default `false`. Not consulted for a `realtime` model, which streams its own previews. See [previews](../endpoints/v1/transcribe.md#previews). |
 | `max_input_chars`        | integer         | no       | **Text to speech only.** Longest `text` the model accepts in one `POST /v1/synthesize`. Absent means unbounded: the daemon sends whole utterances and never splits for length. When set, the daemon chunks on sentence boundaries to stay under it. Must be non-zero. |
 | `output_sample_rate`      | integer         | no       | **Text to speech only.** Native output rate in Hz, e.g. `24000`. **Advisory** — the authoritative rate is the `x-tts-sample-rate` response header on each synthesis, since a manifest cannot know what a cloud provider will actually return. It lets the settings UI show a rate and the daemon pre-size buffers before the first response. Must be 8000–192000. |
@@ -591,8 +591,8 @@ model can be selected:
 
 | `role`           | Feature        | Route                    | Selected through                                        |
 |------------------|----------------|--------------------------|---------------------------------------------------------|
-| `transcription`  | speech to text | `POST /v1/transcribe`    | [`/pipeline/1/model`](../endpoints/v1/pipeline.md)      |
-| `post_processor` | speech to text | `POST /v1/process`       | [`/pipeline/2`](../endpoints/v1/pipeline.md)            |
+| `transcription`  | speech to text | `POST /v1/transcribe`    | [`/stt/pipeline/1/model`](../endpoints/v1/pipeline.md)      |
+| `post_processor` | speech to text | `POST /v1/process`       | [`/stt/pipeline/2`](../endpoints/v1/pipeline.md)            |
 | `synthesis`      | text to speech | `POST /v1/synthesize`    | the text-to-speech pipeline                             |
 
 The roles do not cross: selecting a model where another role belongs is

@@ -7,8 +7,8 @@ discovered from a `backend.toml` on disk (see
 models it serves plus the **secrets** and **options** it accepts.
 
 This endpoint drives the settings UI's per-backend configuration section. The
-flat model picker lives at [`GET /pipeline/{stage}/model/list`](./pipeline/model-list.md); switching the active
-model is [`POST /pipeline/1/model`](./pipeline/model.md).
+flat model picker lives at [`GET /stt/pipeline/{stage}/model/list`](./pipeline/model-list.md); switching the active
+model is [`POST /stt/pipeline/1/model`](./pipeline/model.md).
 
 ## Secrets vs. options
 
@@ -48,7 +48,7 @@ secrets and options.
 
 ```http
 GET /backend/list HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -205,9 +205,9 @@ the files go, so nothing keeps running against a directory that no longer
 exists. `was_active` is `true` if this backend was filling stage 1: its loaded
 model is unloaded (freeing device memory) and the active-backend and
 preferred-model config cleared, so `GET /status` stays consistent with
-`GET /pipeline/1`. `was_post_processor` is `true` if it was selected as the
+`GET /stt/pipeline/1`. `was_post_processor` is `true` if it was selected as the
 post-processor backend, loaded or not: the post-processor is unloaded and the
-selection forgotten, as `DELETE /pipeline/2` would. Both can be `true` for a
+selection forgotten, as `DELETE /stt/pipeline/2` would. Both can be `true` for a
 backend serving both roles.
 
 ### Failure modes

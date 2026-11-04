@@ -5,8 +5,8 @@
 //! Super TTS; this names Super STT's router, secrets and consent dialog to
 //! them.
 //!
-//! Binds `$XDG_RUNTIME_DIR/stt/super-stt-http.sock` (override via
-//! `SUPER_STT_HTTP_SOCKET`). All endpoints are served under the `/v1`
+//! Binds `$XDG_RUNTIME_DIR/voice/super-voice-http.sock` (override via
+//! `SUPER_VOICE_HTTP_SOCKET`). All endpoints are served under the `/v1`
 //! URL prefix — route definitions in `build_router` are written as
 //! bare paths (`/ping`, `/auth/request`, …) and the prefix is applied
 //! via a single `Router::nest("/v1", …)` at the bottom of the file.
@@ -17,8 +17,8 @@
 //! - `GET  /v1/auth/status`               — probe token validity (no consent UI)
 //! - `GET  /v1/ping`                      — liveness (any authenticated token)
 //! - `GET  /v1/status`                    — current model + device (`status` scope)
-//! - `POST /v1/transcribe`                — start a daemon-mic recording
-//! - `POST /v1/transcribe/stop`           — stop an in-flight daemon-mic recording
+//! - `POST /v1/stt/transcribe`                — start a daemon-mic recording
+//! - `POST /v1/stt/transcribe/stop`           — stop an in-flight daemon-mic recording
 //! - `GET  /v1/events?topics=…`           — Server-Sent Events stream (per-topic scope)
 //! - `GET  /v1/update`                    — last self-update check result (`settings` scope)
 //! - `POST /v1/update/check`              — force an immediate self-update check (`settings` scope)
@@ -35,9 +35,9 @@
 //! - Every endpoint other than `/v1/auth/request` requires
 //!   `Authorization: Bearer <token>`. Missing/invalid → 401 with
 //!   `{ status: "error", message: "invalid_session", data: { reason } }`.
-//! - The popup is the `super-stt-consent` helper binary, spawned as a
+//! - The popup is the `super-voice-consent` helper binary, spawned as a
 //!   subprocess. It writes "allow" / "deny" / "dismissed" to stdout.
-//! - Set `SUPER_STT_AUTO_APPROVE=1` in the daemon environment to skip
+//! - Set `SUPER_VOICE_AUTO_APPROVE=1` in the daemon environment to skip
 //!   the popup entirely (intended for tests / CI).
 
 use crate::daemon::http::state::AppState;
@@ -48,12 +48,12 @@ use super_engine_daemon::auth::consent::ConsentDialog;
 use super_engine_daemon::auth::{Auth, AuthConfig};
 use super_engine_daemon::http::server::{Listeners, serve};
 use super_engine_daemon::instance::InstanceLock;
-use super_stt_shared::SUPER_STT;
+use super_stt_shared::SUPER_VOICE;
 use tokio::sync::broadcast;
 
 /// Env var that, when set to "1", bypasses the consent popup entirely
 /// and auto-approves every `auth_request`. Intended for tests / CI only.
-pub const AUTO_APPROVE_ENV: &str = "SUPER_STT_AUTO_APPROVE";
+pub const AUTO_APPROVE_ENV: &str = "SUPER_VOICE_AUTO_APPROVE";
 
 /// Spawn the HTTP server on the Unix socket `instance` locks, and on the
 /// loopback TCP port when `[http.tcp]` turns it on. Returns once the listeners
@@ -83,7 +83,7 @@ pub async fn start_http_server(
     };
     let config = AuthConfig {
         dialog: ConsentDialog {
-            product: &SUPER_STT,
+            product: &SUPER_VOICE,
             describe_scopes: super_stt_shared::consent::permissions_for_scopes,
         },
         secrets: daemon.secrets.clone(),
@@ -105,7 +105,7 @@ mod tests {
     fn auto_approve_env_is_the_one_the_engine_reads() {
         assert_eq!(
             super::AUTO_APPROVE_ENV,
-            super::SUPER_STT.env(super_engine_daemon::auth::AUTO_APPROVE)
+            super::SUPER_VOICE.env(super_engine_daemon::auth::AUTO_APPROVE)
         );
     }
 }

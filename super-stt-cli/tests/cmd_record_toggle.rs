@@ -5,12 +5,12 @@
 //! from the daemon to the CLI (see
 //! `docs/protocol/endpoints/v1/transcribe.md`):
 //!
-//! - `record` against an idle daemon → calls `POST /v1/transcribe`
+//! - `record` against an idle daemon → calls `POST /v1/stt/transcribe`
 //!   (start). Audio failure in CI is tolerated — only the routing
 //!   matters here.
 //! - `record` against a recording daemon → consults
 //!   `/v1/status::is_recording`, sees `true`, dispatches
-//!   `POST /v1/transcribe/stop` instead of `/transcribe`. The
+//!   `POST /v1/stt/transcribe/stop` instead of `/stt/transcribe`. The
 //!   first CLI's stream then receives a `done` event and the
 //!   recording is stopped daemon-side.
 //!
@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use super_engine_test_daemon::TestDaemon;
-use super_stt_shared::product::SUPER_STT;
+use super_stt_shared::product::SUPER_VOICE;
 
 const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-cli");
 
@@ -60,7 +60,7 @@ fn spawn_daemon() -> (TestDaemon, PathBuf) {
         .enable_all()
         .build()
         .expect("a runtime to wait on the daemon")
-        .block_on(TestDaemon::build(&SUPER_STT, locate_daemon_bin(), "cli-toggle").start());
+        .block_on(TestDaemon::build(&SUPER_VOICE, locate_daemon_bin(), "cli-toggle").start());
     let socket = daemon.socket().to_path_buf();
     (daemon, socket)
 }
@@ -70,9 +70,9 @@ fn spawn_daemon() -> (TestDaemon, PathBuf) {
 fn run_cli(socket: &Path, args: &[&str]) -> (i32, String, String) {
     let cli_bin = DAEMON_BIN;
     let mut child = Command::new(cli_bin)
-        .env("SUPER_STT_AUTO_APPROVE", "1")
-        .env("SUPER_STT_MUTE_CUES", "1")
-        .env("SUPER_STT_HTTP_SOCKET", socket)
+        .env("SUPER_VOICE_AUTO_APPROVE", "1")
+        .env("SUPER_VOICE_MUTE_CUES", "1")
+        .env("SUPER_VOICE_HTTP_SOCKET", socket)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -91,7 +91,7 @@ fn run_cli(socket: &Path, args: &[&str]) -> (i32, String, String) {
     (status.code().unwrap_or(-1), stdout, stderr)
 }
 
-/// Idle daemon: `record` → routes to `/v1/transcribe`. Audio failure
+/// Idle daemon: `record` → routes to `/v1/stt/transcribe`. Audio failure
 /// in CI is fine — we just verify that the CLI didn't barf because of
 /// a routing bug. The expected paths are:
 ///  - audio works → recording starts, CLI blocks on SSE stream until
@@ -124,7 +124,7 @@ fn record_routes_to_transcribe_when_idle() {
 
 /// `record` against a recording daemon: the CLI must consult
 /// `/v1/status::is_recording`, see `true`, and dispatch
-/// `/v1/transcribe/stop` instead of `/v1/transcribe`. We can't force
+/// `/v1/stt/transcribe/stop` instead of `/v1/stt/transcribe`. We can't force
 /// `is_recording=true` from outside the daemon without driving a real
 /// recording, so this is an end-to-end test that needs a working
 /// microphone.
@@ -134,7 +134,7 @@ fn record_routes_to_transcribe_when_idle() {
 ///     Blocks on SSE.
 ///  2. After ~3 s (enough for `is_recording=true` to be set), CLI B
 ///     runs `record` (no args) → must detect the in-flight capture
-///     via `/status` and call `/transcribe/stop`. Stdout must contain
+///     via `/status` and call `/stt/transcribe/stop`. Stdout must contain
 ///     "Recording stop signal sent" (the documented `transcribe/stop`
 ///     success message — NOT a transcription or "(no speech
 ///     detected)").
@@ -149,9 +149,9 @@ fn record_routes_to_transcribe_stop_when_already_recording() {
     let a = std::thread::spawn(move || {
         let cli_bin = DAEMON_BIN;
         Command::new(cli_bin)
-            .env("SUPER_STT_AUTO_APPROVE", "1")
-            .env("SUPER_STT_MUTE_CUES", "1")
-            .env("SUPER_STT_HTTP_SOCKET", &socket)
+            .env("SUPER_VOICE_AUTO_APPROVE", "1")
+            .env("SUPER_VOICE_MUTE_CUES", "1")
+            .env("SUPER_VOICE_HTTP_SOCKET", &socket)
             .args(["record", "--stop-mode", "manual-only"])
             .output()
             .expect("CLI A run")

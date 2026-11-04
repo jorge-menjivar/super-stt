@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/device/list` and `/pipeline/{stage}/model/{model}/device`
+//! `/stt/pipeline/{stage}/device/list` and `/stt/pipeline/{stage}/model/{model}/device`
 //! — the accelerators a stage or one of its models can run on.
 //!
 //! The preference is per model, not per stage: two models in the same stage can
@@ -16,7 +16,7 @@ use super::{Stage, unknown_stage};
 use crate::daemon::http::v1::wire::{DeviceList, FromDaemon, ModelDevice};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 
-/// `GET /pipeline/{stage}/device/list` — the devices the backend selected for
+/// `GET /stt/pipeline/{stage}/device/list` — the devices the backend selected for
 /// this stage can be run on here.
 #[utoipa::path(
     get,
@@ -53,7 +53,7 @@ pub(crate) async fn list_stage_devices(
     narrowed(resp, DeviceList::from_daemon)
 }
 
-/// `GET /pipeline/{stage}/model/{model}/device` — the device `model` prefers,
+/// `GET /stt/pipeline/{stage}/model/{model}/device` — the device `model` prefers,
 /// what it resolved to, and what this install can offer it.
 #[utoipa::path(
     get,
@@ -68,7 +68,7 @@ model, not per stage: two models in the same stage can prefer different devices.
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
          example = 1),
-        ("model" = String, Path, description = "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it."),
+        ("model" = String, Path, description = "The model's name, as `GET /stt/pipeline/{stage}/model/list` or `GET /backend/list` spells it."),
     ),
     security(("session_token" = ["settings"])),
     responses(
@@ -103,7 +103,7 @@ pub(crate) struct SetDeviceBody {
     pub(crate) device: String,
 }
 
-/// `POST /pipeline/{stage}/model/{model}/device` — run `model` on `device`,
+/// `POST /stt/pipeline/{stage}/model/{model}/device` — run `model` on `device`,
 /// reloading it when it is the one this stage is running.
 #[utoipa::path(
     post,
@@ -119,12 +119,12 @@ Every stage reloads the same way — unload, then load on the new device — and
 reload that fails puts the model back on the device it had, leaves the setting as \
 it was, and answers `500` with the reason.
 
-List what this host can offer with `GET /pipeline/{stage}/model/{model}/device/list`.",
+List what this host can offer with `GET /stt/pipeline/{stage}/model/{model}/device/list`.",
     params(
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
          example = 1),
-        ("model" = String, Path, description = "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it."),
+        ("model" = String, Path, description = "The model's name, as `GET /stt/pipeline/{stage}/model/list` or `GET /backend/list` spells it."),
     ),
     request_body = SetDeviceBody,
     security(("session_token" = ["settings"])),
@@ -154,7 +154,7 @@ pub(crate) async fn set_model_device(
     narrowed(resp, ModelDevice::from_daemon)
 }
 
-/// `GET /pipeline/{stage}/model/{model}/device/list` — the devices this
+/// `GET /stt/pipeline/{stage}/model/{model}/device/list` — the devices this
 /// install can offer `model` on this host.
 #[utoipa::path(
     get,
@@ -170,7 +170,7 @@ model supports.",
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
          example = 1),
-        ("model" = String, Path, description = "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it."),
+        ("model" = String, Path, description = "The model's name, as `GET /stt/pipeline/{stage}/model/list` or `GET /backend/list` spells it."),
     ),
     security(("session_token" = ["settings"])),
     responses(

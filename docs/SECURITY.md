@@ -21,7 +21,7 @@ Based on comprehensive security reviews completed in August 2025, Super STT demo
 ## Socket Access Control
 
 The daemon listens on a Unix domain socket at
-`<runtime dir>/stt/super-stt-http.sock`. Access is restricted to the user
+`<runtime dir>/voice/super-voice-http.sock`. Access is restricted to the user
 running the daemon — there is **no** shared `stt` group and no group membership
 to configure. Two independent layers enforce this:
 
@@ -67,16 +67,16 @@ check rather than a cross-platform one.
 
 ### Verification
 ```bash
-ls -la "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.sock"
-# srw-rw---- ... <you> <your-primary-group> ... super-stt-http.sock
+ls -la "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-http.sock"
+# srw-rw---- ... <you> <your-primary-group> ... super-voice-http.sock
 ```
 
 ## Security Features
 
 ### 1. Keyboard Input Protection
-- **Consent-gated authorization**: Auto-typing is the per-request `write_mode` flag on `POST /transcribe` (or the daemon's configured write mode). Reaching that endpoint at all requires a consent-minted session token with the `transcribe` scope — so a client can only type after the user approved it through the one-time consent prompt. There is no separate keyboard/write scope; it is the same `transcribe` scope dictation uses. See [Authorization](#authorization) and [`protocol/auth.md`](protocol/auth.md)
+- **Consent-gated authorization**: Auto-typing is the per-request `write_mode` flag on `POST /stt/transcribe` (or the daemon's configured write mode). Reaching that endpoint at all requires a consent-minted session token with the `transcribe` scope — so a client can only type after the user approved it through the one-time consent prompt. There is no separate keyboard/write scope; it is the same `transcribe` scope dictation uses. See [Authorization](#authorization) and [`protocol/auth.md`](protocol/auth.md)
 - **Peer identity for the prompt**: the kernel's peer credentials plus its record of the peer's executable (`SO_PEERCRED` + `/proc/<pid>/exe` on Linux, `LOCAL_PEERCRED` + `proc_pidpath` on macOS) tell the consent prompt *which binary* is asking and reject cross-UID peers; this identifies the caller, it is not by itself the authorization
-- **Debug-only test bypass**: The consent auto-approval used by tests/CI (`SUPER_STT_AUTO_APPROVE`) is compiled out of release builds
+- **Debug-only test bypass**: The consent auto-approval used by tests/CI (`SUPER_VOICE_AUTO_APPROVE`) is compiled out of release builds
 - **Output sanitization**: Backend transcription output is untrusted, so before it is typed the daemon strips non-whitespace control codes (ESC/BEL/NUL/backspace), Unicode bidi overrides, and zero-width characters — a terminal escape sequence or a bidi spoof in a transcript can't reach the focused window
 - **Limited scope**: Only types actual transcription results
 
@@ -87,7 +87,7 @@ ls -la "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.s
 
 ### 3. Consent &amp; Peer Identity
 - **Session tokens + scopes**: Every request other than `/auth/request` requires a `Bearer` session token; each token carries the user-approved scopes that gate what it may do (`transcribe`, `settings`, `secrets`, `status`, and the event-topic scopes — see [`protocol/auth.md`](protocol/auth.md) for the full catalog)
-- **One-time consent**: Tokens are minted only after a popup naming the requesting binary (resolved from the kernel's peer credentials) and the scopes it asks for, which the user approves or denies. The popup is the `super-stt-consent` helper on Linux and an `osascript` dialog on macOS, where the helper's Wayland layer-shell surface has no counterpart; both render the same scope descriptions, from `super_stt_shared::consent`
+- **One-time consent**: Tokens are minted only after a popup naming the requesting binary (resolved from the kernel's peer credentials) and the scopes it asks for, which the user approves or denies. The popup is the `super-voice-consent` helper on Linux and an `osascript` dialog on macOS, where the helper's Wayland layer-shell surface has no counterpart; both render the same scope descriptions, from `super_stt_shared::consent`
 - **Same-UID only**: A peer whose UID differs from the daemon's is rejected before any prompt
 - See [`protocol/auth.md`](protocol/auth.md) for the full token, scope, and consent contract
 

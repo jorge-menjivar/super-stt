@@ -30,7 +30,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 HTTP/1.1 + JSON on two transports that serve the identical API.
 
 **A Unix domain socket** under the per-user runtime directory at \
-`<runtime dir>/stt/super-stt-http.sock` (override with `SUPER_STT_HTTP_SOCKET`), which is \
+`<runtime dir>/voice/super-voice-http.sock` (override with `SUPER_VOICE_HTTP_SOCKET`), which is \
 what native clients use. The runtime directory is `$XDG_RUNTIME_DIR` on Linux and the \
 Darwin per-user temp directory on macOS — ask the daemon rather than assuming, or read \
 the `runtime_dir` server variable below. Its filesystem permissions are the first layer \
@@ -51,9 +51,9 @@ A client cannot widen its own permissions. See `docs/protocol/auth.md`.
 With curl, over the socket:
 
 ```
-curl --unix-socket \"${XDG_RUNTIME_DIR:-$TMPDIR}/stt/super-stt-http.sock\" \\
+curl --unix-socket \"${XDG_RUNTIME_DIR:-$TMPDIR}/voice/super-voice-http.sock\" \\
      -H \"Authorization: Bearer $STT_TOKEN\" \\
-     http://stt.local/v1/ping
+     http://voice.local/v1/ping
 ```",
         license(name = "GPL-3.0-only", identifier = "GPL-3.0-only"),
         contact(name = "Super STT", url = "https://github.com/jorge-menjivar/super-stt"),
@@ -126,7 +126,7 @@ impl Modify for LocalServers {
                 // a reader has to type, and naming it here saves them going to
                 // find it. `unix://` + an absolute path is the spelling Docker
                 // and friends use, so it reads as a socket rather than a host.
-                .url("unix://{runtime_dir}/stt/super-stt-http.sock")
+                .url("unix://{runtime_dir}/voice/super-voice-http.sock")
                 .parameter(
                     "runtime_dir",
                     ServerVariableBuilder::new()
@@ -137,7 +137,7 @@ impl Modify for LocalServers {
                              per-user temp directory (`/var/folders/<xx>/<hash>/T`, what \
                              `getconf DARWIN_USER_TEMP_DIR` prints) on macOS. `/tmp/stt` \
                              is the fallback on both. Override the whole socket path with \
-                             `SUPER_STT_HTTP_SOCKET`.",
+                             `SUPER_VOICE_HTTP_SOCKET`.",
                         )),
                 )
                 .description(Some(
@@ -213,7 +213,7 @@ pub(crate) fn annotate_scopes(openapi: &mut utoipa::openapi::OpenApi) {
             let note = scope_note(operation.security.as_ref());
             // Test against the note itself, not against a trailing `)`: a
             // summary may legitimately end in a parenthetical of its own, and
-            // `GET /transcribe/realtime` ("… session (WebSocket)") is one — a
+            // `GET /stt/transcribe/realtime` ("… session (WebSocket)") is one — a
             // looser check silently left the one endpoint whose summary already
             // had a suffix as the only one without its scope.
             if let Some(summary) = operation.summary.as_mut()

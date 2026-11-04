@@ -26,7 +26,7 @@ This document is the companion to:
 
 A model is identified by the `(name, source)` pair — the same
 pair external clients use on
-[`/pipeline/1/model`](../endpoints/v1/pipeline/model.md):
+[`/stt/pipeline/1/model`](../endpoints/v1/pipeline/model.md):
 
 | Field      | Type   | Notes                                                                       |
 |------------|--------|-----------------------------------------------------------------------------|
@@ -514,7 +514,7 @@ with a timeout, currently 30 seconds — makes the daemon deliver the *raw*
 transcript and log a warning. A backend that cannot improve a transcript should
 therefore fail loudly rather than return something degraded: the fallback is
 the user's original text, which is never worse. See
-[`/pipeline`](../endpoints/v1/pipeline.md).
+[`/stt/pipeline`](../endpoints/v1/pipeline.md).
 
 ### `POST /v1/cancel`
 
@@ -542,7 +542,7 @@ non-realtime models only.
 ### Consumer-facing endpoint
 
 ```
-GET /v1/transcribe/realtime
+GET /v1/stt/transcribe/realtime
 ```
 
 The daemon serves this endpoint. It is **not** part of the backend-facing `/v1`
@@ -551,8 +551,8 @@ backend's `ws-server.handle` export (see
 [wasm.md — Realtime](./wasm.md#realtime-websocket)). The JSON control protocol
 below is interpreted by the backend guest, not by the daemon.
 
-**Auth:** same scope and bearer token as `POST /v1/transcribe` (`client` scope
-required; `settings` tokens also satisfy it). The token must appear in the HTTP
+**Auth:** same scope and bearer token as the daemon's `POST /v1/stt/transcribe`
+(the `transcribe` scope). The token must appear in the HTTP
 upgrade request's `Authorization: Bearer <token>` header.
 
 ### Frame protocol

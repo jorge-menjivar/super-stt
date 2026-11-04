@@ -7,7 +7,7 @@
 //! them unless explicitly opted-in. To run them locally:
 //!
 //! ```bash
-//! cargo test -p super-stt-consent -- --ignored --nocapture
+//! cargo test -p super-voice-consent -- --ignored --nocapture
 //! ```
 //!
 //! What's covered:
@@ -23,8 +23,8 @@
 //!   This validates:
 //!     - `cosmic::app::run` boots without panicking against the real
 //!       compositor;
-//!     - the env-var contract (`SUPER_STT_AUTH_APP_NAME` / `SUPER_STT_AUTH_SCOPES` /
-//!       `SUPER_STT_AUTH_EXE_PATH`) is wired up;
+//!     - the env-var contract (`SUPER_VOICE_AUTH_APP_NAME` / `SUPER_VOICE_AUTH_SCOPES` /
+//!       `SUPER_VOICE_AUTH_EXE_PATH`) is wired up;
 //!     - all three decision paths (Allow / Deny / dismissed) write a
 //!       recognizable line to stdout.
 //!
@@ -39,7 +39,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const HELPER_BIN: &str = env!("CARGO_BIN_EXE_super-stt-consent");
+const HELPER_BIN: &str = env!("CARGO_BIN_EXE_super-voice-consent");
 
 /// How long to let the surface settle before judging it healthy. The
 /// corner-radius protocol violation this guards against killed the helper
@@ -67,14 +67,14 @@ fn renders_and_decides() {
     }
 
     let mut child = Command::new(HELPER_BIN)
-        .env("SUPER_STT_AUTH_APP_NAME", "Smoke Test App")
-        .env("SUPER_STT_AUTH_SCOPES", "transcribe status")
-        .env("SUPER_STT_AUTH_EXE_PATH", "/usr/bin/smoke-test")
+        .env("SUPER_VOICE_AUTH_APP_NAME", "Smoke Test App")
+        .env("SUPER_VOICE_AUTH_SCOPES", "transcribe status")
+        .env("SUPER_VOICE_AUTH_EXE_PATH", "/usr/bin/smoke-test")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn super-stt-consent");
+        .expect("spawn super-voice-consent");
 
     // Give the window a couple of seconds to render. We don't have a
     // signal that says "window is up" without GUI-automation tooling,
@@ -177,14 +177,14 @@ fn surface_survives_compositor_handshake() {
     let log = File::create(&log_path).expect("create stderr capture file");
 
     let mut child = Command::new(HELPER_BIN)
-        .env("SUPER_STT_AUTH_APP_NAME", "Handshake Test App")
-        .env("SUPER_STT_AUTH_SCOPES", "transcribe status")
-        .env("SUPER_STT_AUTH_EXE_PATH", "/usr/bin/smoke-test")
+        .env("SUPER_VOICE_AUTH_APP_NAME", "Handshake Test App")
+        .env("SUPER_VOICE_AUTH_SCOPES", "transcribe status")
+        .env("SUPER_VOICE_AUTH_EXE_PATH", "/usr/bin/smoke-test")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(log))
         .spawn()
-        .expect("spawn super-stt-consent");
+        .expect("spawn super-voice-consent");
 
     std::thread::sleep(HANDSHAKE_GRACE);
 

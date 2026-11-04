@@ -4,7 +4,7 @@ use crate::daemon::types::SuperSTTDaemon;
 use log::{error, info};
 use std::sync::Arc;
 use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
-use super_stt_shared::product::SUPER_STT as PRODUCT;
+use super_stt_shared::product::SUPER_VOICE as PRODUCT;
 use super_stt_shared::theme::AudioTheme;
 
 impl SuperSTTDaemon {

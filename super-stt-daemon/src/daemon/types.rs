@@ -61,7 +61,7 @@ pub struct LoadedModel {
 /// Shared handle to the currently-loaded model (or `None` while idle/loading).
 pub type SharedLoadedModel = Arc<tokio::sync::RwLock<Option<LoadedModel>>>;
 
-/// One preview on its way to the waiting `/transcribe` client: the text and
+/// One preview on its way to the waiting `/stt/transcribe` client: the text and
 /// what it spans, which the client cannot tell from the text alone.
 #[derive(Debug, Clone)]
 pub struct PreviewFrame {
@@ -69,7 +69,7 @@ pub struct PreviewFrame {
     pub source: PreviewSource,
 }
 
-/// The single `/transcribe` preview slot: an `(id, sender)` guarded by a lock,
+/// The single `/stt/transcribe` preview slot: an `(id, sender)` guarded by a lock,
 /// where `id` lets a racing request claim the slot only when free and clear it
 /// only when it is still its own.
 pub type PreviewSlot =
@@ -84,7 +84,7 @@ pub struct SuperSTTDaemon {
     /// A second slot rather than a second daemon: a post-processor is an
     /// ordinary backend model — same discovery, same instantiation, same
     /// `Transcribe` box — that happens to be driven over `POST /v1/process`
-    /// instead of `/v1/transcribe`. Keeping it beside [`Self::model`] is what
+    /// instead of `/v1/stt/transcribe`. Keeping it beside [`Self::model`] is what
     /// lets it be selected independently of the transcription backend and
     /// survive a backend switch.
     pub post_processor: SharedLoadedModel,
@@ -109,7 +109,7 @@ pub struct SuperSTTDaemon {
     // Cached keyboard simulator (session persists across recordings, except
     // for backends that go stale while idle — see `Simulator::is_cacheable`)
     pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
-    // Streams preview text to the one waiting `/transcribe` client. See
+    // Streams preview text to the one waiting `/stt/transcribe` client. See
     // [`PreviewSlot`]: the id closes the busy-check TOCTOU that let a losing
     // request null the winner's preview stream.
     pub preview_text: PreviewSlot,

@@ -25,7 +25,7 @@ check. A network failure during the check is reported in
 
 ```http
 POST /update/check HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/model/{model}/device` — the device a model runs on.
+//! `/stt/pipeline/{stage}/model/{model}/device` — the device a model runs on.
 //!
 //! A device belongs to a model, and is addressed through the stage that runs
 //! it: the model resolves against that stage's selected backend, and a change
@@ -31,10 +31,10 @@ pub struct ModelDevice {
 }
 
 fn device_path(stage: u32, model: &str) -> String {
-    format!("/pipeline/{stage}/model/{model}/device")
+    format!("/stt/pipeline/{stage}/model/{model}/device")
 }
 
-/// Read a model's device (HTTP `GET /pipeline/{stage}/model/{model}/device`).
+/// Read a model's device (HTTP `GET /stt/pipeline/{stage}/model/{model}/device`).
 pub async fn get_model_device(stage: u32, model: String) -> HttpResult<ModelDevice> {
     let path = device_path(stage, &model);
     with_settings_token(move |socket, token| {
@@ -54,7 +54,7 @@ pub async fn get_model_device(stage: u32, model: String) -> HttpResult<ModelDevi
     .await
 }
 
-/// Set a model's device (HTTP `POST /pipeline/{stage}/model/{model}/device`).
+/// Set a model's device (HTTP `POST /stt/pipeline/{stage}/model/{model}/device`).
 ///
 /// `device` is the `cpu`/`gpu` preference. Reloads the model when it is the
 /// one its stage is running; otherwise only records the choice.
@@ -73,15 +73,15 @@ pub async fn set_model_device(stage: u32, model: String, device: String) -> Http
 }
 
 fn device_list_path(stage: u32, model: &str) -> String {
-    format!("/pipeline/{stage}/model/{model}/device/list")
+    format!("/stt/pipeline/{stage}/model/{model}/device/list")
 }
 
 fn stage_device_list_path(stage: u32) -> String {
-    format!("/pipeline/{stage}/device/list")
+    format!("/stt/pipeline/{stage}/device/list")
 }
 
 /// The devices a model can be loaded onto here
-/// (HTTP `GET /pipeline/{stage}/model/{model}/device/list`).
+/// (HTTP `GET /stt/pipeline/{stage}/model/{model}/device/list`).
 ///
 /// The daemon's answer, not a client derivation: the model's declared devices
 /// narrowed to the accelerators this install has and this host can run. Empty
@@ -104,7 +104,7 @@ pub async fn list_model_devices(stage: u32, model: String) -> HttpResult<Vec<Str
 }
 
 /// The devices the stage's selected backend can run models on here
-/// (HTTP `GET /pipeline/{stage}/device/list`) — the union of
+/// (HTTP `GET /stt/pipeline/{stage}/device/list`) — the union of
 /// [`list_model_devices`] over the models it serves in that stage's role.
 pub async fn list_stage_devices(stage: u32) -> HttpResult<Vec<String>> {
     let path = stage_device_list_path(stage);

@@ -26,7 +26,7 @@
 - Format TOML with Taplo (`taplo.toml`) when editing manifests.
 
 ## Testing Guidelines
-- Runtime/UX tests: Python against daemon socket at `/run/user/$UID/stt/super-stt-http.sock`.
+- Runtime/UX tests: Python against daemon socket at `/run/user/$UID/voice/super-voice-http.sock`.
   - Example: `python3 test_download_progress.py` (ensure daemon is running).
 - Rust unit tests live next to code (`#[cfg(test)]`) or in `tests/` per crate.
 - For protocol changes, add tests in `super-stt-shared` first.
@@ -37,6 +37,6 @@
 - PRs include purpose, linked issues, testing steps/commands, and UI screenshots (app/applets). Mention affected crates and update docs/`justfile` if behavior changes.
 
 ## Security & Configuration Tips
-- Daemon runs as a user service (`systemd --user`) and exposes a Unix socket under `/run/user/$UID/stt/`.
+- Daemon runs as a user service (`systemd --user`) and exposes a Unix socket under `/run/user/$UID/voice/`.
 - Some ML deps may reference local paths (e.g., `../candle-2/*`); document deviations in PRs.
 - Do not commit large model files; use daemon-managed downloads.

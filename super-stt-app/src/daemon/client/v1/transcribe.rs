@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/transcribe` — streaming speech-to-text via SSE.
+//! `/stt/transcribe` — streaming speech-to-text via SSE.
 
 use crate::daemon::client::internal::response::require_unit;
 use crate::daemon::client::internal::session::{
@@ -24,7 +24,7 @@ pub enum RecordEvent {
 }
 
 /// Start a recording and stream `RecordEvent`s as the daemon emits SSE
-/// events on `POST /transcribe`. Closing the returned stream early
+/// events on `POST /stt/transcribe`. Closing the returned stream early
 /// signals the daemon to stop the recording.
 ///
 /// On `invalid_session` from the initial connect (the cached settings
@@ -120,7 +120,7 @@ pub fn record_command_stream() -> impl futures_util::Stream<Item = RecordEvent> 
     )
 }
 
-/// Send a stop signal to a running recording (HTTP `POST /transcribe/stop`).
+/// Send a stop signal to a running recording (HTTP `POST /stt/transcribe/stop`).
 pub async fn stop_record_command() -> HttpResult<()> {
     with_settings_token(|socket, token| async move {
         let resp = http_client::transcribe_stop(socket, &token).await?;

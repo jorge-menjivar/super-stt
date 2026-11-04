@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}` — the backend filling one stage.
+//! `/stt/pipeline/{stage}` — the backend filling one stage.
 //!
 //! A transcript passes through ordered stages: stage 1 turns audio into text,
 //! every later stage rewrites what the one before it produced. Every stage
@@ -46,10 +46,10 @@ pub struct StageBackend {
 /// The path a stage answers on. Its model answers one level down, in
 /// [`super::model`].
 fn stage_path(stage: u32) -> String {
-    format!("/pipeline/{stage}")
+    format!("/stt/pipeline/{stage}")
 }
 
-/// Read `stage`'s backend (HTTP `GET /pipeline/{stage}`).
+/// Read `stage`'s backend (HTTP `GET /stt/pipeline/{stage}`).
 pub async fn get_stage(stage: u32) -> HttpResult<StageBackend> {
     with_settings_token(move |socket, token| async move {
         let resp = require_success(
@@ -70,7 +70,7 @@ pub async fn get_stage(stage: u32) -> HttpResult<StageBackend> {
     .await
 }
 
-/// Select the backend filling `stage` (HTTP `POST /pipeline/{stage}`).
+/// Select the backend filling `stage` (HTTP `POST /stt/pipeline/{stage}`).
 ///
 /// Records which backend fills the stage and unloads a foreign model — it does
 /// NOT load one. Pair with [`super::model::set_stage_model`] to also run a model.
@@ -92,7 +92,7 @@ pub async fn set_stage_backend(stage: u32, source: String) -> HttpResult<()> {
 }
 
 /// Empty `stage`, forgetting the model with it
-/// (HTTP `DELETE /pipeline/{stage}`).
+/// (HTTP `DELETE /stt/pipeline/{stage}`).
 ///
 /// This is a card's Deselect. [`super::model::unload_stage_model`] is the softer
 /// one that keeps the backend *and* the model it was pointed at.

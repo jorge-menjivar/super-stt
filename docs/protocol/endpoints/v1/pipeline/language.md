@@ -1,4 +1,4 @@
-# `/pipeline/{stage}/model/{model}/language`
+# `/stt/pipeline/{stage}/model/{model}/language`
 
 Read and set a model's **language override**, and read the daemon's resolved
 effective language. The override is one of the model's `supported_languages`,
@@ -22,11 +22,11 @@ separate endpoints, as they are for the device:
 | language | `/language`                                                  | [`/language/list`](#get-pipelinestagemodelmodellanguagelist)        |
 
 `{model}` is the model name as
-[`GET /pipeline/{stage}/model/list`](./model-list.md) spells it; names contain
+[`GET /stt/pipeline/{stage}/model/list`](./model-list.md) spells it; names contain
 only alphanumerics and hyphens, so the segment is used as-is.
 
 ```
-/pipeline/1/model/whisper-large-v3/language
+/stt/pipeline/1/model/whisper-large-v3/language
 ```
 
 Every stage answers it. A post-processor is monolingual and says so in
@@ -48,15 +48,15 @@ addressing stages by position is that they answer the same verbs.
 - `Authorization: Bearer <session_token>` is required on every request.
 - A token without the `settings` scope gets `403 scope_denied`.
 
-## `GET /pipeline/{stage}/model/{model}/language`
+## `GET /stt/pipeline/{stage}/model/{model}/language`
 
 Returns the daemon's full resolution for the named model.
 
 **Request:**
 
 ```http
-GET /pipeline/1/model/whisper-large-v3/language HTTP/1.1
-Host: stt.local
+GET /stt/pipeline/1/model/whisper-large-v3/language HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -84,7 +84,7 @@ model's device list is not part of its device. This endpoint answers what is
 set; that one answers what may be set, and only one of them changes when the
 user picks a language.
 
-## `GET /pipeline/{stage}/model/{model}/language/list`
+## `GET /stt/pipeline/{stage}/model/{model}/language/list`
 
 What `POST` will accept for this model: the tags it serves, plus the reserved
 `auto` for letting it detect the language itself.
@@ -92,8 +92,8 @@ What `POST` will accept for this model: the tags it serves, plus the reserved
 **Request:**
 
 ```http
-GET /pipeline/1/model/whisper-large-v3/language/list HTTP/1.1
-Host: stt.local
+GET /stt/pipeline/1/model/whisper-large-v3/language/list HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -116,13 +116,13 @@ its manifest lists — the same shape
 for a model that runs remotely. A client hides the control on an empty list
 rather than special-casing a status.
 
-## `POST /pipeline/{stage}/model/{model}/language`
+## `POST /stt/pipeline/{stage}/model/{model}/language`
 
 **Request:**
 
 ```http
-POST /pipeline/1/model/whisper-large-v3/language HTTP/1.1
-Host: stt.local
+POST /stt/pipeline/1/model/whisper-large-v3/language HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -135,15 +135,15 @@ Content-Type: application/json
 
 **Response (200):** the resolution block (as `GET`).
 
-## `DELETE /pipeline/{stage}/model/{model}/language`
+## `DELETE /stt/pipeline/{stage}/model/{model}/language`
 
 Clear the override (back to Automatic).
 
 **Request:**
 
 ```http
-DELETE /pipeline/1/model/whisper-large-v3/language HTTP/1.1
-Host: stt.local
+DELETE /stt/pipeline/1/model/whisper-large-v3/language HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 

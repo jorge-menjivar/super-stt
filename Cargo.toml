@@ -3,7 +3,7 @@
   members         = [
     "super-stt-app",
     "super-stt-cli",
-    "super-stt-consent",
+    "super-voice-consent",
     "super-stt-daemon",
     "super-voice-indexer",
     "super-stt-install",
@@ -32,7 +32,7 @@
   default-members = [
     "super-stt-app",
     "super-stt-cli",
-    "super-stt-consent",
+    "super-voice-consent",
     "super-stt-daemon",
     "super-stt-install",
     "super-stt-shared",

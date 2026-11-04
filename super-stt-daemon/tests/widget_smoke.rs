@@ -111,7 +111,7 @@ async fn subscription_recovers_from_daemon_restart() {
     let (_socket_dir, http_socket) = socket_in_temp_dir();
 
     // 1. Boot the daemon and confirm /auth/request works under
-    //    SUPER_STT_AUTO_APPROVE so the subscription's session::obtain
+    //    SUPER_VOICE_AUTO_APPROVE so the subscription's session::obtain
     //    will succeed silently.
     let mut guard = start_daemon(&http_socket).await;
 
@@ -250,7 +250,7 @@ async fn subscription_recovers_from_invalid_session() {
     // Plant a token the daemon has never seen. The first
     // `events_stream` call will get 401 invalid_session; the helper
     // must `session::forget` and re-`obtain` (which under
-    // SUPER_STT_AUTO_APPROVE returns a fresh real token). It is planted
+    // SUPER_VOICE_AUTO_APPROVE returns a fresh real token). It is planted
     // as minted for `TEST_SCOPES`, or `obtain` would replace it before the
     // daemon ever saw it and the 401 path would go untested.
     let granted: Vec<String> = TEST_SCOPES.iter().map(|s| (*s).to_string()).collect();

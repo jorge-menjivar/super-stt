@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Realtime WebSocket transport, end to end over the daemon's real HTTP
-//! listener: `GET /v1/transcribe/realtime`.
+//! listener: `GET /v1/stt/transcribe/realtime`.
 //!
 //! Every other realtime test drives `WasmBackend::realtime_session` directly
 //! (`wasm_mock_realtime.rs`), which skips the HTTP layer entirely. That left the
@@ -11,7 +11,7 @@
 //! opening `recv` saw a closed consumer stream and returned without a word. The
 //! round-trip test below fails exactly that way if the call is ever lost again.
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI), so it runs in the default `cargo test` flow.
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` (no GUI), so it runs in the default `cargo test` flow.
 #![cfg(feature = "wasm-backends")]
 
 mod common;
@@ -50,7 +50,7 @@ fn mock_component() -> Option<PathBuf> {
 /// separate online-models gate; realtime is not a property of the device.
 fn seed_realtime_backend(data_home: &Path, component: &Path) {
     let backend_dir = data_home
-        .join("super-stt")
+        .join("super-voice")
         .join("backends")
         .join("mock-realtime");
     std::fs::create_dir_all(&backend_dir).expect("create fixture backend dir");
@@ -115,8 +115,8 @@ async fn send(
         .unwrap_or_default();
     let mut builder = Request::builder()
         .method(method)
-        .uri(format!("http://stt.local{path}"))
-        .header("host", "stt.local")
+        .uri(format!("http://voice.local{path}"))
+        .header("host", "voice.local")
         .header("authorization", format!("Bearer {token}"));
     if !payload.is_empty() {
         builder = builder.header("content-type", "application/json");
@@ -140,7 +140,7 @@ async fn select_realtime_model(socket_path: &PathBuf, token: &str) {
     let (status, body) = send(
         socket_path,
         Method::POST,
-        "/v1/pipeline/1/model",
+        "/v1/stt/pipeline/1/model",
         token,
         Some(serde_json::json!({ "model": REALTIME_MODEL, "source": FIXTURE_SOURCE })),
     )
@@ -170,7 +170,7 @@ async fn open_realtime_ws(
     socket_path: &PathBuf,
     token: &str,
 ) -> tokio_tungstenite::WebSocketStream<UnixStream> {
-    let mut request = "ws://stt.local/v1/transcribe/realtime"
+    let mut request = "ws://voice.local/v1/stt/transcribe/realtime"
         .into_client_request()
         .expect("build ws request");
     request.headers_mut().insert(
@@ -258,7 +258,14 @@ async fn realtime_websocket_session_round_trip() {
 async fn realtime_websocket_requires_the_transcribe_scope() {
     let (_guard, sock, token) = start_daemon(&["status"], None).await;
 
-    let (status, _) = send(&sock, Method::GET, "/v1/transcribe/realtime", &token, None).await;
+    let (status, _) = send(
+        &sock,
+        Method::GET,
+        "/v1/stt/transcribe/realtime",
+        &token,
+        None,
+    )
+    .await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,

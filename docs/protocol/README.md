@@ -17,7 +17,7 @@ There are two ways to build on Super STT:
 ## Build a client
 
 A client talks to the daemon over an HTTP/1.1 + JSON API on a Unix domain
-socket (`<runtime dir>/stt/super-stt-http.sock` — see
+socket (`<runtime dir>/voice/super-voice-http.sock` — see
 [transport.md](./transport.md#where-the-daemon-listens) for where that is on
 each platform). No Rust required —
 `curl`, Python, Node, or anything with an HTTP client works.
@@ -25,15 +25,15 @@ each platform). No Rust required —
 ```bash
 # 1. Ask for consent. The user approves your app once, for the scopes you
 #    request; the daemon returns a session token bound to your binary.
-curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.sock" \
-     -X POST http://stt.local/auth/request \
+curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-http.sock" \
+     -X POST http://voice.local/auth/request \
      -H 'Content-Type: application/json' \
      -d '{"app_name":"My App","scopes":["transcribe","status"],"version":"0.1"}'
 # → { "session_token": "stt_…", "scopes": [...], "expires_at": "…" }
 
 # 2. Send the token on every subsequent request.
-curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.sock" \
-     -X POST http://stt.local/transcribe \
+curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-http.sock" \
+     -X POST http://voice.local/transcribe \
      -H "Authorization: Bearer $STT_TOKEN" -d '{"wait":true}'
 ```
 
@@ -51,7 +51,7 @@ What the protocol gives you:
   model/download status, and final transcription text. See
   [endpoints/v1/events.md](./endpoints/v1/events.md).
 - **Realtime transcription.** Realtime-capable models are driven over a
-  WebSocket session at `/transcribe/realtime`.
+  WebSocket session at `/stt/transcribe/realtime`.
 
 Reference:
 

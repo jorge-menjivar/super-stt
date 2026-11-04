@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Pipeline stage numbers, as `/pipeline/{stage}` spells them.
+//! Pipeline stage numbers, as `/stt/pipeline/{stage}` spells them.
 //!
 //! A transcript passes through ordered stages: stage 1 turns audio into text,
 //! stage 2 rewrites it. The number is the address in every pipeline path, the
@@ -25,9 +25,9 @@ pub(crate) const fn default_stage() -> u32 {
 
 // --- The stage report -------------------------------------------------------
 //
-// `GET /pipeline` and `GET /pipeline/{stage}` answer with these. They were
+// `GET /stt/pipeline` and `GET /stt/pipeline/{stage}` answer with these. They were
 // `serde_json::Value` on both ends until the protocol grew a generated OpenAPI
-// document: the daemon built each stage with `json!` and `/pipeline/{stage}`
+// document: the daemon built each stage with `json!` and `/stt/pipeline/{stage}`
 // picked its stage back out of the array with `.get("stage")`, so every field
 // name existed only as a string literal at each site and nothing checked that
 // the two agreed. A published schema cannot be generated from a `Value`, and
@@ -52,7 +52,7 @@ pub enum StageRole {
 /// it switched on.
 ///
 /// A stage reports its *backend*, not its model. The model is one level down,
-/// at `GET /pipeline/{stage}/model`, as [`StageModelReport`].
+/// at `GET /stt/pipeline/{stage}/model`, as [`StageModelReport`].
 ///
 /// The two were one object until the stages were made to behave alike, and the
 /// split is what fixed them: stage 1 reported the model it had *loaded* while
@@ -88,7 +88,7 @@ pub struct StageReport {
 /// The model slot of one stage: what is selected, whether it is up, the device
 /// it runs on, and the load still in flight.
 ///
-/// Answers `GET /pipeline/{stage}/model`, and answers it the same way at every
+/// Answers `GET /stt/pipeline/{stage}/model`, and answers it the same way at every
 /// position — which is the point of it being its own object. `model` is the
 /// *selection* and survives an unload; `loaded` says whether that selection is
 /// running right now.
@@ -103,7 +103,7 @@ pub struct StageModelReport {
     pub loaded: bool,
     /// The accelerator the selection runs on; `null` when nothing is selected.
     ///
-    /// What it *could* run on is `GET /pipeline/{stage}/model/{model}/device/list`,
+    /// What it *could* run on is `GET /stt/pipeline/{stage}/model/{model}/device/list`,
     /// kept out of here deliberately: that list costs a host probe, and a card
     /// fills its picker from it once rather than on every poll of this.
     pub device: Option<StageModelDevice>,
@@ -240,7 +240,7 @@ mod tests {
         for key in ["model", "loaded", "device", "switch"] {
             assert!(
                 !object.contains_key(key),
-                "{key} belongs to /pipeline/{{stage}}/model, not to the stage"
+                "{key} belongs to /stt/pipeline/{{stage}}/model, not to the stage"
             );
         }
         // Sorted: key order depends on whether `serde_json/preserve_order` is
@@ -333,7 +333,7 @@ mod tests {
     /// nothing else.
     ///
     /// `available_devices` is deliberately not here: it costs a host probe, and
-    /// `GET /pipeline/{stage}/model/{model}/device/list` is the endpoint that
+    /// `GET /stt/pipeline/{stage}/model/{model}/device/list` is the endpoint that
     /// answers it. Adding it back would make every poll of a card's model
     /// re-detect the host's GPUs.
     #[test]

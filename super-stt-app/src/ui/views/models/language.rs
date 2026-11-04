@@ -2,7 +2,7 @@
 
 //! The per-model language control, shared by both pipeline stages.
 //!
-//! The daemon's `/pipeline/{stage}/model/{model}/language` is keyed by the
+//! The daemon's `/stt/pipeline/{stage}/model/{model}/language` is keyed by the
 //! model, not by the stage it runs in, so one control serves the transcription
 //! card and the post-processing card alike. It lives here rather than on either
 //! card so the two cannot drift apart.

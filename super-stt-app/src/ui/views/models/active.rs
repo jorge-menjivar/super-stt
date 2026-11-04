@@ -342,7 +342,7 @@ pub(super) fn staged_vram_shortfall(backend: &BackendInfo, app: &AppModel) -> Op
 /// (and asks the daemon for the model's own device); picking a device stages
 /// it too; the Load button commits both, setting the model's device and then
 /// loading it via `set_model`. The device dropdown lists what the daemon
-/// answered for the staged model (`/pipeline/1/model/{model}/device/list`) and
+/// answered for the staged model (`/stt/pipeline/1/model/{model}/device/list`) and
 /// is omitted whenever that list is empty: an online model, or a model with no
 /// viable device on this install.
 pub(super) fn staged_model_picker<'a>(

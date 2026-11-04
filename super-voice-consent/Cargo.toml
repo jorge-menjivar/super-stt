@@ -1,14 +1,14 @@
 [package]
-    name = "super-stt-consent"
+    name = "super-voice-consent"
     version.workspace = true
     authors.workspace = true
     edition.workspace = true
-    description = "Floating libcosmic consent dialog spawned by the Super STT daemon"
+    description = "Floating libcosmic consent dialog spawned by the Super Voice daemon"
     repository = "https://github.com/jorge-menjivar/super-stt"
     license = "GPL-3.0-only"
 
 [[bin]]
-    name = "super-stt-consent"
+    name = "super-voice-consent"
     path = "src/main.rs"
 
 [dependencies]

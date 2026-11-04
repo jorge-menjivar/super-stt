@@ -21,7 +21,7 @@
 //! `recording_state` → `recording_events`, `frequency_bands` →
 //! `audio_visualization`.
 //!
-//! Hermetic: `SUPER_STT_AUTO_APPROVE=1` (no GUI), so it runs in the default `cargo test` flow.
+//! Hermetic: `SUPER_VOICE_AUTO_APPROVE=1` (no GUI), so it runs in the default `cargo test` flow.
 
 mod common;
 
@@ -72,8 +72,8 @@ async fn open_events(
 
     let req = Request::builder()
         .method(Method::GET)
-        .uri(format!("http://stt.local/v1/events?{query}"))
-        .header("host", "stt.local")
+        .uri(format!("http://voice.local/v1/events?{query}"))
+        .header("host", "voice.local")
         .header("authorization", format!("Bearer {token}"))
         .body(Empty::<Bytes>::new())
         .expect("build req");
@@ -135,8 +135,8 @@ async fn post_language(sock: &PathBuf, token: &str, tag: &str) -> StatusCode {
     });
     let req = Request::builder()
         .method(Method::POST)
-        .uri("http://stt.local/v1/settings/language")
-        .header("host", "stt.local")
+        .uri("http://voice.local/v1/settings/language")
+        .header("host", "voice.local")
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
         .body(Full::new(Bytes::from(format!(

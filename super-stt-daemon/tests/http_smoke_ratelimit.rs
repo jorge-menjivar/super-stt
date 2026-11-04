@@ -18,7 +18,7 @@
 //! the readiness probe) doesn't consume the quota the flood is measured
 //! against.
 //!
-//! Hermetic: `SUPER_STT_AUTO_APPROVE=1`.
+//! Hermetic: `SUPER_VOICE_AUTO_APPROVE=1`.
 
 mod common;
 
@@ -58,8 +58,8 @@ async fn ping_on(
 ) -> (StatusCode, Vec<u8>) {
     let req = Request::builder()
         .method(Method::GET)
-        .uri("http://stt.local/v1/ping")
-        .header("host", "stt.local")
+        .uri("http://voice.local/v1/ping")
+        .header("host", "voice.local")
         .header("authorization", format!("Bearer {token}"))
         .body(Empty::<Bytes>::new())
         .expect("build req");

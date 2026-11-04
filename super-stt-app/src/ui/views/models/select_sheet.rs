@@ -63,7 +63,7 @@ pub fn select_backend_sheet(app: &AppModel) -> Element<'_, Message> {
 
     // What the daemon says can fill stage 1, not a filter of the catalog: a
     // backend serving nothing but post-processors would be selected, then show
-    // an empty model picker — and `POST /pipeline/1` refuses it anyway.
+    // an empty model picker — and `POST /stt/pipeline/1` refuses it anyway.
     //
     // `None` is the answer still in flight; an empty answer is the daemon
     // saying nothing installed transcribes. The two read differently below.

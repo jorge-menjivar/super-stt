@@ -7,7 +7,7 @@
 //! curated `GLOBAL_LANGUAGES` const that lived here, which meant this client
 //! decided what the daemon accepted — and no other client could know. It is
 //! `GET /settings/language/list` now; per-model pickers read
-//! `GET /pipeline/{stage}/model/{model}/language/list`.
+//! `GET /stt/pipeline/{stage}/model/{model}/language/list`.
 
 /// Script subtag (ISO 15924) → display name. Names the `Hans` / `Hant` Chinese
 /// distinction (a script, not a region) and the Latin / Cyrillic / Arabic

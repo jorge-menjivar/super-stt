@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline` — the ordered stages a transcript passes through.
+//! `/stt/pipeline` — the ordered stages a transcript passes through.
 //!
 //! Contract: `docs/protocol/endpoints/v1/pipeline.md`.
 //!
-//! The modules mirror the paths: [`stage`] serves `/pipeline/{stage}`,
+//! The modules mirror the paths: [`stage`] serves `/stt/pipeline/{stage}`,
 //! [`backend`] the menu that fills it, [`model`] serves
-//! `/pipeline/{stage}/model` and its verbs, [`device`] and [`language`] serve
-//! the two per-model preferences. `GET /pipeline`, the whole report, is here at
+//! `/stt/pipeline/{stage}/model` and its verbs, [`device`] and [`language`] serve
+//! the two per-model preferences. `GET /stt/pipeline`, the whole report, is here at
 //! the root because that is where the path is.
 //!
 //! Every stage answers the same verbs — select a backend, deselect it, run a
@@ -118,7 +118,7 @@ fn unknown_stage(stage: u32) -> Response {
     )
 }
 
-/// `GET /pipeline` — every stage, in order.
+/// `GET /stt/pipeline` — every stage, in order.
 #[utoipa::path(
     get,
     path = "/pipeline",
@@ -129,7 +129,7 @@ The ordered stages a transcript passes through. Stage 1 turns audio into text; e
 later stage rewrites what the one before it produced.
 
 Each stage reports the backend filling it and whether the stage is switched on. What \
-that backend is running is one level down, at `GET /pipeline/{stage}/model` — a stage \
+that backend is running is one level down, at `GET /stt/pipeline/{stage}/model` — a stage \
 is a durable selection, its model has a runtime, and reporting the two together is \
 what once let the stages drift apart. Stages are addressed by position precisely so a \
 third can be appended without inventing a third endpoint for it.",
@@ -146,7 +146,7 @@ pub(crate) async fn get_pipeline(State(s): State<AppState>) -> Response {
     narrowed(resp, PipelineReport::from_daemon)
 }
 
-/// Every `/pipeline` route. Merged into the settings group, whose scope these
+/// Every `/stt/pipeline` route. Merged into the settings group, whose scope these
 /// share.
 ///
 /// No path appears here: `routes!` reads each one off the handler's

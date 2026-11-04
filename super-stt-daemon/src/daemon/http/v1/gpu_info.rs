@@ -6,7 +6,7 @@
 //! The hardware inventory, independent of any model. What a *particular* model
 //! can be run on here is narrower — the intersection of this and the builds the
 //! model ships — and is answered by
-//! [`/pipeline/{stage}/model/{model}/device/list`](super::pipeline::device).
+//! [`/stt/pipeline/{stage}/model/{model}/device/list`](super::pipeline::device).
 
 use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, narrowed};
 use crate::daemon::http::state::AppState;

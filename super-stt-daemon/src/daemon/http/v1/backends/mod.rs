@@ -7,7 +7,7 @@
 //! the sub-resources each get their own module — [`options`] for
 //! `/backend/{backend_id}/option/list`, [`secrets`] for
 //! `/backend/{backend_id}/secret/list`, and [`context`] for
-//! `/backend/{backend_id}/context`.
+//! `/stt/backend/{backend_id}/context`.
 //!
 //! A model's language override is not here. It is a per-`(source, model)`
 //! preference like its device, and both are addressed through the stage that
@@ -67,7 +67,7 @@ Every backend installed on this machine, each with the models it serves, the opt
 it exposes, and which of its secrets are configured. Secret *values* are never \
 returned — only whether each is set.
 
-This is the full catalog, roles included. `GET /pipeline/{stage}/model/list` is the \
+This is the full catalog, roles included. `GET /stt/pipeline/{stage}/model/list` is the \
 narrower read a stage's model picker wants; browsing what is *available to install* \
 is `GET /registry/backend/list`.",
     security(("session_token" = ["settings"])),
@@ -200,11 +200,12 @@ pub(crate) async fn uninstall_backend(
 /// The `settings`-scoped `/backend/list` routes, gathered for the settings group.
 ///
 /// [`secrets`] is deliberately absent: those paths carry their own scope and are
-/// registered against their own guard in [`super`].
+/// registered against their own guard in [`super`]. So is [`context`]: a
+/// backend's dictation context belongs to speech to text, and is served under
+/// `/stt` with the rest of that feature.
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list_backends))
         .routes(routes!(uninstall_backend))
-        .merge(context::routes())
         .merge(options::routes())
 }

@@ -268,7 +268,7 @@ pub enum ModelsPageMessage {
 #[derive(Debug, Clone)]
 pub enum DeviceMessage {
     /// The accelerator the loaded model is on, from the startup read of
-    /// `GET /pipeline/1`; `None` when nothing is loaded.
+    /// `GET /stt/pipeline/1`; `None` when nothing is loaded.
     DeviceInfoLoaded(Option<String>),
     DeviceError(String), // Device switching error
 }
@@ -549,10 +549,10 @@ pub enum LanguageMessage {
     PrimaryLanguagesLoaded(Vec<String>),
     /// User picked a global language (None = clear → DELETE).
     PrimaryLanguageSelected(Option<String>),
-    /// Per-model resolution block (`/pipeline/{stage}/model/{model}/language`)
+    /// Per-model resolution block (`/stt/pipeline/{stage}/model/{model}/language`)
     /// loaded from the daemon for `(source, model)`.
     /// The languages a model can be pinned to, from
-    /// `GET /pipeline/{stage}/model/{model}/language/list`.
+    /// `GET /stt/pipeline/{stage}/model/{model}/language/list`.
     ///
     /// Separate from the resolution block: the block changes with every pick,
     /// the offer cannot change for a given model, so a pick does not re-fetch

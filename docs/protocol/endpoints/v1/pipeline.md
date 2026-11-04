@@ -1,4 +1,4 @@
-# `/pipeline`
+# `/stt/pipeline`
 
 The ordered **stages** a transcript passes through. Stage 1 turns audio into
 text; every later stage rewrites the text the stage before it produced.
@@ -12,25 +12,25 @@ so a client learns one shape and applies it anywhere in the pipeline:
 
 | Verb | Path | Meaning |
 |---|---|---|
-| Read the backend | [`GET /pipeline/{stage}`](./pipeline/stage.md#get-pipelinestage)           | Which backend fills this stage, and whether it is switched on |
-| List its backends | [`GET /pipeline/{stage}/backend/list`](./pipeline/backend-list.md)       | The installed backends that can fill this stage |
-| Select backend   | [`POST /pipeline/{stage}`](./pipeline/stage.md#post-pipelinestage)         | Which installed backend fills this stage |
-| Deselect backend | [`DELETE /pipeline/{stage}`](./pipeline/stage.md#delete-pipelinestage)       | Empty the stage, forgetting its model     |
-| Read its model   | [`GET /pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel)     | What it is pointed at, whether that is up, and the device it runs on |
-| Run a model      | [`POST /pipeline/{stage}/model`](./pipeline/model.md#post-pipelinestagemodel)   | Load and run one of that backend's models |
-| List its models  | [`GET /pipeline/{stage}/model/list`](./pipeline/model-list.md) | The models that backend serves in this stage's role |
-| Read a model's language | [`GET /pipeline/{stage}/model/{model}/language`](./pipeline/language.md) | The language one of that backend's models transcribes in |
-| Set it           | [`POST /pipeline/{stage}/model/{model}/language`](./pipeline/language.md#post-pipelinestagemodelmodellanguage) | Pin it, overriding the global setting |
-| List a model's languages | [`GET /pipeline/{stage}/model/{model}/language/list`](./pipeline/language.md#get-pipelinestagemodelmodellanguagelist) | What that model can be pinned to |
-| Stop it          | [`DELETE /pipeline/{stage}/model`](./pipeline/model.md#delete-pipelinestagemodel) | Unload, keeping the backend selected      |
-| Read a model's device | [`GET /pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice)  | Where one of that backend's models runs |
-| Set it           | [`POST /pipeline/{stage}/model/{model}/device`](./pipeline/device.md#post-pipelinestagemodelmodeldevice) | Run it on the CPU or the GPU, reloading if it is loaded |
-| List a model's devices | [`GET /pipeline/{stage}/model/{model}/device/list`](./pipeline/device.md#get-pipelinestagemodelmodeldevicelist) | What this install can run that model on |
-| List the backend's devices | [`GET /pipeline/{stage}/device/list`](./pipeline/device.md#get-pipelinestagedevicelist) | What this install can run that backend on, for this stage |
-| Abandon a load   | [`POST /pipeline/{stage}/model/cancel`](./pipeline/model.md#post-pipelinestagemodelcancel) | Stop the load this stage has in flight, download included |
-| Reload in place  | [`POST /pipeline/{stage}/model/reload`](./pipeline/model.md#post-pipelinestagemodelreload) | Re-instantiate it to pick up changed secrets or options |
+| Read the backend | [`GET /stt/pipeline/{stage}`](./pipeline/stage.md#get-pipelinestage)           | Which backend fills this stage, and whether it is switched on |
+| List its backends | [`GET /stt/pipeline/{stage}/backend/list`](./pipeline/backend-list.md)       | The installed backends that can fill this stage |
+| Select backend   | [`POST /stt/pipeline/{stage}`](./pipeline/stage.md#post-pipelinestage)         | Which installed backend fills this stage |
+| Deselect backend | [`DELETE /stt/pipeline/{stage}`](./pipeline/stage.md#delete-pipelinestage)       | Empty the stage, forgetting its model     |
+| Read its model   | [`GET /stt/pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel)     | What it is pointed at, whether that is up, and the device it runs on |
+| Run a model      | [`POST /stt/pipeline/{stage}/model`](./pipeline/model.md#post-pipelinestagemodel)   | Load and run one of that backend's models |
+| List its models  | [`GET /stt/pipeline/{stage}/model/list`](./pipeline/model-list.md) | The models that backend serves in this stage's role |
+| Read a model's language | [`GET /stt/pipeline/{stage}/model/{model}/language`](./pipeline/language.md) | The language one of that backend's models transcribes in |
+| Set it           | [`POST /stt/pipeline/{stage}/model/{model}/language`](./pipeline/language.md#post-pipelinestagemodelmodellanguage) | Pin it, overriding the global setting |
+| List a model's languages | [`GET /stt/pipeline/{stage}/model/{model}/language/list`](./pipeline/language.md#get-pipelinestagemodelmodellanguagelist) | What that model can be pinned to |
+| Stop it          | [`DELETE /stt/pipeline/{stage}/model`](./pipeline/model.md#delete-pipelinestagemodel) | Unload, keeping the backend selected      |
+| Read a model's device | [`GET /stt/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice)  | Where one of that backend's models runs |
+| Set it           | [`POST /stt/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#post-pipelinestagemodelmodeldevice) | Run it on the CPU or the GPU, reloading if it is loaded |
+| List a model's devices | [`GET /stt/pipeline/{stage}/model/{model}/device/list`](./pipeline/device.md#get-pipelinestagemodelmodeldevicelist) | What this install can run that model on |
+| List the backend's devices | [`GET /stt/pipeline/{stage}/device/list`](./pipeline/device.md#get-pipelinestagedevicelist) | What this install can run that backend on, for this stage |
+| Abandon a load   | [`POST /stt/pipeline/{stage}/model/cancel`](./pipeline/model.md#post-pipelinestagemodelcancel) | Stop the load this stage has in flight, download included |
+| Reload in place  | [`POST /stt/pipeline/{stage}/model/reload`](./pipeline/model.md#post-pipelinestagemodelreload) | Re-instantiate it to pick up changed secrets or options |
 
-That split is the same one `/pipeline/1` and `/pipeline/1/model` draw for
+That split is the same one `/stt/pipeline/1` and `/stt/pipeline/1/model` draw for
 transcription, and for the same reason: choosing a backend is cheap and cannot
 fail for runtime reasons, while loading a model downloads, allocates and can
 fail.
@@ -47,20 +47,20 @@ A stage's `role` must match the model's
 transcription model cannot be run in stage 2 and a post-processor cannot be run
 in stage 1.
 
-**This replaces `/pipeline/1` and `/pipeline/1/model`,** which were the
+**This replaces `/stt/pipeline/1` and `/stt/pipeline/1/model`,** which were the
 stage-1-only spelling of the same four verbs and have been removed. A client
 that used them moves as follows:
 
 | Was | Now |
 |---|---|
-| `GET /pipeline/1`          | `GET /pipeline/1` (`stage.source`) plus `GET /pipeline/1/model` |
-| `POST /pipeline/1`         | `POST /pipeline/1`                      |
-| `DELETE /pipeline/1`       | `DELETE /pipeline/1`                    |
-| `GET /pipeline/1`            | `GET /pipeline/1`                       |
-| `POST /pipeline/1/model`           | `POST /pipeline/1/model`                |
-| `DELETE /pipeline/1/model`         | `DELETE /pipeline/1/model`              |
-| `POST /pipeline/1/model/cancel`    | `POST /pipeline/1/model/cancel`         |
-| `POST /pipeline/1/model/reload`    | `POST /pipeline/1/model/reload`         |
+| `GET /stt/pipeline/1`          | `GET /stt/pipeline/1` (`stage.source`) plus `GET /stt/pipeline/1/model` |
+| `POST /stt/pipeline/1`         | `POST /stt/pipeline/1`                      |
+| `DELETE /stt/pipeline/1`       | `DELETE /stt/pipeline/1`                    |
+| `GET /stt/pipeline/1`            | `GET /stt/pipeline/1`                       |
+| `POST /stt/pipeline/1/model`           | `POST /stt/pipeline/1/model`                |
+| `DELETE /stt/pipeline/1/model`         | `DELETE /stt/pipeline/1/model`              |
+| `POST /stt/pipeline/1/model/cancel`    | `POST /stt/pipeline/1/model/cancel`         |
+| `POST /stt/pipeline/1/model/reload`    | `POST /stt/pipeline/1/model/reload`         |
 
 The stage object is flatter than the old `active_model` payload: `current.model`
 and `current.source` are `model` and `source`, and `current.provider` — a
@@ -70,7 +70,7 @@ compatibility shim that was always an empty string — is gone.
 device is a property of a model — a small one runs fine on the CPU while the
 large one beside it needs the GPU, and a post-processor sharing the pipeline
 with either has its own answer again — so it is now read and set per model, at
-[`/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice).
+[`/stt/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice).
 A daemon upgraded from the global preference keeps loading models where it
 always did: a model with no device of its own falls back to the old global
 value in `daemon.ron`, and takes its own the first time one is set.
@@ -116,7 +116,7 @@ Splitting the object and giving every stage an `enabled` is what fixed both.
 ## The model object
 
 One stage's model slot, from
-[`GET /pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel).
+[`GET /stt/pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel).
 Every stage answers it with the same shape and the same meanings.
 
 | Field    | Type    | Notes                                                                   |
@@ -136,7 +136,7 @@ Every stage answers it with the same shape and the same meanings.
 
 What the model *could* run on is deliberately not here: that list costs a fresh
 probe of the host's accelerators, and
-[`GET /pipeline/{stage}/model/{model}/device/list`](./pipeline/device.md#get-pipelinestagemodelmodeldevicelist)
+[`GET /stt/pipeline/{stage}/model/{model}/device/list`](./pipeline/device.md#get-pipelinestagemodelmodeldevicelist)
 is the endpoint that answers it. Filling a device picker means one call for the
 options and this one for the current value.
 
@@ -159,25 +159,25 @@ Each verb's reference lives with its path:
 
 | Page | Covers |
 |---|---|
-| [`pipeline/stage.md`](./pipeline/stage.md)   | `GET`, `POST`, `DELETE /pipeline/{stage}` |
-| [`pipeline/backend-list.md`](./pipeline/backend-list.md) | `GET /pipeline/{stage}/backend/list` |
-| [`pipeline/model.md`](./pipeline/model.md)   | `GET`, `POST`, `DELETE /pipeline/{stage}/model`, and its `cancel` / `reload` |
-| [`pipeline/model-list.md`](./pipeline/model-list.md) | `GET /pipeline/{stage}/model/list` |
-| [`pipeline/device.md`](./pipeline/device.md) | `/pipeline/{stage}/model/{model}/device`, both device lists |
-| [`pipeline/language.md`](./pipeline/language.md) | `/pipeline/{stage}/model/{model}/language`, and the list it offers |
+| [`pipeline/stage.md`](./pipeline/stage.md)   | `GET`, `POST`, `DELETE /stt/pipeline/{stage}` |
+| [`pipeline/backend-list.md`](./pipeline/backend-list.md) | `GET /stt/pipeline/{stage}/backend/list` |
+| [`pipeline/model.md`](./pipeline/model.md)   | `GET`, `POST`, `DELETE /stt/pipeline/{stage}/model`, and its `cancel` / `reload` |
+| [`pipeline/model-list.md`](./pipeline/model-list.md) | `GET /stt/pipeline/{stage}/model/list` |
+| [`pipeline/device.md`](./pipeline/device.md) | `/stt/pipeline/{stage}/model/{model}/device`, both device lists |
+| [`pipeline/language.md`](./pipeline/language.md) | `/stt/pipeline/{stage}/model/{model}/language`, and the list it offers |
 
 This page keeps what they share: the stages, the stage and model objects, auth,
 the post-processing contract, and the events every stage emits.
 
-## `GET /pipeline`
+## `GET /stt/pipeline`
 
 Every stage, in order.
 
 **Request:**
 
 ```http
-GET /pipeline HTTP/1.1
-Host: stt.local
+GET /stt/pipeline HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -209,7 +209,7 @@ Content-Type: application/json
 ```
 
 Which models those backends are running is one
-[`GET /pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel) per
+[`GET /stt/pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel) per
 position.
 
 ## Post-processing behavior
@@ -219,7 +219,7 @@ than 30 seconds, the **raw transcript is delivered unchanged** and the failure i
 logged. A cleanup step that is down never costs the user their words.
 
 **What it applies to:** every final transcript — the daemon's own recording flow
-and [`POST /transcribe`](./transcribe.md). It deliberately does **not** apply to
+and [`POST /stt/transcribe`](./transcribe.md). It deliberately does **not** apply to
 preview text or to [realtime sessions](../../backend/contract.md#consumer-facing-endpoint): both are
 latency paths, and a preview is rewritten again on the next pass anyway.
 

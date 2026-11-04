@@ -6,7 +6,7 @@
 //! scope-aware rejection: a `client`-scope token must NOT be allowed to
 //! hit settings endpoints.
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` so no GUI is needed — it's part of
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` so no GUI is needed — it's part of
 //! the default `cargo test` flow.
 
 mod common;
@@ -123,9 +123,9 @@ async fn settings_scope_endpoints() {
     .await;
     assert_eq!(s, StatusCode::OK);
 
-    // --- GET /pipeline/1: the transcription stage, with `switch` progress ---
-    let (s, body) = raw_get_json(&http_socket, "/pipeline/1", &settings_token).await;
-    assert_eq!(s, StatusCode::OK, "GET /pipeline/1: {body}");
+    // --- GET /stt/pipeline/1: the transcription stage, with `switch` progress ---
+    let (s, body) = raw_get_json(&http_socket, "/stt/pipeline/1", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /stt/pipeline/1: {body}");
     assert_eq!(body["status"], "success");
     let stage = &body["stage"];
     assert_eq!(stage["stage"], 1);
@@ -140,9 +140,9 @@ async fn settings_scope_endpoints() {
     // No switch in flight at startup
     assert!(stage["switch"].is_null());
 
-    // --- GET /pipeline/{stage}/model/list (was the stage-1-only GET /models) ---
+    // --- GET /stt/pipeline/{stage}/model/list (was the stage-1-only GET /models) ---
     for stage in [1, 2] {
-        let path = format!("/pipeline/{stage}/model/list");
+        let path = format!("/stt/pipeline/{stage}/model/list");
         let (s, body) = raw_get_json(&http_socket, &path, &settings_token).await;
         assert_eq!(s, StatusCode::OK, "GET {path}: {body}");
         assert_eq!(body["status"], "success", "GET {path}: {body}");
@@ -186,7 +186,7 @@ async fn settings_scope_endpoints() {
     assert_eq!(s, StatusCode::OK);
 
     // --- /active_device is gone: a device belongs to a model, and is read
-    // and set at /pipeline/{stage}/model/{model}/device (covered by
+    // and set at /stt/pipeline/{stage}/model/{model}/device (covered by
     // http_smoke_pipeline.rs). ---
     let (s, _) = raw_get_json(&http_socket, "/active_device", &settings_token).await;
     assert_eq!(s, StatusCode::NOT_FOUND, "GET /active_device must be gone");
@@ -411,12 +411,12 @@ async fn settings_scope_endpoints() {
     .await;
     assert_eq!(s, StatusCode::OK, "POST /audio_theme/test: {body}");
 
-    // --- POST /pipeline/1/model/cancel: with no switch in flight, the
+    // --- POST /stt/pipeline/1/model/cancel: with no switch in flight, the
     // daemon returns 409 Conflict with
     // `{ "status": "error", "message": "No download in progress" }`.
     let (s, body) = raw_post_json(
         &http_socket,
-        "/pipeline/1/model/cancel",
+        "/stt/pipeline/1/model/cancel",
         &settings_token,
         serde_json::json!({}),
     )
@@ -434,12 +434,12 @@ async fn settings_scope_endpoints() {
         "cancel response missing expected message: {body}"
     );
 
-    // --- POST /pipeline/1/model: unknown model name should be 400 Bad
+    // --- POST /stt/pipeline/1/model: unknown model name should be 400 Bad
     // Request with status:"error". We don't want to trigger an
     // actual model download in CI, so we probe the error path.
     let (s, body) = raw_post_json(
         &http_socket,
-        "/pipeline/1/model",
+        "/stt/pipeline/1/model",
         &settings_token,
         serde_json::json!({
             "model": "definitely-not-a-real-model-xyz",
@@ -450,7 +450,7 @@ async fn settings_scope_endpoints() {
     assert_eq!(
         s,
         StatusCode::BAD_REQUEST,
-        "POST /pipeline/1/model unknown-model expected 400: {body}"
+        "POST /stt/pipeline/1/model unknown-model expected 400: {body}"
     );
     assert_eq!(body["status"], "error");
     let msg = body["message"].as_str().unwrap_or("");

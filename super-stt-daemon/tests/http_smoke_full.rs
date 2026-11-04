@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Full end-to-end auth smoke test with the real consent helper.
 //!
-//! Unlike `http_smoke.rs` (which uses `SUPER_STT_AUTO_APPROVE=1` to
+//! Unlike `http_smoke.rs` (which uses `SUPER_VOICE_AUTO_APPROVE=1` to
 //! bypass the popup entirely) and `http_smoke_gui.rs` (which exercises
 //! the *dismiss* path by SIGTERM'ing the helper), this test runs the
 //! full chain:
 //!
-//! 1. Daemon starts WITHOUT `SUPER_STT_AUTO_APPROVE`, but WITH
-//!    `SUPER_STT_AUTH_AUTO_APPROVE_AFTER_MS=2000` in its environment.
+//! 1. Daemon starts WITHOUT `SUPER_VOICE_AUTO_APPROVE`, but WITH
+//!    `SUPER_VOICE_AUTH_AUTO_APPROVE_AFTER_MS=2000` in its environment.
 //! 2. A test client calls `POST /auth/request`.
-//! 3. The daemon spawns the real `super-stt-consent` helper, which
-//!    inherits `SUPER_STT_AUTH_AUTO_APPROVE_AFTER_MS` from the daemon's env.
+//! 3. The daemon spawns the real `super-voice-consent` helper, which
+//!    inherits `SUPER_VOICE_AUTH_AUTO_APPROVE_AFTER_MS` from the daemon's env.
 //! 4. The helper renders the libcosmic layer-shell dialog (visible for
 //!    ~5 seconds during the test), then writes `allow` to stdout via a
 //!    background timer.
@@ -51,21 +51,24 @@ fn skip_if_no_display() -> Option<&'static str> {
     }
 }
 
-/// Build `super-stt-consent` and confirm it lives next to the daemon
+/// Build `super-voice-consent` and confirm it lives next to the daemon
 /// binary (which is where the daemon's `locate_consent_helper` looks
 /// first). `cargo test` builds both into the same `target/<profile>/`
 /// directory, so this is just an explicit cargo build to be safe.
 fn ensure_consent_helper_built() -> PathBuf {
     let status = Command::new(env!("CARGO"))
-        .args(["build", "-p", "super-stt-consent"])
+        .args(["build", "-p", "super-voice-consent"])
         .status()
-        .expect("invoke cargo to build super-stt-consent");
-    assert!(status.success(), "cargo build -p super-stt-consent failed");
+        .expect("invoke cargo to build super-voice-consent");
+    assert!(
+        status.success(),
+        "cargo build -p super-voice-consent failed"
+    );
 
     let daemon_dir = Path::new(common::DAEMON_BIN)
         .parent()
         .expect("daemon binary parent dir");
-    let helper = daemon_dir.join("super-stt-consent");
+    let helper = daemon_dir.join("super-voice-consent");
     assert!(
         helper.exists(),
         "expected consent helper to be co-located with daemon at {} \
@@ -83,9 +86,9 @@ fn ensure_consent_helper_built() -> PathBuf {
 /// daemon's output when diagnosing a hang.
 async fn start_daemon_with_auto_approve_timer() -> (TestDaemon, PathBuf) {
     let daemon = common::daemon("full")
-        .without("SUPER_STT_AUTO_APPROVE")
+        .without("SUPER_VOICE_AUTO_APPROVE")
         .env(
-            "SUPER_STT_AUTH_AUTO_APPROVE_AFTER_MS",
+            "SUPER_VOICE_AUTH_AUTO_APPROVE_AFTER_MS",
             AUTO_APPROVE_MS.to_string(),
         )
         .env(
@@ -170,7 +173,7 @@ async fn auth_request_real_helper_returns_working_token() {
         "expected InvalidSession variant, got: {err}"
     );
 
-    // (We deliberately skip exercising /transcribe here — the HTTP
+    // (We deliberately skip exercising /stt/transcribe here — the HTTP
     // path runs a real recording inline and doesn't yet have a fire-
     // and-forget short-circuit, so it'd block the test for the full
     // recording timeout. Auth + ping + status + bogus-token rejection

@@ -3,7 +3,7 @@
 //! Main daemon entry point and coordination.
 //!
 //! Boots the daemon, spawns the HTTP listener on
-//! `$XDG_RUNTIME_DIR/stt/super-stt-http.sock`, and waits for a shutdown
+//! `$XDG_RUNTIME_DIR/voice/super-voice-http.sock`, and waits for a shutdown
 //! signal. Client commands (`record`, `status`, etc.) live in
 //! `super-stt-cli`, which talks to the daemon over HTTP.
 
@@ -62,7 +62,7 @@ pub async fn run() -> Result<()> {
     // config, builds its state or sweeps backend units.
     //
     // The socket path is resolved by `get_http_socket_path`, which honors the
-    // `SUPER_STT_HTTP_SOCKET` override (tests use this to bind a unique socket
+    // `SUPER_VOICE_HTTP_SOCKET` override (tests use this to bind a unique socket
     // without overriding `$XDG_RUNTIME_DIR`, which would break the Wayland
     // connection for spawned consent helpers). Clients resolve through the
     // same helper, so daemon and clients always agree on the path.

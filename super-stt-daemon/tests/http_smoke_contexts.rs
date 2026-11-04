@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Contexts HTTP smoke test: `/context/...` and `/backend/{source}/context`.
+//! Contexts HTTP smoke test: `/stt/context/...` and `/stt/backend/{source}/context`.
 //!
 //! What is checked here is the part only a live daemon can answer: that the
 //! paths resolve the way the router claims, that a write survives to the file
 //! and back, and that the three per-backend states are three distinct answers
 //! on the wire.
 //!
-//! The one that would be easy to lose is `/context/active` against
-//! `/context/{id}`. Those are siblings, one literal and one a parameter, and
+//! The one that would be easy to lose is `/stt/context/active` against
+//! `/stt/context/{id}`. Those are siblings, one literal and one a parameter, and
 //! nothing in the daemon's own tests would notice the router preferring the
-//! wrong one — `GET /context/active` would simply start answering with a
+//! wrong one — `GET /stt/context/active` would simply start answering with a
 //! context whose id happened to be `active`, which is exactly why that id is
 //! refused.
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 
 mod common;
 
@@ -88,8 +88,8 @@ async fn delete_req(p: &PathBuf, path: &str, token: &str) -> (StatusCode, Value)
 async fn a_context_round_trips_through_the_api() {
     let (_guard, sock, token) = start_daemon().await;
 
-    let (s, body) = get(&sock, "/context/list", &token).await;
-    assert_eq!(s, StatusCode::OK, "GET /context/list: {body}");
+    let (s, body) = get(&sock, "/stt/context/list", &token).await;
+    assert_eq!(s, StatusCode::OK, "GET /stt/context/list: {body}");
     assert_eq!(body["contexts"].as_array().expect("an array").len(), 0);
     assert!(
         body["active"].is_null(),
@@ -100,7 +100,7 @@ async fn a_context_round_trips_through_the_api() {
     // empty row for the next one.
     let (s, body) = post_req(
         &sock,
-        "/context/coding",
+        "/stt/context/coding",
         &token,
         json!({
             "name": "Coding",
@@ -109,7 +109,7 @@ async fn a_context_round_trips_through_the_api() {
         }),
     )
     .await;
-    assert_eq!(s, StatusCode::OK, "POST /context/coding: {body}");
+    assert_eq!(s, StatusCode::OK, "POST /stt/context/coding: {body}");
     assert_eq!(body["context"]["id"], "coding");
     assert_eq!(
         body["context"]["vocabulary"],
@@ -117,14 +117,14 @@ async fn a_context_round_trips_through_the_api() {
         "blank terms are dropped and the rest trimmed: {body}"
     );
 
-    let (s, body) = get(&sock, "/context/coding", &token).await;
+    let (s, body) = get(&sock, "/stt/context/coding", &token).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body["context"]["prompt"], "I dictate code.");
 
     // Re-posting the same id replaces in place rather than appending.
     let (s, _) = post_req(
         &sock,
-        "/context/coding",
+        "/stt/context/coding",
         &token,
         json!({
             "name": "Writing code",
@@ -134,7 +134,7 @@ async fn a_context_round_trips_through_the_api() {
     )
     .await;
     assert_eq!(s, StatusCode::OK);
-    let (_, body) = get(&sock, "/context/list", &token).await;
+    let (_, body) = get(&sock, "/stt/context/list", &token).await;
     assert_eq!(
         body["contexts"].as_array().expect("an array").len(),
         1,
@@ -142,35 +142,41 @@ async fn a_context_round_trips_through_the_api() {
     );
     assert_eq!(body["contexts"][0]["name"], "Writing code");
 
-    let (s, body) = delete_req(&sock, "/context/coding", &token).await;
-    assert_eq!(s, StatusCode::OK, "DELETE /context/coding: {body}");
-    let (s, body) = get(&sock, "/context/coding", &token).await;
+    let (s, body) = delete_req(&sock, "/stt/context/coding", &token).await;
+    assert_eq!(s, StatusCode::OK, "DELETE /stt/context/coding: {body}");
+    let (s, body) = get(&sock, "/stt/context/coding", &token).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
     assert_eq!(body["error_code"], "unknown_context", "{body}");
 }
 
-/// `/context/active` is a literal sibling of `/context/{id}`. If the router
+/// `/stt/context/active` is a literal sibling of `/stt/context/{id}`. If the router
 /// ever preferred the parameter, this is the test that says so.
 #[tokio::test]
 async fn the_active_selection_is_not_shadowed_by_a_context_id() {
     let (_guard, sock, token) = start_daemon().await;
     post_req(
         &sock,
-        "/context/coding",
+        "/stt/context/coding",
         &token,
         json!({ "name": "Coding" }),
     )
     .await;
 
-    let (s, body) = get(&sock, "/context/active", &token).await;
-    assert_eq!(s, StatusCode::OK, "GET /context/active: {body}");
+    let (s, body) = get(&sock, "/stt/context/active", &token).await;
+    assert_eq!(s, StatusCode::OK, "GET /stt/context/active: {body}");
     assert!(
         body["id"].is_null(),
         "creating a context does not activate it"
     );
 
-    let (s, body) = post_req(&sock, "/context/active", &token, json!({ "id": "coding" })).await;
-    assert_eq!(s, StatusCode::OK, "POST /context/active: {body}");
+    let (s, body) = post_req(
+        &sock,
+        "/stt/context/active",
+        &token,
+        json!({ "id": "coding" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "POST /stt/context/active: {body}");
     assert_eq!(body["id"], "coding");
     assert_eq!(
         body["context"]["name"], "Coding",
@@ -180,13 +186,19 @@ async fn the_active_selection_is_not_shadowed_by_a_context_id() {
     // The literal wins over the parameter, so a body shaped like a context
     // reaches the setter instead of creating one called `active`. Which is the
     // whole reason that id is refused.
-    let (s, body) = post_req(&sock, "/context/active", &token, json!({ "name": "Nope" })).await;
+    let (s, body) = post_req(
+        &sock,
+        "/stt/context/active",
+        &token,
+        json!({ "name": "Nope" }),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert!(
         body["id"].is_null(),
         "the setter ran, with no `id` in the body, so it cleared the selection: {body}"
     );
-    let (_, body) = get(&sock, "/context/list", &token).await;
+    let (_, body) = get(&sock, "/stt/context/list", &token).await;
     assert_eq!(
         body["contexts"].as_array().expect("an array").len(),
         1,
@@ -195,26 +207,44 @@ async fn the_active_selection_is_not_shadowed_by_a_context_id() {
 
     // `list` has no setter at all, so the same probe there is a 405 rather than
     // an upsert.
-    let (s, body) = post_req(&sock, "/context/list", &token, json!({ "name": "Nope" })).await;
+    let (s, body) = post_req(
+        &sock,
+        "/stt/context/list",
+        &token,
+        json!({ "name": "Nope" }),
+    )
+    .await;
     assert_eq!(
         s,
         StatusCode::METHOD_NOT_ALLOWED,
         "`list` is a path too: {body}"
     );
 
-    post_req(&sock, "/context/active", &token, json!({ "id": "coding" })).await;
+    post_req(
+        &sock,
+        "/stt/context/active",
+        &token,
+        json!({ "id": "coding" }),
+    )
+    .await;
     let (s, _) = post_req(
         &sock,
-        "/context/active",
+        "/stt/context/active",
         &token,
         json!({ "id": Value::Null }),
     )
     .await;
     assert_eq!(s, StatusCode::OK);
-    let (_, body) = get(&sock, "/context/active", &token).await;
+    let (_, body) = get(&sock, "/stt/context/active", &token).await;
     assert!(body["id"].is_null(), "null clears the selection: {body}");
 
-    let (s, body) = post_req(&sock, "/context/active", &token, json!({ "id": "ghost" })).await;
+    let (s, body) = post_req(
+        &sock,
+        "/stt/context/active",
+        &token,
+        json!({ "id": "ghost" }),
+    )
+    .await;
     assert_eq!(s, StatusCode::NOT_FOUND, "{body}");
 }
 
@@ -223,10 +253,10 @@ async fn the_active_selection_is_not_shadowed_by_a_context_id() {
 #[tokio::test]
 async fn a_backend_can_follow_pin_or_take_no_context() {
     let (_guard, sock, token) = start_daemon().await;
-    let path = format!("/backend/{FIXTURE_SOURCE_ENC}/context");
+    let path = format!("/stt/backend/{FIXTURE_SOURCE_ENC}/context");
     post_req(
         &sock,
-        "/context/coding",
+        "/stt/context/coding",
         &token,
         json!({
             "name": "Coding",
@@ -234,8 +264,20 @@ async fn a_backend_can_follow_pin_or_take_no_context() {
         }),
     )
     .await;
-    post_req(&sock, "/context/email", &token, json!({ "name": "Email" })).await;
-    post_req(&sock, "/context/active", &token, json!({ "id": "coding" })).await;
+    post_req(
+        &sock,
+        "/stt/context/email",
+        &token,
+        json!({ "name": "Email" }),
+    )
+    .await;
+    post_req(
+        &sock,
+        "/stt/context/active",
+        &token,
+        json!({ "id": "coding" }),
+    )
+    .await;
 
     // Default: follows the active context.
     let (s, body) = get(&sock, &path, &token).await;
@@ -267,7 +309,7 @@ async fn a_backend_can_follow_pin_or_take_no_context() {
     // the active one, which would send this backend a context the user had
     // pointed it away from.
     post_req(&sock, &path, &token, json!({ "id": "email" })).await;
-    delete_req(&sock, "/context/email", &token).await;
+    delete_req(&sock, "/stt/context/email", &token).await;
     let (s, body) = get(&sock, &path, &token).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["mode"], "pinned", "the pin is kept: {body}");
@@ -277,7 +319,13 @@ async fn a_backend_can_follow_pin_or_take_no_context() {
     );
 
     // Re-creating it restores what the user set.
-    post_req(&sock, "/context/email", &token, json!({ "name": "Email" })).await;
+    post_req(
+        &sock,
+        "/stt/context/email",
+        &token,
+        json!({ "name": "Email" }),
+    )
+    .await;
     let (_, body) = get(&sock, &path, &token).await;
     assert_eq!(body["context"]["id"], "email", "{body}");
 }
@@ -288,7 +336,7 @@ async fn an_undeliverable_context_is_refused_and_an_unknown_backend_is_a_404() {
 
     let (s, body) = post_req(
         &sock,
-        "/context/coding",
+        "/stt/context/coding",
         &token,
         json!({
             "name": "Coding",
@@ -299,19 +347,25 @@ async fn an_undeliverable_context_is_refused_and_an_unknown_backend_is_a_404() {
     assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error_code"], "invalid_value", "{body}");
 
-    let (s, body) = post_req(&sock, "/context/coding", &token, json!({ "name": "  " })).await;
+    let (s, body) = post_req(
+        &sock,
+        "/stt/context/coding",
+        &token,
+        json!({ "name": "  " }),
+    )
+    .await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "a context needs a name: {body}");
 
     let (s, body) = post_req(
         &sock,
-        "/context/Coding",
+        "/stt/context/Coding",
         &token,
         json!({ "name": "Coding" }),
     )
     .await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "an id is a slug: {body}");
 
-    let (s, body) = get(&sock, "/backend/github.com%2Fno%2Fsuch/context", &token).await;
+    let (s, body) = get(&sock, "/stt/backend/github.com%2Fno%2Fsuch/context", &token).await;
     assert_eq!(s, StatusCode::NOT_FOUND, "{body}");
     assert_eq!(body["error_code"], "unknown_backend", "{body}");
 }

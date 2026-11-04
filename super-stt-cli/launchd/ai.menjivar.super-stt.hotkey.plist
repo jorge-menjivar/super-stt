@@ -21,7 +21,7 @@
   this file. One placeholder is substituted by `just bundle-macos` before the
   bundle is signed:
 
-    __BINDING__   the shortcut: $SUPER_STT_HOTKEY, else ctrl+alt+space. The
+    __BINDING__   the shortcut: $SUPER_VOICE_HOTKEY, else ctrl+alt+space. The
                   recipe validates it with the listener's own check mode
                   first, since a binding the listener rejects would otherwise
                   be restarted every ThrottleInterval, failing the same way
@@ -78,7 +78,7 @@
         <key>RUST_LOG</key>
         <string>info</string>
         <!-- See the daemon's agent for why this is not StandardErrorPath. -->
-        <key>SUPER_STT_LOG_FILE</key>
+        <key>SUPER_VOICE_LOG_FILE</key>
         <string>Library/Logs/super-stt/hotkey.log</string>
     </dict>
 </dict>

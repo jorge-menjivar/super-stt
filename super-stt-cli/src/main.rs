@@ -4,13 +4,13 @@
 //! Auth flow is delegated to `super_stt_shared::daemon::session`, the
 //! shared client-side session helper. Each client (CLI, settings app,
 //! applet) keeps its token in a file of its own, named by its `AppId`; the
-//! CLI's is `$XDG_STATE_HOME/super-stt/clients/super-stt-cli.json`.
+//! CLI's is `$XDG_STATE_HOME/super-voice/clients/super-stt-cli.json`.
 //!
 //! `session::with_token` handles cache-hit, consent-popup-on-miss, and
 //! `invalid_session` retry transparently — handlers below just write
 //! the network call and propagate the daemon's error string.
 //!
-//! For tests / CI: set `SUPER_STT_AUTO_APPROVE=1` in the daemon's
+//! For tests / CI: set `SUPER_VOICE_AUTO_APPROVE=1` in the daemon's
 //! environment so the consent popup is bypassed and `/auth/request`
 //! auto-approves.
 
@@ -242,7 +242,7 @@ async fn cmd_record(
     // Toggle behavior: probe `/v1/status` first. If a daemon-mic
     // capture is already in progress, this invocation acts as a stop
     // signal; otherwise we start a fresh recording. The daemon's
-    // `/v1/transcribe` endpoint refuses with `409 recording_in_progress`
+    // `/v1/stt/transcribe` endpoint refuses with `409 recording_in_progress`
     // when something is already running — the protocol places the
     // start-or-stop decision on the client (see
     // `docs/protocol/endpoints/v1/transcribe.md`).

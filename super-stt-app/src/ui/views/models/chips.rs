@@ -153,7 +153,7 @@ pub(super) struct StageCompute {
 /// What a stage's backend can run its models on.
 ///
 /// `offered` is the daemon's own answer for the stage's selected backend —
-/// `/pipeline/{stage}/device/list`, already scoped to the models this stage
+/// `/stt/pipeline/{stage}/device/list`, already scoped to the models this stage
 /// would run and narrowed to what the install and host can do. Every other
 /// card (the Library's, the picker sheet's) is for a backend no stage has
 /// selected, which the daemon has no verb for, so those read the catalog.

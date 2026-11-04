@@ -35,7 +35,7 @@ pub(crate) struct DaemonStatus {
     current_model: Option<String>,
     /// `true` while a daemon-mic cycle is active — capture *and* the
     /// transcription and typing that follow it. A toggle hotkey reads this and
-    /// calls `POST /transcribe/stop` when true, `POST /transcribe` when false.
+    /// calls `POST /stt/transcribe/stop` when true, `POST /stt/transcribe` when false.
     busy: bool,
 }
 
@@ -49,7 +49,7 @@ A snapshot of what the daemon is running: which model is loaded, on which \
 accelerator, and whether a recording cycle is in flight.
 
 Subscriber introspection and other operator detail are not exposed here — see \
-`GET /pipeline/1` and `GET /pipeline/{stage}/model/{model}/device`, which need the \
+`GET /stt/pipeline/1` and `GET /stt/pipeline/{stage}/model/{model}/device`, which need the \
 `settings` scope.",
     security(("session_token" = ["status"])),
     responses(

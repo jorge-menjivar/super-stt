@@ -32,6 +32,12 @@ need, and the user approves that set.
 | `audio_visualization`   | Subscribe to frequency-band visualization data on `/events`                 | [audio_visualization](./scopes/audio_visualization.md) |
 | `global_transcriptions` | Subscribe to **every** app's live + final transcription text on `/events`   | [global_transcriptions](./scopes/global_transcriptions.md) |
 | `daemon_status`         | Subscribe to model/device/download/registry status on `/events`             | [daemon_status](./scopes/daemon_status.md)         |
+| `speak`                 | Play synthesized speech; stop speech, including another app's               | [speak](../../tts/docs/protocol/scopes/speak.md)   |
+| `voices`                | Add, list, play back, rename, and delete cloned-voice recordings            | [voices](../../tts/docs/protocol/scopes/voices.md) |
+| `playback_events`       | Subscribe to speaking-state and playback-progress events on `/events`       | [playback_events](../../tts/docs/protocol/scopes/playback_events.md) |
+
+The last three are text to speech's. Its routes join this daemon next, and
+their pages move here with them.
 
 A Settings UI, for example, requests several at once
 (`["settings", "secrets", "status", "transcribe", "recording_events", "audio_visualization", "daemon_status"]`),
@@ -56,7 +62,7 @@ requires `Authorization: Bearer <token>`.
 
 ```http
 POST /auth/request HTTP/1.1
-Host: stt.local
+Host: voice.local
 Content-Type: application/json
 
 {
@@ -110,7 +116,7 @@ popup. Useful for headless / CLI clients that want to fail-fast.
 
 ```http
 GET /auth/status HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -281,7 +287,7 @@ Content-Type: application/json
 ```
 
 This is a bug in the client (a token without the `settings` scope
-trying to call `POST /pipeline/1/model`, for example). Re-issuing
+trying to call `POST /stt/pipeline/1/model`, for example). Re-issuing
 `/auth/request` with the missing scope added is the only path
 forward, and the user has to explicitly approve the new set.
 
@@ -318,7 +324,7 @@ endpoints leak no per-scope information.
 The endpoints and topics each scope unlocks live in the dedicated
 docs — those are the source of truth, not duplicated here:
 
-- `transcribe` — `/transcribe`, `/transcribe/stop`, `/transcribe/realtime`; see [transcribe.md](./scopes/transcribe.md).
+- `transcribe` — `/stt/transcribe`, `/stt/transcribe/stop`, `/stt/transcribe/realtime`; see [transcribe.md](./scopes/transcribe.md).
 - `status` — `GET /status`; see [status.md](./scopes/status.md).
 - `settings` — the configuration + registry surface, including backend options; see [settings.md](./scopes/settings.md).
 - `secrets` — backend credential management: `GET/POST/DELETE /backend/{backend_id}/secret/list/*` (write-only; values never returned); see [secrets.md](./scopes/secrets.md).

@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 pub use super_engine_test_daemon::{Method, StatusCode, TestDaemon, shutdown};
-use super_stt_shared::product::SUPER_STT;
+use super_stt_shared::product::SUPER_VOICE;
 
 /// The daemon binary under test.
 pub const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
@@ -20,7 +20,7 @@ pub const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 /// A `super-stt-daemon` to start, in a home of its own named after `label`.
 /// See `super_engine_test_daemon` for the home and the test switches.
 pub fn daemon(label: &str) -> super_engine_test_daemon::Builder {
-    TestDaemon::build(&SUPER_STT, DAEMON_BIN, label)
+    TestDaemon::build(&SUPER_VOICE, DAEMON_BIN, label)
 }
 
 /// `method /v1{path}` on the daemon at `socket`. See
@@ -32,7 +32,7 @@ pub async fn request(
     token: Option<&str>,
     body: Option<&serde_json::Value>,
 ) -> (StatusCode, serde_json::Value) {
-    super_engine_test_daemon::request(&SUPER_STT, socket, method, path, token, body).await
+    super_engine_test_daemon::request(&SUPER_VOICE, socket, method, path, token, body).await
 }
 
 // ---------- backend fixtures -------------------------------------------------
@@ -43,7 +43,7 @@ pub async fn request(
 /// it reports having no backends at all.
 #[must_use]
 pub fn backends_dir(data_home: &Path) -> PathBuf {
-    data_home.join("super-stt").join("backends")
+    data_home.join("super-voice").join("backends")
 }
 
 /// The prebuilt mock component (`just build-mock-wasm-backend`), or `None` when
@@ -59,7 +59,7 @@ pub fn mock_component() -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
-/// The transcript [`mock_component`] returns from `POST /v1/transcribe`. Kept
+/// The transcript [`mock_component`] returns from its `POST /v1/transcribe`. Kept
 /// beside the path that stages it so an assertion cannot drift from the
 /// component it is asserting against.
 pub const MOCK_TRANSCRIPTION: &str = "mock transcription";

@@ -99,7 +99,7 @@ impl SuperSTTDaemon {
                 ErrorCode::InvalidBackend,
                 &format!(
                     "Backend {source} serves no transcription model. If it \
-                     post-processes, select it for that stage with POST /pipeline/2."
+                     post-processes, select it for that stage with POST /stt/pipeline/2."
                 ),
             );
         }
@@ -186,7 +186,7 @@ impl SuperSTTDaemon {
                 return DaemonResponse::error_with_code(
                     ErrorCode::InvalidBackend,
                     "No transcription backend is selected, so there is nothing to \
-                     resolve the model against. Select one with POST /pipeline/1, \
+                     resolve the model against. Select one with POST /stt/pipeline/1, \
                      or name the model's `source`.",
                 );
             };
@@ -218,7 +218,7 @@ impl SuperSTTDaemon {
             );
         };
 
-        // A post-processor serves `POST /v1/process`, not `/v1/transcribe`, so
+        // A post-processor serves `POST /v1/process`, not `/v1/stt/transcribe`, so
         // loading one here would fail on every recording. It belongs to the
         // post-processing stage instead — say which one, since the two stages
         // take the same shape of request and the only difference is the path.
@@ -228,7 +228,7 @@ impl SuperSTTDaemon {
                 &format!(
                     "Model {model} is a post-processing model, not a transcription \
                      model. Run it in the post-processing stage with \
-                     POST /pipeline/2/model instead."
+                     POST /stt/pipeline/2/model instead."
                 ),
             );
         }

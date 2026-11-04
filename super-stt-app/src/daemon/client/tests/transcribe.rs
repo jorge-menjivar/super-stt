@@ -54,7 +54,7 @@ async fn the_test_panel_asks_for_a_held_open_realtime_stream() {
 
     let request = daemon.request();
     assert_eq!(request.method, "POST");
-    assert_eq!(request.path(), "/transcribe");
+    assert_eq!(request.path(), "/stt/transcribe");
     assert_eq!(
         request.json(),
         json!({
@@ -178,7 +178,7 @@ async fn stopping_a_recording_posts_to_the_stop_path() {
 
     let request = daemon.request();
     assert_eq!(request.method, "POST");
-    assert_eq!(request.path(), "/transcribe/stop");
+    assert_eq!(request.path(), "/stt/transcribe/stop");
     assert_eq!(request.json(), json!({}));
 }
 

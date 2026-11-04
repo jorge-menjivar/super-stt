@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}` — one stage's backend: read it, fill it, empty it.
+//! `/stt/pipeline/{stage}` — one stage's backend: read it, fill it, empty it.
 //!
-//! Only the backend. What it is running is `/pipeline/{stage}/model`, next door
+//! Only the backend. What it is running is `/stt/pipeline/{stage}/model`, next door
 //! in [`super::model`]. The pair is deliberate — a card's Select and its Load
 //! are separate acts, and Deselect here forgets the backend where Unload there
 //! keeps it.
@@ -17,7 +17,7 @@ use super::{Stage, unknown_stage};
 use crate::daemon::http::v1::wire::{FromDaemon, StageEnvelope, StageMutation};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 
-/// `GET /pipeline/{stage}` — one stage, from the same report.
+/// `GET /stt/pipeline/{stage}` — one stage, from the same report.
 #[utoipa::path(
     get,
     path = "/pipeline/{stage}",
@@ -25,11 +25,11 @@ use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
     summary = "Report one pipeline stage",
     description = "\
 The backend filling this position, and whether the stage is switched on. The same \
-object `GET /pipeline` carries in its array, for a client that only cares about one \
+object `GET /stt/pipeline` carries in its array, for a client that only cares about one \
 position — narrowed from that report rather than derived separately, so one stage and \
 the whole list can never disagree.
 
-The model is not here: read it at `GET /pipeline/{stage}/model`.",
+The model is not here: read it at `GET /stt/pipeline/{stage}/model`.",
     params(
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
@@ -72,7 +72,7 @@ pub(crate) struct SetBackendBody {
     pub(crate) source: String,
 }
 
-/// `POST /pipeline/{stage}` — select the backend filling this stage.
+/// `POST /stt/pipeline/{stage}` — select the backend filling this stage.
 #[utoipa::path(
     post,
     path = "/pipeline/{stage}",
@@ -80,7 +80,7 @@ pub(crate) struct SetBackendBody {
     summary = "Select the backend filling a stage",
     description = "\
 Points a stage at an installed backend. Selecting a backend does not load a model — \
-do that with `POST /pipeline/{stage}/model`.
+do that with `POST /stt/pipeline/{stage}/model`.
 
 A backend that serves nothing this stage can run is refused: filling stage 2 with a \
 transcription-only backend would leave the user staring at an empty model picker \
@@ -120,7 +120,7 @@ pub(crate) async fn set_stage_backend(
     narrowed(resp, StageMutation::from_daemon)
 }
 
-/// `DELETE /pipeline/{stage}` — deselect this stage's backend.
+/// `DELETE /stt/pipeline/{stage}` — deselect this stage's backend.
 #[utoipa::path(
     delete,
     path = "/pipeline/{stage}",

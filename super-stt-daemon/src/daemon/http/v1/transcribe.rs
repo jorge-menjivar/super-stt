@@ -64,7 +64,7 @@ Being a WebSocket, the frame protocol is not describable in OpenAPI — see \
         (status = 503, description = "Too many concurrent realtime sessions.", body = ErrorEnvelope),
     ),
 )]
-/// `GET /v1/transcribe/realtime` — upgrade the connection and bridge it to the
+/// `GET /v1/stt/transcribe/realtime` — upgrade the connection and bridge it to the
 /// active model's realtime session.
 pub(crate) async fn realtime_ws_handler(
     ws: axum::extract::ws::WebSocketUpgrade,
@@ -219,13 +219,13 @@ async fn run_realtime_session(
 }
 
 /// One SSE frame for a `serde_json::Value` payload — the unbounded
-/// `/transcribe` stream ([`emit_sse_event`]) holds `Value`s. The framing is
+/// `/stt/transcribe` stream ([`emit_sse_event`]) holds `Value`s. The framing is
 /// `super_engine_daemon::events::sse_frame`, which `/events` uses too.
 pub(crate) fn format_sse_frame(event: &str, data: &serde_json::Value) -> axum::body::Bytes {
     super_engine_daemon::events::sse_frame(event, &serde_json::to_string(data).unwrap_or_default())
 }
 
-/// Emit a single SSE frame onto the unbounded `/transcribe` stream. Returns
+/// Emit a single SSE frame onto the unbounded `/stt/transcribe` stream. Returns
 /// `false` if the receiver is gone (client disconnected).
 pub(crate) fn emit_sse_event(
     tx: &tokio::sync::mpsc::UnboundedSender<Result<axum::body::Bytes, std::io::Error>>,
@@ -235,7 +235,7 @@ pub(crate) fn emit_sse_event(
     tx.send(Ok(format_sse_frame(event, data))).is_ok()
 }
 
-/// Monotonic id identifying one `/transcribe` request's claim on the shared
+/// Monotonic id identifying one `/stt/transcribe` request's claim on the shared
 /// preview slot, so a racing request clears only its own sender.
 fn next_preview_slot_id() -> u64 {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -261,7 +261,7 @@ fn body_flag(body: &serde_json::Value, key: &str, default: bool) -> bool {
 /// touching the microphone and return a single JSON `{ transcription }` (or a
 /// coded error). Rejects `stream_realtime` combined with `audio_data` per the
 /// contract.
-/// The body of `POST /transcribe`. Every field is optional; which combination
+/// The body of `POST /stt/transcribe`. Every field is optional; which combination
 /// you send selects one of the four behaviours the endpoint documents.
 ///
 /// Declared, not deserialized. The handler reads the body as raw JSON so it can
@@ -334,7 +334,7 @@ async fn transcribe_precaptured(s: &AppState, body: serde_json::Value) -> axum::
     })
 }
 
-/// `POST /transcribe`. One endpoint, four use cases dispatched on the body
+/// `POST /stt/transcribe`. One endpoint, four use cases dispatched on the body
 /// (see `docs/protocol/endpoints/v1/transcribe.md`):
 /// - top-level `audio_data` → pre-captured one-shot, `200` JSON `{transcription}`;
 /// - mic `wait:false` → fire-and-forget, `202 {message:"Recording started"}`;
@@ -357,7 +357,7 @@ One endpoint with four behaviours, selected by the body:
 | Body | Behaviour | Response |
 |---|---|---|
 | `audio_data` present | Transcribe the supplied buffer; the microphone is never opened | `200` JSON with `transcription` |
-| no `audio_data`, `wait: false` (default) | Start recording and detach; stop it with `POST /transcribe/stop` | `202` with `message: \"Recording started\"` |
+| no `audio_data`, `wait: false` (default) | Start recording and detach; stop it with `POST /stt/transcribe/stop` | `202` with `message: \"Recording started\"` |
 | `wait: true` | Record, then stream the result | `200 text/event-stream`, one `done` frame |
 | `wait: true`, `stream_realtime: true` | As above, plus incremental previews | `200 text/event-stream`, `preview` frames then `done` |
 
@@ -379,7 +379,7 @@ request's — a batch model streams only `done` unless its manifest sets \
 
 Starting while a recording is already in flight is `409 recording_in_progress` — \
 this endpoint only ever *starts* one. Read `busy` from `GET /status` and call \
-`POST /transcribe/stop` to end the running capture.",
+`POST /stt/transcribe/stop` to end the running capture.",
     request_body(content = TranscribeBody, description = "All fields optional; the combination selects the behaviour."),
     security(("session_token" = ["transcribe"])),
     responses(
@@ -420,7 +420,7 @@ pub(crate) async fn transcribe(
 ///   model_not_loaded` — both checked (in that order) before either shape
 ///   below commits.
 /// - `wait:false` → `202 {message:"Recording started"}`, recording detaches and
-///   runs in the background (stop via `POST /transcribe/stop`).
+///   runs in the background (stop via `POST /stt/transcribe/stop`).
 /// - `wait:true` → `200 text/event-stream`, ending with `done`/`error`;
 ///   `stream_realtime:true` additionally streams incremental `preview` frames.
 ///   Closing the connection stops the recording.
@@ -447,11 +447,11 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
     }
 
     // Reject with `409 recording_in_progress` if a cycle is already
-    // in progress. `/v1/transcribe` is "start a fresh recording" only —
+    // in progress. `/v1/stt/transcribe` is "start a fresh recording" only —
     // toggle semantics live in the client (see
     // `docs/protocol/endpoints/v1/transcribe.md`). The client is
     // expected to consult `GET /v1/status::busy` and call
-    // `/v1/transcribe/stop` to end an in-flight capture.
+    // `/v1/stt/transcribe/stop` to end an in-flight capture.
     if *s.daemon.busy.read().await {
         return recording_in_progress_response();
     }
@@ -492,7 +492,7 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
 
     // Fire-and-forget: detach the recording from this connection and return
     // `202` immediately. The recording owns its busy/stop lifecycle (stopped via
-    // `POST /transcribe/stop`); write-mode still types the result on completion.
+    // `POST /stt/transcribe/stop`); write-mode still types the result on completion.
     //
     // The `202` is optimistic and carries no completion guarantee (by design):
     // the busy check above is a plain read, and the authoritative claim is inside
@@ -553,7 +553,7 @@ fn transcribe_mic_sse(
     tokio::spawn(async move {
         // Hook into the daemon's preview-text channel so each preview
         // update gets forwarded as an SSE `preview` event. Claim the shared slot
-        // atomically: if another `/transcribe` already holds it we lost the
+        // atomically: if another `/stt/transcribe` already holds it we lost the
         // busy-check race (line 203 is a plain read), so bail with an error
         // frame rather than clobbering the winner's stream.
         let (preview_tx, mut preview_rx) = tokio::sync::mpsc::unbounded_channel::<PreviewFrame>();
@@ -561,7 +561,7 @@ fn transcribe_mic_sse(
         // Claim the shared preview slot only when the client asked to stream
         // preview frames (`stream_realtime`). Otherwise the response carries just
         // the terminal `done`/`error`. When we claim, do it atomically: if
-        // another `/transcribe` already holds it we lost the busy-check race
+        // another `/stt/transcribe` already holds it we lost the busy-check race
         // (the check above is a plain read), so bail with an error frame rather
         // than clobbering the winner's stream. When we don't claim, keep the
         // sender alive so `preview_rx.recv()` pends (never yields `None`).
@@ -590,7 +590,7 @@ fn transcribe_mic_sse(
         // inactivity so the hyper client (and any intermediate proxy)
         // doesn't drop the connection during a silent recording or a
         // slow CPU transcription pass. Short cadence is intentional —
-        // `/v1/transcribe` with preview disabled has long stretches
+        // `/v1/stt/transcribe` with preview disabled has long stretches
         // with zero events, and the CLI's hyper has been observed to
         // disconnect after ~4 s of body silence.
         let keepalive_interval = tokio::time::Duration::from_secs(2);
@@ -699,7 +699,7 @@ fn transcribe_mic_sse(
     tag = "transcribe",
     summary = "Stop the in-flight microphone recording",
     description = "\
-Ends a recording started by `POST /transcribe`. Idempotent: stopping when nothing \
+Ends a recording started by `POST /stt/transcribe`. Idempotent: stopping when nothing \
 is recording succeeds with `No recording in progress`.
 
 `message` says what happened — `Recording stop signal sent`, `Manual stop not \

@@ -165,7 +165,7 @@ RUST_LOG=super_stt_cli=debug \
 Set this up before you spend an afternoon fighting permissions:
 
 ```bash
-export SUPER_STT_SIGN_IDENTITY="Super STT Dev"
+export SUPER_VOICE_SIGN_IDENTITY="Super STT Dev"
 ```
 
 macOS ties Accessibility and Microphone grants, and Keychain ACLs, to a
@@ -210,7 +210,7 @@ to be redone:
 
 ```bash
 security find-identity -v -p codesigning
-export SUPER_STT_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export SUPER_VOICE_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
 ```
 
 Without one, a self-signed certificate works for local development —
@@ -246,7 +246,7 @@ Super STT is a Rust workspace:
 | `super-stt-daemon`         | The engine: installs backends, loads models, serves the protocol |
 | `super-stt-app`            | Desktop settings & management app                                |
 | `super-stt-cli`            | The `stt` command-line client                                    |
-| `super-stt-consent`        | Consent-popup helper for the auth handshake                      |
+| `super-voice-consent`        | Consent-popup helper for the auth handshake                      |
 | `super-stt-shared`         | Common types, protocol definitions, validation                   |
 | `super-voice-registry-types` | Super Voice's backend contract, on `super-engine-spec`         |
 | `super-voice-indexer`      | CI tool that builds the published registry `index.json`          |

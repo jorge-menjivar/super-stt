@@ -11,7 +11,7 @@ use super_stt_shared::models::protocol::DownloadProgress;
 pub use super_engine_daemon::download_progress::{Progress, status};
 
 /// Which load a tracker is for: the backend serving the model, and the
-/// `/pipeline/{stage}` position provisioning it. Reported on every tick so a
+/// `/stt/pipeline/{stage}` position provisioning it. Reported on every tick so a
 /// client can put the progress on the card that started it: the model name
 /// alone does not say whose download it is, and both stages download through
 /// the same tracker.

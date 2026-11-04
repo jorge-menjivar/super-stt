@@ -2,13 +2,13 @@
 //! End-to-end smoke tests for the new HTTP daemon protocol.
 //!
 //! Spawns the `super-stt-daemon` binary against a temp `XDG_RUNTIME_DIR`
-//! with `SUPER_STT_AUTO_APPROVE=1` (so the consent popup is bypassed and
+//! with `SUPER_VOICE_AUTO_APPROVE=1` (so the consent popup is bypassed and
 //! `/auth/request` auto-approves), then
 //! exercises every endpoint via the shared `http_client` module:
 //!
 //! - `POST /auth/request` mints a session token (auto-approved).
 //! - `GET  /ping` / `GET /status` succeed with the token.
-//! - `POST /transcribe` / `POST /transcribe/stop` succeed with the token.
+//! - `POST /stt/transcribe` / `POST /stt/transcribe/stop` succeed with the token.
 //! - Requests without a token (or with a bogus token) get `401 invalid_session`.
 //!
 //! Run with:
@@ -40,10 +40,10 @@ async fn start_daemon() -> (TestDaemon, PathBuf) {
 async fn http_endpoints_respond() {
     let (_guard, http_socket) = start_daemon().await;
 
-    // --- POST /auth/request (auto-approved by SUPER_STT_AUTO_APPROVE=1) ---
+    // --- POST /auth/request (auto-approved by SUPER_VOICE_AUTO_APPROVE=1) ---
     let auth = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
         .await
-        .expect("auth_request should succeed under SUPER_STT_AUTO_APPROVE=1");
+        .expect("auth_request should succeed under SUPER_VOICE_AUTO_APPROVE=1");
     assert!(!auth.session_token.is_empty(), "token should not be empty");
     assert!(
         SCOPES
@@ -110,7 +110,7 @@ async fn http_endpoints_respond() {
         "status must report busy=false on a freshly-booted daemon"
     );
 
-    // --- POST /transcribe (fire-and-forget) ---
+    // --- POST /stt/transcribe (fire-and-forget) ---
     // Hermetic test harness => no backend installed => no model loaded, so
     // the daemon now fails fast with `409 model_not_loaded` before
     // committing to `202` (see docs/protocol/endpoints/v1/transcribe.md).
@@ -139,7 +139,7 @@ async fn http_endpoints_respond() {
         ),
     }
 
-    // --- POST /transcribe/stop ---
+    // --- POST /stt/transcribe/stop ---
     let resp = http_client::transcribe_stop(http_socket.clone(), &token)
         .await
         .expect("transcribe/stop should respond");
@@ -163,7 +163,7 @@ async fn http_endpoints_respond() {
     );
 }
 
-/// `POST /v1/transcribe/stop` must be idempotent when no recording is
+/// `POST /v1/stt/transcribe/stop` must be idempotent when no recording is
 /// in progress — it returns `200` with `message: "No recording in
 /// progress"`. The CLI's record subcommand relies on this when the
 /// user presses the hotkey twice while audio failed to start: the
@@ -182,7 +182,7 @@ async fn transcribe_stop_idempotent_when_idle() {
     let token = auth.session_token;
 
     // Idle daemon: status must report busy=false BEFORE we
-    // call /transcribe/stop.
+    // call /stt/transcribe/stop.
     let pre = http_client::status(http_socket.clone(), &token)
         .await
         .expect("status before stop");
@@ -222,7 +222,7 @@ async fn transcribe_stop_idempotent_when_idle() {
     );
 }
 
-/// Pins the documented `/v1/transcribe` second-call behavior: when a
+/// Pins the documented `/v1/stt/transcribe` second-call behavior: when a
 /// daemon-mic capture is already in progress, the daemon rejects
 /// the second call with `409 recording_in_progress` and `http_client`
 /// surfaces that JSON body as a typed error (NOT as "transcribe

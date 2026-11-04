@@ -5,4 +5,4 @@ pub mod dbus;
 pub use dbus::DBusManager;
 /// The served interface exists only where there is a bus to serve it on.
 #[cfg(target_os = "linux")]
-pub use dbus::SuperSTTDBusService;
+pub use dbus::SuperVoiceDBusService;

@@ -21,7 +21,7 @@ use super::pipeline::default_stage;
 /// variant names map to it via `rename_all = "snake_case"`.
 ///
 /// The variants describing a stage running a model carry `stage` — the
-/// `/pipeline/{stage}` position whose model the event is about. A pipeline has
+/// `/stt/pipeline/{stage}` position whose model the event is about. A pipeline has
 /// more than one stage running models, and the events are the only way a
 /// client learns about a load it did not start (the daemon's own startup load,
 /// or another client's), so each says whose it is. A payload without the field

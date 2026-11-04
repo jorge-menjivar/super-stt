@@ -23,8 +23,8 @@ graph TD
 
     %% HTTP Route Groups
     D_API --> R_Auth["/auth"]
-    D_API --> R_Transcribe["/transcribe"]
-    D_API --> R_Pipeline["/pipeline"]
+    D_API --> R_Transcribe["/stt/transcribe"]
+    D_API --> R_Pipeline["/stt/pipeline"]
     D_API --> R_Registry["/registry"]
     D_API --> R_Settings["/settings"]
     D_API --> R_System["/system"]
@@ -65,7 +65,7 @@ graph TD
     E22 --> D_SSE
 
     %% D-Bus Interface
-    D_DBus --> DB_Int["com.github.jorge_menjivar.SuperSTT1"]
+    D_DBus --> DB_Int["com.github.jorge_menjivar.SuperVoice1"]
     DB_Int --> DB_Obj["/com/github/jorge_menjivar/SuperSTT"]
     DB_Obj -.-> DB_M1["ping()"]
     DB_Obj -.-> DB_M2["get_status()"]

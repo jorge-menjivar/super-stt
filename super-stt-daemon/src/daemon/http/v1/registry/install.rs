@@ -27,7 +27,7 @@ from somewhere the registry does not vouch for — a custom repo or a local dire
 and is worth showing the user.
 
 Installing neither selects the backend nor loads a model; do that through \
-`POST /pipeline/{stage}` and `POST /pipeline/{stage}/model`. Upgrading one already \
+`POST /stt/pipeline/{stage}` and `POST /stt/pipeline/{stage}/model`. Upgrading one already \
 installed is `POST /registry/backend/update`, which runs this same pipeline.",
     request_body = InstallRequest,
     security(("session_token" = ["settings"])),

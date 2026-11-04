@@ -11,7 +11,7 @@
 //! This module holds one session open for the take instead, feeding captured
 //! audio in as it arrives and forwarding the backend's own `preview` frames to
 //! [`SuperSTTDaemon::emit_preview`] — the same place the sliding-window loop
-//! publishes, so `/events`, the `/transcribe` SSE stream, and preview typing all
+//! publishes, so `/events`, the `/stt/transcribe` SSE stream, and preview typing all
 //! work unchanged. The session's `done` frame is the final transcript, so the
 //! separate Phase 4 decode is skipped entirely.
 //!

@@ -20,7 +20,7 @@ always available via [`GET /update`](../update.md).
 
 ```http
 POST /settings/update_check_enabled HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -63,7 +63,7 @@ generic `400` rejection, not a classified `error_code` — the same behavior as
 
 ```http
 GET /settings/update_check_enabled HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 

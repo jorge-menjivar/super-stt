@@ -147,7 +147,7 @@ jobs:
           cargo build --release --target ${{ matrix.target }} \
             --bin super-stt-daemon \
             --bin super-stt-cli \
-            --bin super-stt-consent \
+            --bin super-voice-consent \
             --bin super-stt-app \
             --bin super-stt-install
 
@@ -159,7 +159,7 @@ jobs:
           # PATH fallback.
           cp target/${{ matrix.target }}/release/super-stt-daemon dist/
           cp target/${{ matrix.target }}/release/super-stt-cli dist/
-          cp target/${{ matrix.target }}/release/super-stt-consent dist/
+          cp target/${{ matrix.target }}/release/super-voice-consent dist/
           cp target/${{ matrix.target }}/release/super-stt-app dist/
 
           # Include systemd service files

@@ -3,8 +3,8 @@
 Snapshot of the daemon's current operational state — which model is
 loaded and which device it's running on. Subscriber introspection
 and other operator info are not exposed here; for those, the
-`settings` scope's [`GET /pipeline/1`](./pipeline/stage.md) and
-[`GET /pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice)
+`settings` scope's [`GET /stt/pipeline/1`](./pipeline/stage.md) and
+[`GET /stt/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice)
 endpoints apply.
 
 ## Auth
@@ -19,7 +19,7 @@ endpoints apply.
 
 ```http
 GET /status HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -43,7 +43,7 @@ Content-Type: application/json
 | `device`        | string  | The accelerator the loaded model is actually running on: `"cpu"`, `"cuda"`, `"rocm"`, `"metal"`, `"vulkan"`, or `"remote"` for an online model. `"unknown"` if nothing is loaded. |
 | `model_loaded`  | bool    | `false` while the daemon is still loading the initial model or after a failed switch   |
 | `current_model` | string? | The loaded model's name (e.g. `whisper-tiny`); absent when `model_loaded` is `false`   |
-| `busy`          | bool    | `true` while a daemon-mic cycle is active — covers audio capture **and** the post-capture transcription/typing. Clients implementing a toggle hotkey consult this and call [`POST /transcribe/stop`](./transcribe/stop.md) when `true`, [`POST /transcribe`](./transcribe.md) when `false`. |
+| `busy`          | bool    | `true` while a daemon-mic cycle is active — covers audio capture **and** the post-capture transcription/typing. Clients implementing a toggle hotkey consult this and call [`POST /stt/transcribe/stop`](./transcribe/stop.md) when `true`, [`POST /stt/transcribe`](./transcribe.md) when `false`. |
 
 **Errors:**
 

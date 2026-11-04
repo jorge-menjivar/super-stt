@@ -1,11 +1,11 @@
-# `GET /pipeline/{stage}/model/list`
+# `GET /stt/pipeline/{stage}/model/list`
 
 The models a [stage](./stage.md) can run: the ones its backend serves **in that
 stage's role**. This is what fills a model picker.
 
 Each entry is a `[name, source]` pair, where `source` is the repo id of the
 backend serving it (see [`docs/protocol/backend/`](../../../backend/)). That is
-the pair [`POST /pipeline/{stage}/model`](./model.md#post-pipelinestagemodel)
+the pair [`POST /stt/pipeline/{stage}/model`](./model.md#post-pipelinestagemodel)
 accepts.
 
 ## Scoped twice, and both halves matter
@@ -37,7 +37,7 @@ for itself.
 - `Authorization: Bearer <session_token>` is required.
 - Tokens without the `settings` scope get `403 scope_denied`.
 
-## `GET /pipeline/{stage}/model/list`
+## `GET /stt/pipeline/{stage}/model/list`
 
 | Param   | Type | Notes                                                                                  |
 |---------|------|-----------------------------------------------------------------------------------------|
@@ -46,8 +46,8 @@ for itself.
 **Request:**
 
 ```http
-GET /pipeline/1/model/list HTTP/1.1
-Host: stt.local
+GET /stt/pipeline/1/model/list HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -65,7 +65,7 @@ Authorization: Bearer stt_…64hex…
 
 | Field              | Type            | Notes                                                                 |
 |--------------------|-----------------|-----------------------------------------------------------------------|
-| `available_models` | array of arrays | Each entry is the `[name, source]` pair `POST /pipeline/{stage}/model` accepts. Empty when the stage has no backend, or when its backend serves nothing in that role. |
+| `available_models` | array of arrays | Each entry is the `[name, source]` pair `POST /stt/pipeline/{stage}/model` accepts. Empty when the stage has no backend, or when its backend serves nothing in that role. |
 
 **Errors:**
 

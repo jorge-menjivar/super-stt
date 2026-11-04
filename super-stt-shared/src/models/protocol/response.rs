@@ -29,7 +29,7 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_devices: Option<Vec<String>>,
     /// The languages a model can be pinned to, on
-    /// `GET /pipeline/{stage}/model/{model}/language/list`. The twin of
+    /// `GET /stt/pipeline/{stage}/model/{model}/language/list`. The twin of
     /// `available_devices`, and answered by the twin endpoint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_languages: Option<Vec<String>>,
@@ -100,17 +100,17 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub post_processor: Option<Value>,
 
-    // The transcription pipeline (GET /pipeline): the ordered stages. See
+    // The transcription pipeline (GET /stt/pipeline): the ordered stages. See
     // docs/protocol/endpoints/v1/pipeline.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pipeline: Option<Vec<StageReport>>,
 
-    // One stage of it (GET /pipeline/{stage}): the same object the array
+    // One stage of it (GET /stt/pipeline/{stage}): the same object the array
     // carries, for a client that only cares about one position.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stage: Option<StageReport>,
 
-    // One stage's model slot (GET /pipeline/{stage}/model): what is selected
+    // One stage's model slot (GET /stt/pipeline/{stage}/model): what is selected
     // there, whether it is up, and the device it runs on. Separate from
     // `stage`, which reports only the backend filling the position.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -132,7 +132,7 @@ pub struct DaemonResponse {
 
     // Whether the daemon is busy with a full capture+transcribe+type cycle.
     // Surfaced on `GET /v1/status` so clients can decide whether to
-    // call `POST /v1/transcribe` (start) or `POST /v1/transcribe/stop`
+    // call `POST /v1/stt/transcribe` (start) or `POST /v1/stt/transcribe/stop`
     // (toggle stop). Absent on responses where it's not meaningful.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub busy: Option<bool>,
@@ -186,7 +186,7 @@ pub struct DownloadProgress {
     /// the same one.
     #[serde(default)]
     pub source: String,
-    /// The `/pipeline/{stage}` position this download is provisioning a model
+    /// The `/stt/pipeline/{stage}` position this download is provisioning a model
     /// for: 1 while a transcription model downloads, 2 while a post-processor
     /// does. Absent from an older daemon's payload, which reads as stage 1 —
     /// the only stage that downloaded anything then.
@@ -245,12 +245,12 @@ impl DaemonResponse {
     /// Build an error response, sanitizing `message` before it crosses the Unix
     /// socket boundary. Full details stay in the daemon logs; clients receive
     /// only a trimmed first-line prefix so internal paths/secrets aren't leaked
-    /// (opt out for local debugging via `SUPER_STT_DEBUG_ERRORS=1`).
+    /// (opt out for local debugging via `SUPER_VOICE_DEBUG_ERRORS=1`).
     #[must_use]
     pub fn error(message: &str) -> Self {
         fn sanitize_error_message(message: &str) -> String {
             // Opt-in detailed errors for local debugging
-            let debug = std::env::var("SUPER_STT_DEBUG_ERRORS").is_ok_and(|v| v == "1")
+            let debug = std::env::var("SUPER_VOICE_DEBUG_ERRORS").is_ok_and(|v| v == "1")
                 || cfg!(debug_assertions);
             if debug {
                 return message.to_string();
