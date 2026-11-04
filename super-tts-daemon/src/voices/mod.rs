@@ -381,14 +381,16 @@ fn read_voice(path: &Path) -> Result<Voice, VoiceError> {
     serde_json::from_slice(&bytes).map_err(|e| VoiceError::Io(format!("unreadable metadata: {e}")))
 }
 
-/// Write `bytes` to `path`, readable only by the owner.
+/// Write `bytes` to `path`, readable only by the owner, atomically.
 ///
 /// A reference clip is a recording of somebody's voice. It gets the same
-/// treatment as the session store, not the default umask.
+/// treatment as the secrets file, not the default umask: the file is created
+/// at 0600, so the clip is never readable by anyone else, not even before a
+/// `chmod`. It replaces any file there whole, so a crash mid-write leaves the
+/// old clip or the new one, never a voice that cannot be read.
 fn write_private(path: &Path, bytes: &[u8]) -> Result<(), VoiceError> {
-    std::fs::write(path, bytes).map_err(|e| VoiceError::Io(e.to_string()))?;
-    restrict(path, 0o600);
-    Ok(())
+    super_engine_spec::fs::write_atomic_private(path, bytes)
+        .map_err(|e| VoiceError::Io(e.to_string()))
 }
 
 /// Best-effort `chmod`. A library that is readable is still usable, so a

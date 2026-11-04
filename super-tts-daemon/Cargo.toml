@@ -53,6 +53,8 @@
     serde.workspace = true
     serde_json.workspace = true
     super-engine-daemon = { workspace = true, features = ["beeper"] }
+    # `fs::write_atomic_private`, for a cloned voice's clip and metadata.
+    super-engine-spec.workspace = true
     super-engine-forge.workspace = true
     super-tts-registry-types = { path = "../super-tts-registry-types", features = ["openapi"] }
     # Shared crate
