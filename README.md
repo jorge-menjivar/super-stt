@@ -59,8 +59,8 @@ Bind `stt record --write` to a key combo. Super+Space is the convention (the COS
 Manage the daemon with the usual systemd controls:
 
 ```bash
-systemctl --user start super-stt      # or: enable / status / restart
-journalctl --user -u super-stt -f     # follow logs
+systemctl --user start super-voice      # or: enable / status / restart
+journalctl --user -u super-voice -f     # follow logs
 ```
 
 ### Recording modes
@@ -152,7 +152,7 @@ This is a snapshot. The app always shows the current catalog, published live at 
 ## 🩺 Troubleshooting
 
 - **`stt: command not found`**: binaries are installed system-wide and are on `PATH` by default — restart your terminal so it rehashes, and check the installer finished without errors.
-- **Daemon won't start / misbehaves**: check `journalctl --user -u super-stt -n 50`.
+- **Daemon won't start / misbehaves**: check `journalctl --user -u super-voice -n 50`.
 - **Transcriptions seem less accurate than they should be**: your microphone input volume may be set too high or too low. Adjust the mic volume in your system sound settings and try again.
 - **Typing doesn't work in some apps**: [`ydotool`](https://github.com/ReimuNotMoe/ydotool) types reliably across virtually all apps. Install it via your package manager, then try it out first by running `sudo ydotoold --socket-path="$HOME/.ydotool_socket" --socket-own="$(id -u):$(id -g)"` in a terminal and setting the write method to **ydotool** in Settings. If that fixes typing, make it permanent by enabling the service (e.g. `systemctl --user enable --now ydotool`).
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Dummy backend manifest — fixture for the indexer→daemon index round-trip test
-# (`super-stt-daemon/src/registry/index_schema.rs`). Not a real backend.
+# (`super-voice-daemon/src/registry/index_schema.rs`). Not a real backend.
 
 [backend]
     source = "github.com/jorge-menjivar/dummy"

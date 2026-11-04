@@ -43,7 +43,7 @@ fn normalize(path: &str) -> String {
 
 /// The daemon's OpenAPI document, as JSON: what a client generator receives.
 fn document() -> serde_json::Value {
-    serde_json::to_value(super_stt_daemon::daemon::http::openapi_document())
+    serde_json::to_value(super_voice_daemon::daemon::http::openapi_document())
         .expect("the document serializes")
 }
 

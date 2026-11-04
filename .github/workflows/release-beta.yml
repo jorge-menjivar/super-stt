@@ -126,7 +126,7 @@ jobs:
       - name: Build binaries
         run: |
           cargo build --release --target ${{ matrix.target }} \
-            --bin super-stt-daemon \
+            --bin super-voice-daemon \
             --bin super-stt-cli \
             --bin super-voice-consent \
             --bin super-stt-app \
@@ -138,14 +138,14 @@ jobs:
           # Daemon, CLI, and consent helper (the new layout). The
           # consent helper MUST be in the same directory as the
           # daemon — locate_consent_helper has no PATH fallback.
-          cp target/${{ matrix.target }}/release/super-stt-daemon dist/
+          cp target/${{ matrix.target }}/release/super-voice-daemon dist/
           cp target/${{ matrix.target }}/release/super-stt-cli dist/
           cp target/${{ matrix.target }}/release/super-voice-consent dist/
           cp target/${{ matrix.target }}/release/super-stt-app dist/
 
           # Include systemd service files
           mkdir -p dist/systemd
-          cp super-stt-daemon/systemd/super-stt.service dist/systemd/
+          cp super-voice-daemon/systemd/super-voice.service dist/systemd/
 
           mkdir -p dist/resources
 

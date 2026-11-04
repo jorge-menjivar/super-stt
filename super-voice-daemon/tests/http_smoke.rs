@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! End-to-end smoke tests for the new HTTP daemon protocol.
 //!
-//! Spawns the `super-stt-daemon` binary against a temp `XDG_RUNTIME_DIR`
+//! Spawns the `super-voice-daemon` binary against a temp `XDG_RUNTIME_DIR`
 //! with `SUPER_VOICE_AUTO_APPROVE=1` (so the consent popup is bypassed and
 //! `/auth/request` auto-approves), then
 //! exercises every endpoint via the shared `http_client` module:

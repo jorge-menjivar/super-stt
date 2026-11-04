@@ -40,10 +40,10 @@ const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-cli");
 fn locate_daemon_bin() -> PathBuf {
     let cli_path = PathBuf::from(DAEMON_BIN); // misnamed env var: this points to cli
     let dir = cli_path.parent().expect("cli bin parent dir");
-    let candidate = dir.join("super-stt-daemon");
+    let candidate = dir.join("super-voice-daemon");
     assert!(
         candidate.exists(),
-        "expected the daemon binary at {} — run `cargo build -p super-stt-daemon` first",
+        "expected the daemon binary at {} — run `cargo build -p super-voice-daemon` first",
         candidate.display()
     );
     candidate

@@ -21,7 +21,7 @@ fn output_path() -> PathBuf {
 }
 
 fn main() -> std::io::Result<()> {
-    let doc = super_stt_daemon::daemon::http::openapi_document();
+    let doc = super_voice_daemon::daemon::http::openapi_document();
     let mut json = doc
         .to_pretty_json()
         .expect("the generated document is always serializable");

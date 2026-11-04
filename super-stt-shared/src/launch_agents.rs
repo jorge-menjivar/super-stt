@@ -25,7 +25,7 @@ use std::path::PathBuf;
 /// One of the bundle's `LaunchAgent`s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Agent {
-    /// `super-stt-daemon`.
+    /// `super-voice-daemon`.
     Daemon,
     /// `super-stt-cli hotkey`, the global shortcut.
     Hotkey,

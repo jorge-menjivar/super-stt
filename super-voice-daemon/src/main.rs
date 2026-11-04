@@ -3,7 +3,7 @@ use anyhow::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    super_stt_daemon::install_crypto_provider();
-    super_stt_daemon::run().await?;
+    super_voice_daemon::install_crypto_provider();
+    super_voice_daemon::run().await?;
     Ok(())
 }

@@ -1,9 +1,9 @@
 [package]
-    name = "super-stt-daemon"
+    name = "super-voice-daemon"
     version.workspace = true
     authors.workspace = true
     edition.workspace = true
-    description = "Super STT cli and daemon service"
+    description = "The Super Voice daemon"
     repository = "https://github.com/jorge-menjivar/super-stt"
     license = "GPL-3.0-only"
 

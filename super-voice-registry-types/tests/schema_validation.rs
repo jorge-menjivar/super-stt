@@ -27,7 +27,7 @@ fn accepts_every_in_repo_backend_toml() {
         .parent()
         .unwrap();
     let dirs = [
-        root.join("super-stt-daemon/tests/fixtures"),
+        root.join("super-voice-daemon/tests/fixtures"),
         root.join("super-tts-daemon/tests/fixtures"),
     ];
     let entries = dirs
@@ -73,7 +73,7 @@ fn a_fixture_still_exercises_the_provider_key() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("super-stt-daemon/tests/fixtures");
+        .join("super-voice-daemon/tests/fixtures");
     let covered = std::fs::read_dir(&dir)
         .expect("daemon test fixtures directory")
         .flatten()

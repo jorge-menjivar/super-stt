@@ -88,7 +88,7 @@ them) puts it in `/Applications`:
 Super STT.app/Contents/
   Info.plist                      super-stt-app/resources/macos/Info.plist
   MacOS/super-stt-app             the settings app, the bundle's executable
-  MacOS/super-stt-daemon
+  MacOS/super-voice-daemon
   MacOS/super-stt-cli             `stt` on the PATH is a wrapper around this
   Helpers/super-stt-cli           the same CLI, which the shortcut agent runs
   Library/LaunchAgents/           the daemon's and the shortcut's agents
@@ -174,7 +174,7 @@ ad-hoc, and an ad-hoc requirement is the content hash — so every `cargo
 build` produces what macOS considers a different program from the one you
 granted. What you actually see:
 
-- The Accessibility pane lists `super-stt-daemon` with its switch **on**
+- The Accessibility pane lists `super-voice-daemon` with its switch **on**
   while the daemon insists it is not allowed to control the keyboard. The row
   is keyed by path, so it survives; the requirement behind it does not.
 - The Keychain re-prompts no matter how many times you click Always Allow.
@@ -243,7 +243,7 @@ Super STT is a Rust workspace:
 
 | Crate                      | Role                                                              |
 |----------------------------|------------------------------------------------------------------|
-| `super-stt-daemon`         | The engine: installs backends, loads models, serves the protocol |
+| `super-voice-daemon`         | The engine: installs backends, loads models, serves the protocol |
 | `super-stt-app`            | Desktop settings & management app                                |
 | `super-stt-cli`            | The `stt` command-line client                                    |
 | `super-voice-consent`        | Consent-popup helper for the auth handshake                      |

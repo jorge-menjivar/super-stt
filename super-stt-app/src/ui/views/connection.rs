@@ -20,7 +20,7 @@ use cosmic::{
 fn start_daemon_command() -> String {
     #[cfg(target_os = "linux")]
     {
-        "systemctl --user start super-stt".to_string()
+        "systemctl --user start super-voice".to_string()
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -34,7 +34,7 @@ fn start_daemon_command() -> String {
 fn restart_daemon_command() -> String {
     #[cfg(target_os = "linux")]
     {
-        "systemctl --user restart super-stt".to_string()
+        "systemctl --user restart super-voice".to_string()
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -43,7 +43,7 @@ fn restart_daemon_command() -> String {
 }
 
 /// The `LaunchAgent`'s domain target. Matches the label in
-/// `super-stt-daemon/launchd/` and the `launchd_target` the justfile builds.
+/// `super-voice-daemon/launchd/` and the `launchd_target` the justfile builds.
 #[cfg(not(target_os = "linux"))]
 fn launchd_target() -> String {
     format!(

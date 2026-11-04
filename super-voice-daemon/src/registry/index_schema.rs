@@ -25,7 +25,7 @@ mod tests {
     //! output and this module's `Index` input. Generates an index from the
     //! `tests/fixtures` dummy manifest with the real binary, then deserializes
     //! it with the `Index` type the registry client uses. Skips gracefully when
-    //! the indexer binary hasn't been built (e.g. `cargo test -p super-stt-daemon`
+    //! the indexer binary hasn't been built (e.g. `cargo test -p super-voice-daemon`
     //! on its own); `cargo test --workspace` builds it and runs this.
     use super::*;
     use semver::Version;

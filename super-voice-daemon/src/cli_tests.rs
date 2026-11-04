@@ -13,7 +13,7 @@ fn repo_root() -> PathBuf {
 }
 
 /// Packaging files that either ship an `ExecStart=` line or rewrite one.
-const PACKAGING: &[&str] = &["super-stt-daemon/systemd/super-stt.service", "justfile"];
+const PACKAGING: &[&str] = &["super-voice-daemon/systemd/super-voice.service", "justfile"];
 
 /// Packaging files that declare the daemon's argv as a launchd
 /// `ProgramArguments` array instead.
@@ -23,7 +23,7 @@ const PACKAGING: &[&str] = &["super-stt-daemon/systemd/super-stt.service", "just
 /// `KeepAlive` exactly as one added to `ExecStart=` crash-loops the unit
 /// under `Restart=always`, and the daemon's clap surface is the same one on
 /// both platforms.
-const PACKAGING_PLISTS: &[&str] = &["super-stt-daemon/launchd/ai.menjivar.super-stt.plist"];
+const PACKAGING_PLISTS: &[&str] = &["super-voice-daemon/launchd/ai.menjivar.super-stt.plist"];
 
 /// The `ProgramArguments` array of a launchd plist, as the argument tokens
 /// that follow the program itself.
@@ -142,7 +142,7 @@ fn every_shipped_execstart_parses() {
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         for args in execstart_args(&text) {
-            let argv: Vec<String> = std::iter::once("super-stt-daemon".to_string())
+            let argv: Vec<String> = std::iter::once("super-voice-daemon".to_string())
                 .chain(args.iter().cloned())
                 .collect();
             assert!(
@@ -170,7 +170,7 @@ fn every_shipped_program_arguments_parses() {
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         for args in plist_program_args(&text) {
-            let argv: Vec<String> = std::iter::once("super-stt-daemon".to_string())
+            let argv: Vec<String> = std::iter::once("super-voice-daemon".to_string())
                 .chain(args.iter().cloned())
                 .collect();
             assert!(
@@ -193,7 +193,7 @@ fn every_shipped_program_arguments_parses() {
 #[test]
 fn the_plist_scan_catches_an_injected_flag() {
     let plist = "<key>ProgramArguments</key>\n<array>\n\
-         <string>/usr/local/bin/super-stt-daemon</string>\n\
+         <string>/usr/local/bin/super-voice-daemon</string>\n\
          <string>--model</string>\n<string>whisper</string>\n</array>";
     let found = plist_program_args(plist);
     assert_eq!(
@@ -201,7 +201,7 @@ fn the_plist_scan_catches_an_injected_flag() {
         vec![vec!["--model".to_string(), "whisper".to_string()]]
     );
     let argv = vec![
-        "super-stt-daemon".to_string(),
+        "super-voice-daemon".to_string(),
         "--model".to_string(),
         "whisper".to_string(),
     ];
@@ -224,7 +224,7 @@ fn the_execstart_scan_catches_an_injected_flag() {
         "the scan missed an injected --model: {found:?}"
     );
     for args in found {
-        let argv: Vec<String> = std::iter::once("super-stt-daemon".to_string())
+        let argv: Vec<String> = std::iter::once("super-voice-daemon".to_string())
             .chain(args.iter().cloned())
             .collect();
         if args.contains(&"--model".to_string()) {
@@ -241,7 +241,7 @@ fn the_execstart_scan_catches_an_injected_flag() {
 #[test]
 fn a_bare_execstart_has_no_arguments() {
     let no_args: Vec<Vec<String>> = vec![vec![]];
-    assert_eq!(execstart_args("ExecStart=super-stt-daemon\n"), no_args);
+    assert_eq!(execstart_args("ExecStart=super-voice-daemon\n"), no_args);
     assert_eq!(execstart_args("ExecStart={{ daemon_bin_name }}\n"), no_args);
     // `ExecStartPre=` is a different directive and must not be scanned.
     assert!(execstart_args("ExecStartPre=/bin/sh -c 'true'\n").is_empty());
