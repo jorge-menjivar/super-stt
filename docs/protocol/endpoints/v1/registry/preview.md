@@ -77,7 +77,7 @@ with an install already running for the same source.
 which is *after* the point of no return. A person pasting a repository URL has
 no other way to see what is in it before committing: the name, the version,
 what it runs as, what it can reach, whether this machine can run it. The
-Super STT app calls this to fill the Install-manually drawer's preview, and
+Super Voice app calls this to fill the Install-manually drawer's preview, and
 shows failures in the same panel.
 
 ## Failure modes

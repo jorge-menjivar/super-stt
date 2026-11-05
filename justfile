@@ -1689,12 +1689,10 @@ status: status-daemon
     echo ""
 
     # Check if app is installed
-    if command -v stt &> /dev/null; then
-        echo "✅ App tools: Installed (stt command available)"
-    elif [ -f "{{ app_dst }}" ]; then
-        echo "✅ Super STT App: Installed"
+    if [ -f "{{ app_dst }}" ]; then
+        echo "✅ Super Voice app: Installed"
     else
-        echo "❌ Super STT App: Not installed"
+        echo "❌ Super Voice app: Not installed"
     fi
 
     # Check if daemon binary exists

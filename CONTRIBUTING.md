@@ -1,6 +1,6 @@
-# Contributing to Super STT
+# Contributing to Super Voice
 
-Thank you for your interest in contributing to Super STT! This document provides guidelines for contributing to the project.
+Thank you for your interest in contributing to Super Voice! This document provides guidelines for contributing to the project.
 
 ## Development Setup
 
@@ -79,7 +79,7 @@ right thing instead: they skip the parts that have no macOS counterpart.
 
 ##### The app bundle
 
-On macOS Super STT installs as one bundle, `Super Voice.app`. `just
+On macOS Super Voice installs as one bundle, `Super Voice.app`. `just
 bundle-macos` builds it into `target/release/`, and `just install` (or
 `install-daemon`, `install-app`, `install-cli`: the bundle carries all of
 them) puts it in `/Applications`:
@@ -104,7 +104,7 @@ A main bundle is not enough for notifications, though: Notification Center
 serves only the bundle's own executable, and every request the daemon makes
 fails as "not allowed" whatever the user has chosen. So the daemon runs
 `super-voice-app --notify <title> <body>`, which sets up a windowless
-`NSApplication`, posts as Super STT and exits
+`NSApplication`, posts as Super Voice and exits
 (`super-voice-app/src/core/app/macos/notifier.rs`). A bare daemon falls back
 to `osascript`, whose banners read "Script Editor".
 
@@ -165,7 +165,7 @@ RUST_LOG=super_stt_cli=debug \
 Set this up before you spend an afternoon fighting permissions:
 
 ```bash
-export SUPER_VOICE_SIGN_IDENTITY="Super STT Dev"
+export SUPER_VOICE_SIGN_IDENTITY="Super Voice Dev"
 ```
 
 macOS ties Accessibility and Microphone grants, and Keychain ACLs, to a
@@ -181,7 +181,7 @@ granted. What you actually see:
 - The daemon's `exe_changed` session revocation fires on every rebuild, and
   the client retries against a session it can never get back.
 
-None of that is a bug in Super STT, and none of it is fixable in code.
+None of that is a bug in Super Voice, and none of it is fixable in code.
 
 With the variable set, every `just run-daemon`, `just run-app`, `just
 run-cli`, `just build-*` and `just bundle-macos` re-signs its output with a
@@ -251,15 +251,15 @@ Super Voice is a Rust workspace:
 | `super-voice-registry-types` | Super Voice's backend contract, on `super-engine-spec`         |
 | `super-voice-indexer`      | CI tool that builds the published registry `index.json`          |
 
-The code Super STT shares with Super TTS lives in
+The code Super Voice shares with the other super-libre products lives in
 [super-engine](https://github.com/super-libre/super-engine), pinned by rev in
 the root `Cargo.toml`. A fix to the backend manifest types, for example, goes
 there, and reaches this workspace when the pin is bumped. So does a fix to the
 daemon's session tokens, consent checks or route guards.
 
-The COSMIC panel applet is shared with Super TTS too, and lives in
+The COSMIC panel applet lives in
 [super-cosmic-applet](https://github.com/super-libre/super-cosmic-applet),
-which publishes its own releases. Super STT's releases don't carry it: the
+which publishes its own releases. Super Voice's releases don't carry it: the
 installer installs the applet's newest release for the channel. `just
 install-applet` builds and installs it from a checkout of that repo instead,
 `SHARED_APPLET_DIR` or else `../super-cosmic-applet`.
@@ -319,7 +319,7 @@ If you discover a security vulnerability, please:
 
 ## License
 
-By contributing to Super STT, you agree that your contributions will be licensed under the GPL-3.0-only license.
+By contributing to Super Voice, you agree that your contributions will be licensed under the GPL-3.0-only license.
 
 ## Questions?
 

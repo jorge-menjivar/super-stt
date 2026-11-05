@@ -68,7 +68,7 @@ Host: voice.local
 Content-Type: application/json
 
 {
-  "app_name": "Super STT Settings App",
+  "app_name": "Super Voice Settings App",
   "scopes":   ["settings", "status", "daemon_status"],
   "version":  "0.10.0"
 }

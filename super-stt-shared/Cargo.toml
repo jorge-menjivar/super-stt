@@ -3,7 +3,7 @@
     version.workspace = true
     authors.workspace = true
     edition.workspace = true
-    description = "Shared types and utilities for Super STT"
+    description = "Speech to text's shared types and utilities for Super Voice"
 
 [dependencies]
     anyhow.workspace = true

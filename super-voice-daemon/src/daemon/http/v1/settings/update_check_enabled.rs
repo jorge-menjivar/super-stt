@@ -8,7 +8,7 @@ settings_toggle!(
     "/settings/update_check_enabled",
     UpdateCheckEnabledState,
     "Turn the periodic update check on or off",
-    "Controls whether the daemon checks for new Super STT releases on its own \
+    "Controls whether the daemon checks for new Super Voice releases on its own \
 schedule. Turning it off does not disable updating \u{2014} `POST /update/check` still \
 works on demand."
 );

@@ -27,7 +27,7 @@ any desktop that provides a notification server, and Notification Center on
 macOS.
 
 **Two caveats on macOS.** A banner carries no action buttons, so the "Open
-Super STT" action on an update notice is absent there. And the daemon cannot
+Super Voice" action on an update notice is absent there. And the daemon cannot
 tell whether a banner was actually shown — if notifications are muted for the
 posting application, or Do Not Disturb is on, the post still reports success,
 so `auto` will *not* fall back to typing. Both follow from the daemon being a

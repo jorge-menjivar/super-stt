@@ -206,7 +206,7 @@ fn describe_connection_failure(e: NewConError) -> anyhow::Error {
         );
         #[cfg(target_os = "macos")]
         return anyhow::anyhow!(
-            "Super STT is not allowed to control your keyboard. Add {exe} under \
+            "Super Voice is not allowed to control your keyboard. Add {exe} under \
              System Settings › Privacy & Security › Accessibility, then {}.",
             restart_instruction()
         );
