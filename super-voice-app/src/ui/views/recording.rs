@@ -3,8 +3,8 @@ use cosmic::Element;
 use cosmic::iced::widget::row;
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, settings, text};
-use super_stt_shared::models::protocol::PreviewSource;
-use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::models::protocol::PreviewSource;
+use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
 
 use super::common::error_banner;
 use crate::state::RecordingStatus;

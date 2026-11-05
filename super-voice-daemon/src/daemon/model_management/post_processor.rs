@@ -16,7 +16,7 @@ use log::{info, warn};
 
 use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::{SuperSTTDaemon, normalize_device};
-use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
+use super_voice_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
 
 impl SuperSTTDaemon {
     /// Load the post-processor named by the config into its slot, replacing

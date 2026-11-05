@@ -10,7 +10,7 @@ use anyhow::Result;
 use log::debug;
 #[cfg(target_os = "linux")]
 use log::warn;
-use super_stt_shared::models::write_method::WriteMethod;
+use super_voice_shared::models::write_method::WriteMethod;
 
 use enigo_backend::EnigoBackend;
 #[cfg(target_os = "linux")]

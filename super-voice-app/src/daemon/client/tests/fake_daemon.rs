@@ -142,8 +142,12 @@ impl FakeDaemon {
         // with the scopes it now asks for. `save` writes the token file on its
         // way, which is why the run needs a state directory of its own.
         let granted: Vec<String> = SETTINGS_SCOPES.iter().map(|s| (*s).to_string()).collect();
-        let _ =
-            super_stt_shared::daemon::session::save(APP_ID_NAME, TOKEN, SETTINGS_SCOPES, &granted);
+        let _ = super_voice_shared::daemon::session::save(
+            APP_ID_NAME,
+            TOKEN,
+            SETTINGS_SCOPES,
+            &granted,
+        );
 
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(

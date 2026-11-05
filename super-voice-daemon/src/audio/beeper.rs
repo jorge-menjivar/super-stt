@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use std::time::Instant;
-use super_stt_shared::product::SUPER_VOICE;
+use super_voice_shared::product::SUPER_VOICE;
 
 /// Play a sequence of beeps. See `super_engine_daemon::beeper::play_beep_sequence`.
 ///

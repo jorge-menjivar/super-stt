@@ -4,9 +4,9 @@
 //! sees the backend before committing to it.
 
 use crate::daemon::client::internal::session::with_settings_token;
-use super_stt_shared::daemon::http_client::HttpResult;
-use super_stt_shared::daemon::http_client::transport;
-use super_stt_shared::registry::PreviewResponse;
+use super_voice_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client::transport;
+use super_voice_shared::registry::PreviewResponse;
 
 /// Resolve `repo_url` and describe the backend it would install.
 pub async fn preview_by_repo_url(repo_url: &str) -> HttpResult<PreviewResponse> {

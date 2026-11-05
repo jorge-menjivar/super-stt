@@ -9,7 +9,7 @@ use axum::response::IntoResponse;
 
 use crate::daemon::http::state::AppState;
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
-use super_stt_shared::models::self_update::SelfUpdateStatus;
+use super_voice_shared::models::self_update::SelfUpdateStatus;
 
 #[utoipa::path(
     get,

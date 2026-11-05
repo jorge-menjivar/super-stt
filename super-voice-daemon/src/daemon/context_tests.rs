@@ -14,9 +14,9 @@ use crate::stt_models::transcribe::{
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use super_stt_shared::models::contexts::{DictationContext, MAX_PROMPT_CHARS};
-use super_stt_shared::models::protocol::ErrorCode;
 use super_voice_registry_types::manifest::{Capabilities, Device, ModelRole, VoiceCapabilities};
+use super_voice_shared::models::contexts::{DictationContext, MAX_PROMPT_CHARS};
+use super_voice_shared::models::protocol::ErrorCode;
 
 fn coding() -> DictationContext {
     DictationContext {

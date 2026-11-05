@@ -5,7 +5,7 @@
 //! The daemon builds error bodies through several constructors, each with a
 //! slightly different shape (`error_code`,
 //! `message`, `data.reason`). The client collapses all of them in one place —
-//! [`super_tts_shared::daemon::http_client::transport::daemon_error`] — into
+//! [`super_voice_shared::tts::daemon::http_client::transport::daemon_error`] — into
 //! the text a user actually sees.
 //!
 //! Nothing structural keeps those two halves in agreement: they live in
@@ -23,8 +23,8 @@ use super::internal::helpers::responses::{invalid_session, rate_limited, reason,
 use super::v1::backends::{json_error, json_error_msg};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use super_tts_shared::daemon::http_client::transport::error_for_status;
-use super_tts_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_shared::tts::daemon::http_client::transport::error_for_status;
+use super_voice_shared::tts::models::protocol::{DaemonResponse, ErrorCode};
 
 async fn parts_of(resp: Response) -> (StatusCode, Vec<u8>) {
     let status = resp.status();

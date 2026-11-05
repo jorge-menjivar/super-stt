@@ -34,7 +34,7 @@ impl AppModel {
 
             ModelsPageMessage::InstallAccepted { source, install_id } => {
                 use crate::state::registry::InstallStatus;
-                use super_stt_shared::registry::events::InstallPhase;
+                use super_voice_shared::registry::events::InstallPhase;
                 // The request was accepted — retire any prior start error.
                 self.registry.install_errors.remove(&source);
                 self.registry.installs.insert(
@@ -52,8 +52,8 @@ impl AppModel {
 
             ModelsPageMessage::InstallFailedToStart { source, error } => {
                 log::error!("install({source}) failed to start: {error}");
-                let error = super_stt_shared::daemon::http_client::HttpError::Other(error)
-                    .user_message(&super_stt_shared::SUPER_VOICE);
+                let error = super_voice_shared::daemon::http_client::HttpError::Other(error)
+                    .user_message(&super_voice_shared::SUPER_VOICE);
                 // Drop the pending marker (there is no background install) and
                 // record the reason so the Browse card shows "Failed" + a note
                 // instead of silently snapping back to the Install button.

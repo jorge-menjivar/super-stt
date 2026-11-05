@@ -13,7 +13,7 @@ use crate::daemon::http::state::AppState;
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 use axum::extract::State;
 use axum::response::Response;
-use super_stt_shared::models::status::{FeatureStatus, VoiceStatus};
+use super_voice_shared::models::status::{FeatureStatus, VoiceStatus};
 
 #[utoipa::path(
     get,

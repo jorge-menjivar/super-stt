@@ -6,9 +6,9 @@
 //! operation with that token and, on `invalid_session`, drops the cache
 //! and retries once with fresh consent.
 
-use super_stt_shared::daemon::http_client::HttpResult;
-use super_stt_shared::daemon::session::{self, AppId};
-use super_stt_shared::validation::get_http_socket_path;
+use super_voice_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::session::{self, AppId};
+use super_voice_shared::validation::get_http_socket_path;
 
 /// Scope set the settings app requests. One cached token covers
 /// everything the app does: config + registry (`settings`), the

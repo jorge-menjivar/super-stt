@@ -27,7 +27,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
-use super_stt_shared::models::contexts::DictationContext;
+use super_voice_shared::models::contexts::DictationContext;
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;

@@ -10,7 +10,7 @@ use crate::daemon::client::v1::pipeline::voice as model_voice;
 use crate::state::{ErrorScope, VoiceResolution};
 use crate::ui::messages::{Message, VoiceMessage};
 use cosmic::prelude::*;
-use super_stt_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client::HttpResult;
 
 impl AppModel {
     /// Route every voice message.

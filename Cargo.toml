@@ -7,8 +7,7 @@
     "super-voice-daemon",
     "super-voice-indexer",
     "super-voice-install",
-    "super-stt-shared",
-    "super-tts-shared",
+    "super-voice-shared",
     "super-voice-registry-types",
   ]
   # The mock WASM backend fixtures build for wasm32-wasip2, not the host target
@@ -30,8 +29,7 @@
     "super-voice-consent",
     "super-voice-daemon",
     "super-voice-install",
-    "super-stt-shared",
-    "super-tts-shared",
+    "super-voice-shared",
     "super-voice-registry-types",
   ]
 

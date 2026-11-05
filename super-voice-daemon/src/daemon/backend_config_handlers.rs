@@ -3,9 +3,11 @@
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::backends::DiscoveredBackend;
 use log::{info, warn};
-use super_stt_shared::models::backends::{BackendInfo, BackendModel, BackendOption, BackendSecret};
-use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 use super_voice_registry_types::manifest::{ModelRole, Opt};
+use super_voice_shared::models::backends::{
+    BackendInfo, BackendModel, BackendOption, BackendSecret,
+};
+use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
 
 /// Fold an optional reload-failure warning into a success message, so a failed
 /// post-write model reload is surfaced to the caller instead of swallowed.

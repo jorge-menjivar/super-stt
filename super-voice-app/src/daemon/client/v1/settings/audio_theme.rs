@@ -5,8 +5,8 @@
 use crate::daemon::client::internal::response::{require_message, require_success};
 use crate::daemon::client::internal::session::with_settings_token;
 use crate::state::AudioTheme;
-use super_stt_shared::daemon::http_client::HttpResult;
-use super_stt_shared::daemon::http_client::transport;
+use super_voice_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client::transport;
 
 /// Read the configured audio-cue theme (HTTP `GET /audio_theme`).
 pub async fn get_current_audio_theme() -> HttpResult<AudioTheme> {

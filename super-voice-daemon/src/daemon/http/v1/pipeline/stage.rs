@@ -11,7 +11,7 @@ use crate::daemon::http::state::AppState;
 use axum::extract::{Path, State};
 use axum::response::Response;
 use serde::Deserialize;
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_voice_shared::models::protocol::DaemonResponse;
 
 use super::{Stage, unknown_stage};
 use crate::daemon::http::v1::wire::{FromDaemon, StageEnvelope, StageMutation};

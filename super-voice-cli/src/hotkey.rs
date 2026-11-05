@@ -24,7 +24,7 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use std::path::PathBuf;
-use super_stt_shared::daemon::session::{self, AppId};
+use super_voice_shared::daemon::session::{self, AppId};
 
 /// The listener's own identity to the daemon, apart from `stt`'s.
 ///

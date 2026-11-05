@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! What Super Voice's daemon and clients share: the session, scopes, paths,
+//! status and protocol types, and speech to text's own. Text to speech's own
+//! are in [`tts`].
+pub mod consent;
+pub mod daemon;
+#[cfg(target_os = "macos")]
+pub mod launch_agents;
+pub mod logging;
+pub mod models;
+pub mod paths;
+pub mod product;
+pub mod registry;
+pub mod tts;
+pub mod utils;
+pub mod validation;
+
+pub use product::SUPER_VOICE;
+pub use super_engine_protocol::sandbox;
+
+pub mod audio;
+
+// Explicit, non-shadowing re-export. A blanket `pub use models::*` used to lift
+// the `models::{registry,audio}` submodule names to the crate root, where they
+// were silently shadowed by the top-level `registry`/`audio` modules. Consumers
+// reach model types via their full `models::<sub>` paths; only `theme` is used
+// at the crate root, so re-export just that.
+pub use models::theme;
+
+#[cfg(feature = "audio")]
+pub use utils::audio as audio_utils;
+
+pub use audio::*;

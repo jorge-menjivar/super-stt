@@ -37,7 +37,7 @@ use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use log::{info, warn};
-use super_stt_shared::registry::UninstallResponse;
+use super_voice_shared::registry::UninstallResponse;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 

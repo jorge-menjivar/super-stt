@@ -8,14 +8,14 @@
 //! `match`es its sub-enum exhaustively — so a newly added variant is a compile
 //! error at both ends instead of silently falling through to `Task::none()`.
 
-use super_stt_shared::models::notification_method::NotificationMethod;
-use super_stt_shared::models::protocol::PreviewSource;
-use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-use super_stt_shared::models::write_method::WriteMethod;
+use super_voice_shared::models::notification_method::NotificationMethod;
+use super_voice_shared::models::protocol::PreviewSource;
+use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::models::write_method::WriteMethod;
 
 use cosmic::widget::segmented_button;
 
-use super_stt_shared::models::contexts::DictationContext;
+use super_voice_shared::models::contexts::DictationContext;
 
 use crate::daemon::backends::BackendInfo;
 use crate::state::{AudioTheme, ContextPage};
@@ -97,7 +97,7 @@ pub enum ShellMessage {
     /// Where the bundle's daemon agent stands, looked up while the daemon is
     /// unreachable. See `core::app::macos::bundle`.
     #[cfg(target_os = "macos")]
-    DaemonAgent(super_stt_shared::launch_agents::Status),
+    DaemonAgent(super_voice_shared::launch_agents::Status),
     /// Register the bundle's agents, for a daemon agent that is not.
     #[cfg(target_os = "macos")]
     RegisterAgents,
@@ -109,7 +109,7 @@ pub enum ShellMessage {
 /// Daemon connection, connection-time settings loads, and the SSE event stream.
 #[derive(Debug, Clone)]
 pub enum DaemonMessage {
-    DaemonConnectionResult(super_stt_shared::daemon::http_client::HttpResult<()>),
+    DaemonConnectionResult(super_voice_shared::daemon::http_client::HttpResult<()>),
     DaemonConnected,
     /// The `/events` SSE stream finished (re)subscribing. Distinct from
     /// `DaemonConnected` (which the REST ping loop also fires): it marks the
@@ -125,7 +125,7 @@ pub enum DaemonMessage {
     VolumeLoaded(u8),
     // Carries the typed error so `classify_daemon_error` can decide
     // blocked-vs-retry on the variant, not the wording.
-    DaemonError(super_stt_shared::daemon::http_client::HttpError),
+    DaemonError(super_voice_shared::daemon::http_client::HttpError),
     RefreshDaemonStatus,
     RetryConnection,
     /// User denied (or had been denying via deny cache) settings-scope
@@ -137,7 +137,7 @@ pub enum DaemonMessage {
     /// consent flow.
     RetryAuthorization,
     PingTimeout,
-    DaemonEventsReceived(Vec<super_stt_shared::models::protocol::NotificationEvent>),
+    DaemonEventsReceived(Vec<super_voice_shared::models::protocol::NotificationEvent>),
 }
 
 /// Model identity: startup load, and the current/loaded model.
@@ -183,7 +183,7 @@ pub enum ModelsPageMessage {
     /// [`ModelsPageMessage::GpuInfoLoaded`].
     RefreshGpuInfo,
     /// GPU inventory + memory loaded from the daemon (empty when none detected).
-    GpuInfoLoaded(Vec<super_stt_shared::models::protocol::GpuInfo>),
+    GpuInfoLoaded(Vec<super_voice_shared::models::protocol::GpuInfo>),
     // Registry / Download-tab messages
     /// User clicked Install on a Download-tab card.
     InstallBackend(String),
@@ -195,7 +195,7 @@ pub enum ModelsPageMessage {
     InstallProgress {
         install_id: String,
         source: String,
-        phase: super_stt_shared::registry::events::InstallPhase,
+        phase: super_voice_shared::registry::events::InstallPhase,
         bytes_done: Option<u64>,
         bytes_total: Option<u64>,
     },
@@ -205,8 +205,8 @@ pub enum ModelsPageMessage {
     InstallFailed {
         install_id: String,
         source: String,
-        phase: super_stt_shared::registry::events::InstallPhase,
-        error: super_stt_shared::registry::events::InstallError,
+        phase: super_voice_shared::registry::events::InstallPhase,
+        error: super_voice_shared::registry::events::InstallError,
     },
     /// User clicked Update on an Installed-tab card.
     UpdateBackend(String),
@@ -218,7 +218,7 @@ pub enum ModelsPageMessage {
     /// User clicked Retry on the Download-tab empty state, or any other refresh trigger.
     RefreshRegistry,
     /// Initial fetch of /registry/backend/list succeeded.
-    RegistryListLoaded(super_stt_shared::registry::RegistryListResponse),
+    RegistryListLoaded(super_voice_shared::registry::RegistryListResponse),
     /// Initial fetch of /registry/backend/list failed.
     RegistryListFailed(String),
     /// User typed in the search box.
@@ -263,7 +263,7 @@ pub enum ModelsPageMessage {
     /// the source without installing it.
     CheckAddSource,
     /// A preview resolved. Carries the backend the source would install.
-    AddPreviewLoaded(Box<super_stt_shared::registry::PreviewResponse>),
+    AddPreviewLoaded(Box<super_voice_shared::registry::PreviewResponse>),
     /// A preview failed. Carries the daemon's message, shown verbatim.
     AddPreviewFailed(String),
     /// One frame of the drawer's "reading" spinner. Only fires while a check
@@ -289,7 +289,7 @@ pub enum DownloadMessage {
     /// poll.
     DownloadProgressUpdate {
         stage: Stage,
-        progress: Box<super_stt_shared::models::protocol::DownloadProgress>,
+        progress: Box<super_voice_shared::models::protocol::DownloadProgress>,
     },
     /// Abandon the download the named stage has in flight. Every variant below
     /// that settles a stage's card carries its stage for the same reason: the
@@ -470,8 +470,8 @@ pub enum VoicesMessage {
     /// Fetch the library and the loaded model's cloning capability.
     Refresh,
     VoicesLoaded {
-        voices: Vec<super_tts_shared::models::voices::VoiceInfo>,
-        model: Option<super_tts_shared::models::voices::VoiceModelSupport>,
+        voices: Vec<super_voice_shared::tts::models::voices::VoiceInfo>,
+        model: Option<super_voice_shared::tts::models::voices::VoiceModelSupport>,
     },
     LoadFailed(String),
 
@@ -503,7 +503,7 @@ pub enum VoicesMessage {
     DiscardPending,
     /// Upload the pending sample as a new voice.
     Save,
-    Saved(super_tts_shared::models::voices::VoiceInfo),
+    Saved(super_voice_shared::tts::models::voices::VoiceInfo),
     SaveFailed(String),
 
     /// Start editing one voice's label. Carries the id and the label to seed
@@ -515,7 +515,7 @@ pub enum VoicesMessage {
     RenameChanged(String),
     CommitRename,
     CancelRename,
-    Renamed(super_tts_shared::models::voices::VoiceInfo),
+    Renamed(super_voice_shared::tts::models::voices::VoiceInfo),
     RenameFailed(String),
 
     Delete(String),
@@ -774,7 +774,7 @@ pub enum RecordingMessage {
 pub enum BetaOptinOutcome {
     /// Saved, and the re-check returned a fresh status (`None` = the daemon
     /// predates `/v1/update`).
-    Applied(Option<super_stt_shared::models::self_update::SelfUpdateStatus>),
+    Applied(Option<super_voice_shared::models::self_update::SelfUpdateStatus>),
     /// The setting write itself failed; nothing changed daemon-side.
     WriteFailed(String),
     /// Saved, but the follow-up re-check failed. The toggle stands; only the
@@ -787,7 +787,7 @@ pub enum BetaOptinOutcome {
 /// `UpdateAvailable` SSE-driven refetch.
 #[derive(Debug, Clone)]
 pub enum UpdateMessage {
-    StatusLoaded(Option<super_stt_shared::models::self_update::SelfUpdateStatus>),
+    StatusLoaded(Option<super_voice_shared::models::self_update::SelfUpdateStatus>),
     StatusError(String),
     CheckNow,
     AutoCheckLoaded(bool),

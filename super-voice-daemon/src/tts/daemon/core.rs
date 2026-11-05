@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::tts::daemon::types::SuperTTSDaemon;
-use super_tts_shared::models::protocol::{Command, DaemonRequest, DaemonResponse};
+use super_voice_shared::tts::models::protocol::{Command, DaemonRequest, DaemonResponse};
 
 impl SuperTTSDaemon {
     /// Route a text-to-speech command to its handler.
@@ -52,26 +52,6 @@ impl SuperTTSDaemon {
             Command::GetActiveBackend => self.handle_get_active_backend().await,
             Command::ClearActiveBackend => self.handle_clear_active_backend().await,
             Command::GetPipeline => self.handle_get_pipeline().await,
-            Command::Ping { .. }
-            | Command::SetAudioTheme { .. }
-            | Command::GetAudioTheme
-            | Command::TestAudioTheme
-            | Command::ListAudioThemes
-            | Command::SetNotificationMethod { .. }
-            | Command::GetNotificationMethod
-            | Command::SetUpdateCheckEnabled { .. }
-            | Command::GetUpdateCheckEnabled
-            | Command::SetUpdateBetaOptin { .. }
-            | Command::GetUpdateBetaOptin
-            | Command::SetVolume { .. }
-            | Command::GetVolume
-            | Command::SetPrimaryLanguage { .. }
-            | Command::GetPrimaryLanguage
-            | Command::ClearPrimaryLanguage
-            | Command::ListPrimaryLanguages
-            | Command::GetGpuInfo => DaemonResponse::error(
-                "This is one of the daemon's shared settings, not text to speech's",
-            ),
         }
     }
 }

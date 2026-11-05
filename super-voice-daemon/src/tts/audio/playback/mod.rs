@@ -40,7 +40,7 @@ use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, StreamTrait};
 use log::{debug, warn};
 use parking_lot::Mutex;
-use super_tts_shared::audio::frames::AudioParams;
+use super_voice_shared::tts::audio::frames::AudioParams;
 
 pub use mixer::DeviceFormat;
 use mixer::SeamFade;

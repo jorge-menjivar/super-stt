@@ -8,7 +8,7 @@ use crate::core::app::AppModel;
 use crate::daemon::backends::{BackendInfo, BackendOption, BackendSecret};
 use crate::daemon::client::ContextMode;
 use crate::ui::messages::{BackendMessage, ContextsMessage, Message};
-use super_stt_shared::models::contexts::DictationContext;
+use super_voice_shared::models::contexts::DictationContext;
 
 use super::surface::muted_text_color;
 

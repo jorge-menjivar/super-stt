@@ -9,11 +9,11 @@
 //!        --features test-fixtures --test `subprocess_mock` -- --nocapture
 #![cfg(all(feature = "subprocess-backends", feature = "test-fixtures"))]
 
-use super_tts_shared::audio::frames::{FrameKind, SampleFormat};
 use super_voice_daemon::registry::host_detect;
 use super_voice_daemon::tts::tts_models::subprocess::SubprocessBackend;
 use super_voice_daemon::tts::tts_models::synthesize::Synthesize;
 use super_voice_daemon::tts::tts_models::v1::{CollectingSink, SynthesizeRequest};
+use super_voice_shared::tts::audio::frames::{FrameKind, SampleFormat};
 
 /// Removes the per-test backend dir on scope exit — including panic unwinds, so a
 /// failed assertion doesn't leak `~/.cache/super-tts-mock-test-<pid>`.
@@ -26,7 +26,7 @@ impl Drop for CleanupDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
         if let Some(name) = self.0.file_name() {
-            let cache = super_tts_shared::paths::cache_dir()
+            let cache = super_voice_shared::paths::cache_dir()
                 .join("backends")
                 .join(name);
             let _ = std::fs::remove_dir_all(cache);
@@ -386,7 +386,7 @@ async fn serve_model_files() -> String {
 /// The files the mock's prepare saw, one per line, or `None` when no prepare
 /// finished. See the mock's `PREPARED_MARKER`.
 fn prepared_with(dir: &std::path::Path) -> Option<String> {
-    let cache = super_tts_shared::paths::cache_dir()
+    let cache = super_voice_shared::paths::cache_dir()
         .join("backends")
         .join(dir.file_name().unwrap());
     std::fs::read_to_string(cache.join("prepared")).ok()

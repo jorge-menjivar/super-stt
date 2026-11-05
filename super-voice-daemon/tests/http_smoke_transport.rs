@@ -20,7 +20,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::client::conn::http1::handshake;
 use std::path::PathBuf;
-use super_stt_shared::daemon::http_client;
+use super_voice_shared::daemon::http_client;
 use tokio::net::UnixStream;
 
 async fn start_daemon() -> (TestDaemon, PathBuf) {

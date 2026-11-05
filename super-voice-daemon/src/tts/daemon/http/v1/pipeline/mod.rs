@@ -88,7 +88,7 @@ impl Stage {
     /// command bus.
     fn resolve(stage: u32) -> Option<Self> {
         match stage {
-            super_tts_shared::models::protocol::SYNTHESIS_STAGE => Some(Self {
+            super_voice_shared::tts::models::protocol::SYNTHESIS_STAGE => Some(Self {
                 list_backends: "list_backends",
                 set_backend: "set_active_backend",
                 clear_backend: "clear_active_backend",

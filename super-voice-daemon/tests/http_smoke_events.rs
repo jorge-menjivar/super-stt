@@ -33,7 +33,7 @@ use hyper::body::Bytes;
 use hyper::client::conn::http1::handshake;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use super_stt_shared::daemon::http_client;
+use super_voice_shared::daemon::http_client;
 use tokio::net::UnixStream;
 use tokio::time::timeout;
 

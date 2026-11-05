@@ -11,8 +11,8 @@ use anyhow::Result;
 use std::sync::{Arc, RwLock};
 use super_engine_daemon::load_gate::LoadGate;
 use super_engine_daemon::secrets::Secrets;
-use super_stt_shared::models::protocol::{DaemonStatusEvent, PreviewSource};
-use super_stt_shared::theme::AudioTheme;
+use super_voice_shared::models::protocol::{DaemonStatusEvent, PreviewSource};
+use super_voice_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
 
 /// Normalize a backend-reported device label to the short wire-name

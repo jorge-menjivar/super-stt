@@ -17,8 +17,8 @@ use common::TestDaemon;
 use futures_util::StreamExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use super_stt_shared::daemon::session::{self, AppId};
-use super_stt_shared::daemon::widget_subscription::{
+use super_voice_shared::daemon::session::{self, AppId};
+use super_voice_shared::daemon::widget_subscription::{
     DEFAULT_INITIAL_BACKOFF, DEFAULT_MAX_BACKOFF, WidgetSubscriptionConfig,
     WidgetSubscriptionUpdate, run_widget_subscription,
 };

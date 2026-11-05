@@ -7,7 +7,7 @@ use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, settings, text};
 
-use super_stt_shared::models::self_update::SelfUpdateStatus;
+use super_voice_shared::models::self_update::SelfUpdateStatus;
 
 use super::common::{error_banner, page_layout};
 use super::models::{accent_button_class, pill_label_tinted, rounded_tooltip};

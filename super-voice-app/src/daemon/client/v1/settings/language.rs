@@ -6,8 +6,8 @@
 
 use crate::daemon::client::internal::response::{require_success, require_unit};
 use crate::daemon::client::internal::session::with_settings_token;
-use super_stt_shared::daemon::http_client::HttpResult;
-use super_stt_shared::daemon::http_client::transport;
+use super_voice_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client::transport;
 
 /// Read the global primary language (HTTP `GET /language`).
 /// Returns `None` when unset (daemon will auto-detect or use the model default).

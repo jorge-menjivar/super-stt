@@ -20,8 +20,8 @@ pub(crate) use super_engine_daemon::devices::{
     parse_device_preference,
 };
 use super_engine_daemon::devices::{device_rejection, device_switch_message, switch_is_satisfied};
-use super_stt_shared::models::protocol::{Command, DaemonResponse, DaemonStatusEvent, ErrorCode};
 use super_voice_registry_types::manifest::Device;
+use super_voice_shared::models::protocol::{Command, DaemonResponse, DaemonStatusEvent, ErrorCode};
 
 /// The pipeline stage a device command addresses. Each has its own selected
 /// backend, its own loaded slot and its own reload path; everything between
@@ -41,8 +41,8 @@ impl PipelineStage {
     #[must_use]
     pub fn position(self) -> u32 {
         match self {
-            Self::Transcription => super_stt_shared::models::protocol::TRANSCRIPTION_STAGE,
-            Self::PostProcessor => super_stt_shared::models::protocol::POST_PROCESSOR_STAGE,
+            Self::Transcription => super_voice_shared::models::protocol::TRANSCRIPTION_STAGE,
+            Self::PostProcessor => super_voice_shared::models::protocol::POST_PROCESSOR_STAGE,
         }
     }
 

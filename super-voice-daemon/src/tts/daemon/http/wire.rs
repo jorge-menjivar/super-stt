@@ -13,10 +13,10 @@
 //! endpoints; a response peculiar to one endpoint is declared next to that
 //! handler instead.
 //!
-//! [`DaemonResponse`]: super_tts_shared::models::protocol::DaemonResponse
+//! [`DaemonResponse`]: super_voice_shared::tts::models::protocol::DaemonResponse
 
 use serde::Serialize;
-use super_tts_shared::models::protocol::ErrorCode;
+use super_voice_shared::tts::models::protocol::ErrorCode;
 use utoipa::ToSchema;
 
 /// The plain acknowledgement: an operation succeeded, with a sentence saying

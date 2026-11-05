@@ -10,7 +10,7 @@
 use crate::daemon::client::BackendContext;
 use cosmic::widget;
 use std::collections::HashMap;
-use super_stt_shared::models::contexts::DictationContext;
+use super_voice_shared::models::contexts::DictationContext;
 
 /// Everything the Contexts page holds.
 #[derive(Debug, Default)]

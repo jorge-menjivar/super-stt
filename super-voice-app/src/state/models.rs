@@ -3,7 +3,7 @@
 //! Data models and types for the Super Voice application.
 
 // Re-export AudioTheme from shared crate
-pub use super_stt_shared::models::theme::AudioTheme;
+pub use super_voice_shared::models::theme::AudioTheme;
 
 /// Daemon connection status
 #[derive(Debug, Clone, Default, PartialEq)]

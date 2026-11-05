@@ -71,7 +71,7 @@ service_dst := systemd_unit_dir / service_file
 # Named as a list rather than reached with `--workspace --exclude` so the
 # macOS gates say what they cover, and so a new portable crate has to be added
 # deliberately rather than silently skipped.
-macos_members := '-p super-voice-daemon -p super-voice-cli -p super-stt-shared -p super-voice-registry-types -p super-voice-install -p super-voice-app'
+macos_members := '-p super-voice-daemon -p super-voice-cli -p super-voice-shared -p super-voice-registry-types -p super-voice-install -p super-voice-app'
 
 # macOS ships as one app bundle, `Super Voice.app`: the settings app is its
 # executable, and the daemon and the CLI sit beside it in Contents/MacOS. The
@@ -584,7 +584,7 @@ run-app *args:
     # signed — the binary reverts to ad-hoc, with its mtime rolled back to
     # the deps artifact's, and macOS quietly drops every grant again.
 
-    exec env RUST_BACKTRACE=full RUST_LOG=super_voice_app=debug,super_stt_shared=debug \
+    exec env RUST_BACKTRACE=full RUST_LOG=super_voice_app=debug,super_voice_shared=debug \
         "$exe"
 
 # Run the daemon for testing purposes.
@@ -647,7 +647,7 @@ run-cli *args:
     # signed — the binary reverts to ad-hoc, with its mtime rolled back to
     # the deps artifact's, and macOS quietly drops every grant again.
 
-    exec env RUST_BACKTRACE=full RUST_LOG=super_stt_cli=debug,super_stt_shared=debug \
+    exec env RUST_BACKTRACE=full RUST_LOG=super_stt_cli=debug,super_voice_shared=debug \
         "$exe" {{ args }}
 
 # Run the consent dialog on its own, without the daemon. The dialog is
@@ -680,7 +680,7 @@ run-consent *scopes: linux-only-gui
     # Quiet RUST_LOG: the default pulls in thousands of wgpu/zbus/wayland lines
     # at startup and buries the dialog's own output.
     env RUST_BACKTRACE=full \
-        RUST_LOG=super_voice_consent=debug,super_stt_shared=debug \
+        RUST_LOG=super_voice_consent=debug,super_voice_shared=debug \
         SUPER_VOICE_AUTH_APP_NAME="Test App" \
         SUPER_VOICE_AUTH_SCOPES="$scopes" \
         SUPER_VOICE_AUTH_EXE_PATH="/usr/bin/test-app" \

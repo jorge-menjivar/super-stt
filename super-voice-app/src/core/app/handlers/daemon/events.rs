@@ -5,7 +5,7 @@ use crate::state::{BlockStage, Stage};
 use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message, UpdateMessage};
 use cosmic::prelude::*;
 use log::{debug, info, warn};
-use super_stt_shared::models::protocol::{DaemonStatusEvent, NotificationEvent};
+use super_voice_shared::models::protocol::{DaemonStatusEvent, NotificationEvent};
 
 /// How a `SettingsChanged { setting }` SSE event should refresh the Updates
 /// page's state, for the two self-update settings (`language` needs
@@ -328,7 +328,7 @@ impl AppModel {
         &mut self,
         data: &serde_json::Value,
     ) -> Option<Task<cosmic::Action<Message>>> {
-        use super_tts_shared::models::protocol::DaemonStatusEvent as SynthesisEvent;
+        use super_voice_shared::tts::models::protocol::DaemonStatusEvent as SynthesisEvent;
         let event = match serde_json::from_value::<SynthesisEvent>(data.clone()) {
             Ok(event) => event,
             Err(e) => {
@@ -400,11 +400,10 @@ impl AppModel {
         event: &NotificationEvent,
     ) -> Option<Task<cosmic::Action<Message>>> {
         // Handle download progress events
-        let progress =
-            serde_json::from_value::<super_stt_shared::models::protocol::DownloadProgress>(
-                event.data.clone(),
-            )
-            .ok()?;
+        let progress = serde_json::from_value::<
+            super_voice_shared::models::protocol::DownloadProgress,
+        >(event.data.clone())
+        .ok()?;
 
         debug!(
             "Received download progress event: {}% for {}",

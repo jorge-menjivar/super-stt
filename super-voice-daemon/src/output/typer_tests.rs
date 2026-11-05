@@ -2,7 +2,7 @@
 use super::*;
 use crate::output::keyboard::Simulator;
 use crate::output::notice;
-use super_stt_shared::models::protocol::PreviewSource;
+use super_voice_shared::models::protocol::PreviewSource;
 
 // ---------------------------------------------------------------------------
 // type_notice (fixed failure markers)

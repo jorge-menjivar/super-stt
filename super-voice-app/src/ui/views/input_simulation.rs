@@ -3,7 +3,7 @@ use cosmic::Element;
 use cosmic::iced::widget::row;
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, Id, button, settings, text};
-use super_stt_shared::models::write_method::WriteMethod;
+use super_voice_shared::models::write_method::WriteMethod;
 
 use super::common::error_banner;
 use crate::ui::messages::{Message, WriteMethodMessage};

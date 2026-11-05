@@ -47,7 +47,7 @@ use super_engine_daemon::auth::consent::ConsentDialog;
 use super_engine_daemon::auth::{Auth, AuthConfig};
 use super_engine_daemon::http::server::{Listeners, serve};
 use super_engine_daemon::instance::InstanceLock;
-use super_stt_shared::SUPER_VOICE;
+use super_voice_shared::SUPER_VOICE;
 use tokio::sync::broadcast;
 
 /// Env var that, when set to "1", bypasses the consent popup entirely
@@ -83,7 +83,7 @@ pub async fn start_http_server(
     let config = AuthConfig {
         dialog: ConsentDialog {
             product: &SUPER_VOICE,
-            describe_scopes: super_stt_shared::consent::permissions_for_scopes,
+            describe_scopes: super_voice_shared::consent::permissions_for_scopes,
         },
         secrets: daemon.secrets.clone(),
         resource_manager: Arc::clone(&resource_manager),

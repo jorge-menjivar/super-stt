@@ -3,7 +3,7 @@
 //! (`require_rate_limit`) actually surfaces `429 rate_limited` on the wire.
 //!
 //! The limiting *logic* (`ResourceManager::record_request`) has unit tests
-//! in `super-stt-shared`; this test pins the HTTP wiring — that exceeding
+//! in `super-voice-shared`; this test pins the HTTP wiring — that exceeding
 //! the quota for a client turns into a `429` response rather than being
 //! silently dropped or mis-mapped.
 //!
@@ -28,7 +28,7 @@ use http_body_util::{BodyExt, Empty};
 use hyper::body::Bytes;
 use hyper::client::conn::http1::handshake;
 use std::path::PathBuf;
-use super_stt_shared::daemon::http_client;
+use super_voice_shared::daemon::http_client;
 use tokio::net::UnixStream;
 
 /// The daemon's quota, the same in the debug build under test as in a release.

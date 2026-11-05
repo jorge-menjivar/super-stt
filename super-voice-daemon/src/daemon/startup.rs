@@ -17,7 +17,7 @@ use anyhow::Result;
 use log::{info, warn};
 use std::sync::{Arc, RwLock};
 use super_engine_daemon::secrets::Secrets;
-use super_stt_shared::SUPER_VOICE;
+use super_voice_shared::SUPER_VOICE;
 use tokio::sync::broadcast;
 
 /// Pre-assembled subsystem handles created during daemon startup.

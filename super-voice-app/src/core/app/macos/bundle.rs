@@ -14,7 +14,7 @@ use objc2::runtime::Bool;
 use objc2_foundation::{NSBundle, NSError};
 use objc2_user_notifications::{UNAuthorizationOptions, UNUserNotificationCenter};
 use std::time::Duration;
-use super_stt_shared::launch_agents::{Agent, Status};
+use super_voice_shared::launch_agents::{Agent, Status};
 
 use crate::ui::messages::{Message, ShellMessage};
 

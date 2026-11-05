@@ -194,7 +194,7 @@ pub(super) fn download_toolbar<'a>(
 /// so "whisper" or "voxtral" find their backend even when the term isn't in
 /// the display name, and "openai" matches through the repo id.
 pub(super) fn registry_entry_matches(
-    entry: &super_stt_shared::registry::RegistryBackend,
+    entry: &super_voice_shared::registry::RegistryBackend,
     needle: &str,
 ) -> bool {
     let needle = needle.to_lowercase();
@@ -243,7 +243,7 @@ pub(super) fn download_empty_state(app: &AppModel) -> Element<'_, Message> {
 /// side carries the Install button.
 pub(super) fn download_card<'a>(
     app: &'a AppModel,
-    entry: &'a super_stt_shared::registry::RegistryBackend,
+    entry: &'a super_voice_shared::registry::RegistryBackend,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let muted = muted_text_color();
@@ -388,8 +388,8 @@ fn browse_overflow_menu() -> Element<'static, Message> {
 
 /// Human-readable label for an [`InstallPhase`], shown inside the "Installing…"
 /// button while a backend install is in progress.
-pub(super) fn phase_label(p: super_stt_shared::registry::events::InstallPhase) -> &'static str {
-    use super_stt_shared::registry::events::InstallPhase;
+pub(super) fn phase_label(p: super_voice_shared::registry::events::InstallPhase) -> &'static str {
+    use super_voice_shared::registry::events::InstallPhase;
     match p {
         InstallPhase::Resolving => "resolving",
         InstallPhase::Downloading => "downloading",

@@ -14,8 +14,8 @@
 //! why that rather than an overlap-add crossfade.
 
 use anyhow::Result;
-use super_tts_shared::audio::frames::AudioParams;
-use super_tts_shared::utils::audio::{ResampleQuality, resample};
+use super_voice_shared::tts::audio::frames::AudioParams;
+use super_voice_shared::tts::utils::audio::{ResampleQuality, resample};
 
 /// The output device's interleaved format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,7 +215,7 @@ fn equal_power(t: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super_tts_shared::audio::frames::SampleFormat;
+    use super_voice_shared::tts::audio::frames::SampleFormat;
 
     fn params(sample_rate: u32, channels: u16) -> AudioParams {
         AudioParams {

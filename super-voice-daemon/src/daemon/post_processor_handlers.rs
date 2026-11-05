@@ -15,7 +15,7 @@
 //! so disabling does not discard the user's choice.
 
 use log::{info, warn};
-use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
 
 use crate::daemon::types::SuperSTTDaemon;
 

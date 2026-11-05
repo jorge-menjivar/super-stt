@@ -5,7 +5,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::response::Response;
 use super_engine_daemon::registry::endpoints::{self, UpdateBody};
-use super_stt_shared::registry::{UpdateRequest, UpdateResponse};
+use super_voice_shared::registry::{UpdateRequest, UpdateResponse};
 
 /// `POST /registry/backend/update` — re-run install if registry has a newer version.
 #[utoipa::path(

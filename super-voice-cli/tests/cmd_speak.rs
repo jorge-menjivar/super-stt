@@ -22,7 +22,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use super_engine_test_daemon::TestDaemon;
-use super_stt_shared::product::SUPER_VOICE;
+use super_voice_shared::product::SUPER_VOICE;
 
 const CLI_BIN: &str = env!("CARGO_BIN_EXE_super-voice-cli");
 
@@ -41,14 +41,6 @@ fn locate_daemon_bin() -> PathBuf {
         candidate.display()
     );
     candidate
-}
-
-/// Monotonic per-call counter so temp paths are unique even when these
-/// tests run concurrently in the same binary.
-fn next_uniq() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static U: AtomicU64 = AtomicU64::new(0);
-    U.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Start a hermetic daemon (see `super_engine_test_daemon`) and wait for its

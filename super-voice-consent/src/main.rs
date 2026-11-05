@@ -46,8 +46,8 @@ use cosmic::widget::{button, dialog, icon, text};
 use std::io::Write;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use super_stt_shared::SUPER_VOICE;
-use super_stt_shared::consent::contract;
+use super_voice_shared::SUPER_VOICE;
+use super_voice_shared::consent::contract;
 // The decision payloads written to stdout right before exit.
 use contract::{ALLOW, DENY, DISMISSED};
 
@@ -238,7 +238,7 @@ impl cosmic::Application for ConsentApp {
             Caller::Web { origin } => format!("{origin} wants access to Super Voice."),
         };
 
-        let permission_lines = super_stt_shared::consent::permissions_for_scopes(&self.scopes);
+        let permission_lines = super_voice_shared::consent::permissions_for_scopes(&self.scopes);
 
         let mut bullet_column =
             cosmic::widget::column::with_capacity(permission_lines.len()).spacing(6);
@@ -566,7 +566,7 @@ fn read_caller() -> Caller {
 }
 
 fn main() -> cosmic::iced::Result {
-    super_stt_shared::logging::init();
+    super_voice_shared::logging::init();
 
     install_termination_handlers();
     spawn_dismiss_timer();

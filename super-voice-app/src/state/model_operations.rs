@@ -34,7 +34,7 @@ pub enum ModelOperationState {
     /// thing the card's wording depends on.
     Provisioning {
         target_model: String,
-        progress: Box<super_stt_shared::models::protocol::DownloadProgress>,
+        progress: Box<super_voice_shared::models::protocol::DownloadProgress>,
     },
     /// Loading the model into memory, after any download finished.
     Loading {
@@ -42,7 +42,7 @@ pub enum ModelOperationState {
         status_message: String,
         /// What the backend reports of its load — a first-time setup, the
         /// step it is on, how far through — once it reports anything.
-        load: Option<super_stt_shared::models::protocol::LoadProgress>,
+        load: Option<super_voice_shared::models::protocol::LoadProgress>,
     },
     /// The operation failed, with the daemon's reason.
     Error { message: String },

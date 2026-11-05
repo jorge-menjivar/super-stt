@@ -785,7 +785,7 @@ mod tests {
         use crate::daemon::test_fixtures::openai_backend;
         use crate::daemon::types::test_daemon;
         use crate::stt_models::backends::DiscoveredBackend;
-        use super_stt_shared::models::contexts::DictationContext;
+        use super_voice_shared::models::contexts::DictationContext;
 
         let daemon = test_daemon().await;
         let source = "github.com/super-stt/openai";
@@ -860,7 +860,7 @@ mod tests {
         use crate::daemon::types::test_daemon;
         use crate::stt_models::backends::DiscoveredBackend;
         use axum::http::HeaderValue;
-        use super_stt_shared::models::contexts::DictationContext;
+        use super_voice_shared::models::contexts::DictationContext;
 
         let daemon = test_daemon().await;
         let source = "github.com/super-stt/openai";
@@ -945,7 +945,7 @@ mod tests {
         use crate::daemon::test_fixtures::openai_backend;
         use crate::daemon::types::test_daemon;
         use crate::stt_models::backends::DiscoveredBackend;
-        use super_stt_shared::models::contexts::DictationContext;
+        use super_voice_shared::models::contexts::DictationContext;
 
         let daemon = test_daemon().await;
         let source = "github.com/super-stt/openai";

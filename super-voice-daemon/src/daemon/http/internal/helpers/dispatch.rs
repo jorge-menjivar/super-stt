@@ -2,7 +2,7 @@
 use crate::daemon::types::SuperSTTDaemon;
 use axum::http::StatusCode;
 use serde_json::Value;
-use super_stt_shared::models::protocol::{DaemonRequest, DaemonResponse, ErrorCode};
+use super_voice_shared::models::protocol::{DaemonRequest, DaemonResponse, ErrorCode};
 
 pub(crate) async fn dispatch(daemon: &SuperSTTDaemon, request: DaemonRequest) -> DaemonResponse {
     daemon.handle_command(request).await
@@ -91,7 +91,7 @@ pub(crate) fn build_transcribe_request(
 /// | classified error | from `error_code.http_status()` (e.g. 400/404/409)|
 /// | un-coded error   | `500` (unclassified server-side failure)          |
 ///
-/// Error identity is the machine-readable [`ErrorCode`](super_stt_shared::models::protocol::ErrorCode)
+/// Error identity is the machine-readable [`ErrorCode`](super_voice_shared::models::protocol::ErrorCode)
 /// the daemon attaches (see `docs/protocol/transport.md`); the earlier
 /// substring-on-`message` matcher — which had drifted from the live wire
 /// strings — has been retired in favor of it.
@@ -168,7 +168,7 @@ pub(crate) async fn ack(
 mod tests {
     use super::status_code_for_response;
     use axum::http::StatusCode;
-    use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
+    use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
 
     /// The status is derived from the machine-readable `error_code`, not the
     /// human `message`. Covers the classes the retired substring matcher used to

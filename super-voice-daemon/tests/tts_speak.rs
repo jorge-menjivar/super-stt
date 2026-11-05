@@ -22,7 +22,7 @@ mod common;
 use common::TestDaemon;
 
 use std::path::PathBuf;
-use super_tts_shared::daemon::http_client;
+use super_voice_shared::tts::daemon::http_client;
 
 const APP_NAME: &str = "super-tts smoke test";
 const SCOPES: &[&str] = &["speak", "status"];
@@ -210,15 +210,16 @@ async fn speak_without_text_is_a_coded_bad_request() {
 
     // `speak()` always sends a `text`, so post the body directly to reach the
     // missing-field path a hand-written client can hit.
-    let err =
-        http_client::transport::post_json::<super_tts_shared::models::protocol::DaemonResponse>(
-            http_socket.clone(),
-            &token,
-            "/tts/speak",
-            &serde_json::json!({ "voice": "alloy" }),
-        )
-        .await
-        .expect_err("a body with no text is not a valid utterance");
+    let err = http_client::transport::post_json::<
+        super_voice_shared::tts::models::protocol::DaemonResponse,
+    >(
+        http_socket.clone(),
+        &token,
+        "/tts/speak",
+        &serde_json::json!({ "voice": "alloy" }),
+    )
+    .await
+    .expect_err("a body with no text is not a valid utterance");
 
     let msg = err.to_string();
     assert!(
@@ -250,7 +251,7 @@ async fn the_removed_option_fields_are_refused_rather_than_ignored() {
             serde_json::json!("whatever")
         };
         let err = http_client::transport::post_json::<
-            super_tts_shared::models::protocol::DaemonResponse,
+            super_voice_shared::tts::models::protocol::DaemonResponse,
         >(
             http_socket.clone(),
             &token,
@@ -288,7 +289,7 @@ async fn text_alone_is_a_complete_speak_request() {
         serde_json::json!({ "text": "Hello.", "voice": null, "speed": null }),
     ] {
         let err = http_client::transport::post_json::<
-            super_tts_shared::models::protocol::DaemonResponse,
+            super_voice_shared::tts::models::protocol::DaemonResponse,
         >(http_socket.clone(), &token, "/tts/speak", &body)
         .await
         .err()

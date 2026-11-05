@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 
-use super_stt_shared::registry::RegistryBackend;
-use super_stt_shared::registry::events::{InstallError, InstallPhase};
+use super_voice_shared::registry::RegistryBackend;
+use super_voice_shared::registry::events::{InstallError, InstallPhase};
 
 #[derive(Debug, Clone, Default)]
 pub struct RegistryState {
@@ -105,7 +105,7 @@ pub enum PreviewState {
     /// install this drawer can start is unverified, so a banner on each one is
     /// noise. The preview names the source and what it reaches, which is the
     /// same caution with facts attached.
-    Ready(Box<super_stt_shared::registry::RegistryBackend>),
+    Ready(Box<super_voice_shared::registry::RegistryBackend>),
     /// The resolve failed. The daemon's message is the whole content: it names
     /// the repo or path and says what to do, so the drawer shows it verbatim.
     Failed(String),
@@ -114,7 +114,7 @@ pub enum PreviewState {
 impl PreviewState {
     /// The backend an Install press would install, if there is one.
     #[must_use]
-    pub fn ready(&self) -> Option<&super_stt_shared::registry::RegistryBackend> {
+    pub fn ready(&self) -> Option<&super_voice_shared::registry::RegistryBackend> {
         match self {
             PreviewState::Ready(backend) => Some(backend),
             _ => None,

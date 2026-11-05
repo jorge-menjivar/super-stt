@@ -2,10 +2,10 @@
 //! Self-update check orchestration: forge query, event, notification.
 
 use crate::daemon::types::SuperSTTDaemon;
-use super_stt_shared::models::notification_method::NotificationMethod;
-use super_stt_shared::models::protocol::DaemonStatusEvent;
-use super_stt_shared::models::self_update::SelfUpdateStatus;
 use super_voice_registry_types::forge::Forge;
+use super_voice_shared::models::notification_method::NotificationMethod;
+use super_voice_shared::models::protocol::DaemonStatusEvent;
+use super_voice_shared::models::self_update::SelfUpdateStatus;
 
 impl SuperSTTDaemon {
     /// Run a self-update check, publish `UpdateAvailable` when a not-yet-seen

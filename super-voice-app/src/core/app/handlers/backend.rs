@@ -10,7 +10,7 @@ use crate::state::ErrorScope;
 use crate::ui::messages::{BackendMessage, Message};
 use cosmic::prelude::*;
 use std::future::Future;
-use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
+use super_voice_shared::daemon::http_client::{HttpError, HttpResult};
 
 /// Build a Configure-sheet-scoped banner message for a failed secret/option save.
 fn configure_backend_error(e: &HttpError) -> Message {

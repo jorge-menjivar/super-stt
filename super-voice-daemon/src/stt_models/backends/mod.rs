@@ -68,5 +68,5 @@ pub fn speech_to_text(all: &[DiscoveredBackend]) -> Vec<DiscoveredBackend> {
 /// one for every feature.
 #[must_use]
 pub fn default_backends_dir() -> PathBuf {
-    engine::default_backends_dir(&super_stt_shared::SUPER_VOICE)
+    engine::default_backends_dir(&super_voice_shared::SUPER_VOICE)
 }

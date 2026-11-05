@@ -14,7 +14,7 @@ use cosmic::iced::widget::text::LineHeight;
 use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, settings, text};
-use super_tts_shared::models::voices::VoiceInfo;
+use super_voice_shared::tts::models::voices::VoiceInfo;
 
 use super::common::error_banner;
 use crate::core::app::AppModel;

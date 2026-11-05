@@ -25,7 +25,7 @@ mod common;
 use common::{Method, StatusCode, TestDaemon};
 
 use std::path::PathBuf;
-use super_stt_shared::daemon::http_client;
+use super_voice_shared::daemon::http_client;
 
 async fn start_daemon() -> (TestDaemon, PathBuf) {
     let daemon = common::daemon("backends").start().await;

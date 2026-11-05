@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
 use crate::tts::daemon::types::test_daemon;
-use super_tts_shared::models::protocol::ErrorCode;
+use super_voice_shared::tts::models::protocol::ErrorCode;
 
 fn make_request(command: &str) -> DaemonRequest {
     DaemonRequest {
@@ -699,7 +699,7 @@ fn backend_with_option(
 /// asserted — the refusal, and that nothing was written behind it.
 #[tokio::test]
 async fn an_option_value_a_header_cannot_carry_is_refused() {
-    use super_tts_shared::models::protocol::ErrorCode;
+    use super_voice_shared::tts::models::protocol::ErrorCode;
 
     let daemon = test_daemon().await;
     let source = "github.com/x/opts";
@@ -1500,7 +1500,7 @@ async fn the_global_default_does_not_override_a_models_own_device() {
 /// text-normalizer stage in front of synthesis breaks every reader at once.
 #[tokio::test]
 async fn get_pipeline_reports_one_synthesis_stage() {
-    use super_tts_shared::models::protocol::{SYNTHESIS_STAGE, StageRole};
+    use super_voice_shared::tts::models::protocol::{SYNTHESIS_STAGE, StageRole};
 
     let daemon = test_daemon().await;
 
@@ -1613,7 +1613,7 @@ async fn a_stage_names_a_backend_that_serves_no_loaded_model() {
 /// would leave the very state the field exists for unreadable.
 #[tokio::test]
 async fn get_model_answers_the_stage_slot_even_when_nothing_is_loaded() {
-    use super_tts_shared::models::protocol::SYNTHESIS_STAGE;
+    use super_voice_shared::tts::models::protocol::SYNTHESIS_STAGE;
 
     let daemon = test_daemon().await;
 
@@ -1927,7 +1927,7 @@ async fn a_stored_voice_survives_until_it_is_cleared() {
     backend.models[0].product.default_voice = Some("af_bella".to_string());
     *daemon.backends.write().await = vec![backend];
 
-    let block = |resp: super_tts_shared::models::protocol::DaemonResponse| {
+    let block = |resp: super_voice_shared::tts::models::protocol::DaemonResponse| {
         resp.voice.expect("a voice block")
     };
 

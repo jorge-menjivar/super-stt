@@ -10,7 +10,7 @@
 use serde::Deserialize;
 
 use crate::daemon::client::internal::session::with_settings_token;
-use super_stt_shared::daemon::http_client::{HttpError, HttpResult, transport};
+use super_voice_shared::daemon::http_client::{HttpError, HttpResult, transport};
 
 /// The reply to a speak request.
 #[derive(Deserialize)]

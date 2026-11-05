@@ -21,11 +21,11 @@ use crate::daemon::http::wire::Ack;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
-use super_stt_shared::models::backends::BackendInfo;
-use super_stt_shared::models::protocol::{
+use super_voice_shared::models::backends::BackendInfo;
+use super_voice_shared::models::protocol::{
     DaemonResponse, GpuHostInfo, GpuInfo, StageModelReport, StageReport,
 };
-use super_stt_shared::models::theme::AudioTheme;
+use super_voice_shared::models::theme::AudioTheme;
 use utoipa::ToSchema;
 
 /// Build a narrow response body from the command bus's wide one.

@@ -16,8 +16,8 @@
 use crate::daemon::client::internal::response::require_success;
 use crate::daemon::client::internal::session::with_settings_token;
 use crate::state::Stage;
-use super_stt_shared::daemon::http_client::HttpResult;
-use super_stt_shared::daemon::http_client::transport;
+use super_voice_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client::transport;
 
 fn enc(s: &str) -> String {
     urlencoding::encode(s).into_owned()

@@ -3,7 +3,7 @@
 
 use futures_util::StreamExt;
 use serde_json::json;
-use super_stt_shared::models::protocol::PreviewSource;
+use super_voice_shared::models::protocol::PreviewSource;
 
 use super::fake_daemon::{FakeDaemon, Reply};
 use crate::daemon::client::v1::transcribe::{self, RecordEvent};

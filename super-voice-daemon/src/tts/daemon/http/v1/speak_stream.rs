@@ -77,7 +77,7 @@ enum ServerFrame {
     /// The backend aligned a span of audio to a span of the text.
     Mark {
         #[serde(flatten)]
-        mark: super_tts_shared::audio::frames::Mark,
+        mark: super_voice_shared::tts::audio::frames::Mark,
     },
     /// How far playback has got, in milliseconds.
     Progress { spoken_ms: u64, queued_ms: u64 },
@@ -372,7 +372,7 @@ pub(crate) fn routes() -> utoipa_axum::router::OpenApiRouter<AppState> {
 #[cfg(test)]
 mod tests {
     use super::{ClientFrame, ServerFrame};
-    use super_tts_shared::audio::frames::Mark;
+    use super_voice_shared::tts::audio::frames::Mark;
 
     /// The wire shape is the contract with every client, and a field rename in
     /// Rust would silently change it. These pin the exact JSON.

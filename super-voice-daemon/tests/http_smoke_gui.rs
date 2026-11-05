@@ -31,7 +31,7 @@ use common::TestDaemon;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
-use super_stt_shared::daemon::http_client;
+use super_voice_shared::daemon::http_client;
 use tokio::time::sleep;
 
 const APP_NAME: &str = "super-stt gui smoke test";

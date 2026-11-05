@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use log::{debug, info, warn};
 use serde_json::Value;
-use super_stt_shared::models::protocol::PreviewSource;
+use super_voice_shared::models::protocol::PreviewSource;
 
 use super::RecordingSession;
 use crate::daemon::types::SuperSTTDaemon;
@@ -204,11 +204,11 @@ impl SuperSTTDaemon {
             // than the sliding window's 5s, but keep it off the async worker for
             // the same reason (audit 2 Tier 3 #2).
             match tokio::task::spawn_blocking(move || {
-                super_stt_shared::utils::audio::resample(
+                super_voice_shared::utils::audio::resample(
                     &new_samples,
                     device_rate,
                     TARGET_RATE,
-                    super_stt_shared::audio_utils::ResampleQuality::Fast,
+                    super_voice_shared::audio_utils::ResampleQuality::Fast,
                 )
             })
             .await

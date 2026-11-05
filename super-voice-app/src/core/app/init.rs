@@ -102,10 +102,10 @@ impl AppModel {
             contexts: crate::state::contexts::ContextsState::default(),
             nav,
             // Initialize Super Voice state using proper socket path
-            socket_path: super_stt_shared::validation::get_http_socket_path(),
+            socket_path: super_voice_shared::validation::get_http_socket_path(),
             daemon_status: DaemonStatus::Disconnected,
-            reconnect_retry: super_stt_shared::daemon::retry::RetryStrategy::for_initial_connection(
-            ),
+            reconnect_retry:
+                super_voice_shared::daemon::retry::RetryStrategy::for_initial_connection(),
             recording_status: RecordingStatus::Idle,
             transcription_text: String::new(),
             preview_text: String::new(),
@@ -147,13 +147,13 @@ impl AppModel {
             device_offers: crate::state::device_offers::DeviceOffers::default(),
             stage_catalog: crate::state::stage_catalog::StageCatalog::default(),
             recording_stop_mode:
-                super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
-            write_method: super_stt_shared::models::write_method::WriteMethod::default(),
+                super_voice_shared::models::recording_stop_mode::RecordingStopMode::default(),
+            write_method: super_voice_shared::models::write_method::WriteMethod::default(),
             write_method_test_text: String::new(),
             resolved_write_method: None,
             write_method_test_countdown: None,
             notification_method:
-                super_stt_shared::models::notification_method::NotificationMethod::default(),
+                super_voice_shared::models::notification_method::NotificationMethod::default(),
             volume: 100,
             last_committed_volume: 100,
 

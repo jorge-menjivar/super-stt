@@ -126,7 +126,7 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
             }
         }),
         Task::perform(get_recording_stop_mode(), |result| {
-            use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+            use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
             match result {
                 Ok(mode_str) => {
                     let mode = mode_str.parse::<RecordingStopMode>().unwrap_or_default();
@@ -143,7 +143,7 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
             }
         }),
         Task::perform(get_write_method(), |result| {
-            use super_stt_shared::models::write_method::WriteMethod;
+            use super_voice_shared::models::write_method::WriteMethod;
             match result {
                 Ok(method_str) => {
                     let method = method_str.parse::<WriteMethod>().unwrap_or_default();
@@ -158,7 +158,7 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
             }
         }),
         Task::perform(get_notification_method(), |result| {
-            use super_stt_shared::models::notification_method::NotificationMethod;
+            use super_voice_shared::models::notification_method::NotificationMethod;
             match result {
                 Ok(method_str) => {
                     let method = method_str.parse::<NotificationMethod>().unwrap_or_default();

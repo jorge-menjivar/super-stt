@@ -10,8 +10,8 @@
 
 use std::fmt;
 
-use super_stt_shared::models::protocol::{POST_PROCESSOR_STAGE, TRANSCRIPTION_STAGE};
-use super_tts_shared::models::protocol::SYNTHESIS_STAGE;
+use super_voice_shared::models::protocol::{POST_PROCESSOR_STAGE, TRANSCRIPTION_STAGE};
+use super_voice_shared::tts::models::protocol::SYNTHESIS_STAGE;
 
 use super::ErrorScope;
 

@@ -10,7 +10,7 @@
 use super::*;
 use cpal_playback as cpal;
 use mixer::SeamFade;
-use super_tts_shared::audio::frames::SampleFormat;
+use super_voice_shared::tts::audio::frames::SampleFormat;
 
 const DEVICE: DeviceFormat = DeviceFormat {
     sample_rate: 48000,

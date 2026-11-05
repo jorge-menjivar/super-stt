@@ -5,7 +5,7 @@
 //! load it is.
 
 use super_engine_daemon::download_progress as engine;
-use super_tts_shared::models::protocol::DownloadProgress;
+use super_voice_shared::tts::models::protocol::DownloadProgress;
 
 pub use super_engine_daemon::download_progress::{Progress, status};
 

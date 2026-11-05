@@ -15,8 +15,8 @@ pub(super) struct UdpSubscriptionId(pub(super) u64);
 /// audio meter and recording-state indicator. Reuses the token already
 /// cached for normal config calls — [`SETTINGS_SCOPES`] grants the
 /// recording / visualization / daemon-status topics below.
-pub(super) const SETTINGS_APP_ID: super_stt_shared::daemon::session::AppId =
-    super_stt_shared::daemon::session::app_id("super-voice-app");
+pub(super) const SETTINGS_APP_ID: super_voice_shared::daemon::session::AppId =
+    super_voice_shared::daemon::session::app_id("super-voice-app");
 const SETTINGS_APP_NAME: &str = "Super Voice Settings App";
 /// Topics the settings app subscribes to over `GET /events`.
 ///
@@ -45,10 +45,10 @@ pub(super) fn audio_events_subscription(
     _id: &UdpSubscriptionId,
 ) -> std::pin::Pin<Box<dyn cosmic::iced::futures::Stream<Item = Message> + Send>> {
     use futures_util::StreamExt;
-    use super_stt_shared::daemon::widget_subscription::{
+    use super_voice_shared::daemon::widget_subscription::{
         WidgetSubscriptionConfig, WidgetSubscriptionUpdate, run_widget_subscription,
     };
-    use super_stt_shared::validation::get_http_socket_path;
+    use super_voice_shared::validation::get_http_socket_path;
 
     Box::pin(cosmic::iced::stream::channel(100, async |mut channel| {
         let config = WidgetSubscriptionConfig::new(
@@ -107,14 +107,14 @@ pub(super) fn audio_events_subscription(
 #[cfg(test)]
 mod tests {
     use super::{SETTINGS_SCOPES, SETTINGS_TOPICS};
-    use super_stt_shared::daemon::widget_subscription::uncovered_topic;
+    use super_voice_shared::daemon::widget_subscription::uncovered_topic;
 
     #[test]
     fn settings_scopes_cover_subscribed_topics() {
         // Guard the hand-maintained SETTINGS_SCOPES / SETTINGS_TOPICS lists:
         // every subscribed topic must be granted by a requested scope, or the
         // daemon refuses the whole stream with `403 scope_denied`. The mapping
-        // lives in super-stt-shared and is pinned to the daemon's
+        // lives in super-voice-shared and is pinned to the daemon's
         // `Topic::required_scope`.
         assert_eq!(uncovered_topic(SETTINGS_SCOPES, SETTINGS_TOPICS), None);
     }

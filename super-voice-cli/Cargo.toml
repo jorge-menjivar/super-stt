@@ -14,8 +14,7 @@
 [dependencies]
     anyhow.workspace = true
     clap.workspace = true
-    super-stt-shared = { path = "../super-stt-shared" }
-    super-tts-shared = { path = "../super-tts-shared" }
+    super-voice-shared = { path = "../super-voice-shared" }
     tokio = {
         workspace = true,
         features = ["io-util", "macros", "net", "rt-multi-thread"]

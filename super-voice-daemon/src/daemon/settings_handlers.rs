@@ -4,11 +4,11 @@ use crate::config::DaemonConfig;
 use crate::daemon::types::SuperSTTDaemon;
 use crate::output::keyboard::Simulator;
 use log::{info, warn};
-use super_stt_shared::models::notification_method::NotificationMethod;
-use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
-use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
-use super_stt_shared::models::write_method::WriteMethod;
+use super_voice_shared::models::notification_method::NotificationMethod;
+use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::models::update_beta_optin::UpdateBetaOptIn;
+use super_voice_shared::models::write_method::WriteMethod;
 
 impl SuperSTTDaemon {
     /// What `POST /write_method/test` types. Fixed and documented in

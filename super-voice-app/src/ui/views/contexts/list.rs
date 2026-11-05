@@ -5,7 +5,7 @@ use cosmic::Element;
 use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, space::horizontal as horizontal_space, text};
-use super_stt_shared::models::contexts::DictationContext;
+use super_voice_shared::models::contexts::DictationContext;
 
 use crate::core::app::AppModel;
 use crate::ui::icons;
@@ -256,7 +256,7 @@ fn preview_terms(vocabulary: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{preview_terms, summary_line};
-    use super_stt_shared::models::contexts::DictationContext;
+    use super_voice_shared::models::contexts::DictationContext;
 
     fn context(prompt: &str, vocabulary: &[&str]) -> DictationContext {
         DictationContext {

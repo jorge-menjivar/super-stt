@@ -25,7 +25,7 @@ use super::surface::muted_text_color;
 /// stale unless that catalog is refetched — which is what left an update
 /// offered after the update it describes had already happened.
 pub(super) fn update_offer(
-    entry: Option<&super_stt_shared::registry::RegistryBackend>,
+    entry: Option<&super_voice_shared::registry::RegistryBackend>,
     in_flight: bool,
 ) -> Option<String> {
     if in_flight {
@@ -1003,7 +1003,7 @@ mod update_offer_tests {
     //! this started from: the flag rides on the registry catalog, so a chip can
     //! survive the update it describes and then do nothing when clicked.
     use super::update_offer;
-    use super_stt_shared::registry::RegistryBackend;
+    use super_voice_shared::registry::RegistryBackend;
 
     fn entry(installed: Option<&str>, latest: &str) -> RegistryBackend {
         // Mirrors what the daemon computes, so the fixture cannot claim an
@@ -1028,7 +1028,7 @@ mod update_offer_tests {
             models: Vec::new(),
             secrets: Vec::new(),
             options: Vec::new(),
-            compatibility: super_stt_shared::registry::Compatibility {
+            compatibility: super_voice_shared::registry::Compatibility {
                 compatible: true,
                 selected_asset: None,
                 reason: None,

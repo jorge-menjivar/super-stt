@@ -5,8 +5,8 @@
 //! settings app reads per-stage detail from [`super::pipeline`] instead.
 
 use crate::daemon::client::internal::session::with_settings_token;
-use super_stt_shared::daemon::http_client;
-use super_stt_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client;
+use super_voice_shared::daemon::http_client::HttpResult;
 
 /// Test daemon connection (HTTP `/ping`).
 pub async fn test_daemon_connection() -> HttpResult<()> {

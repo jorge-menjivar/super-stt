@@ -6,7 +6,7 @@
 //! speech to text, `voice speak` for text to speech — and what the daemon has
 //! once is at the top: `ping`, `status`, `logout`.
 //!
-//! Auth flow is delegated to `super_stt_shared::daemon::session`, the
+//! Auth flow is delegated to `super_voice_shared::daemon::session`, the
 //! shared client-side session helper. Each client (CLI, settings app,
 //! applet) keeps its token in a file of its own, named by its `AppId`; the
 //! CLI's is `$XDG_STATE_HOME/super-voice/clients/super-voice-cli.json`. One
@@ -24,16 +24,16 @@ use anyhow::{Context, Result, anyhow};
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use std::io::Read;
 use std::path::PathBuf;
-use super_stt_shared::daemon::http_client::{self, TranscribeOptions};
-use super_stt_shared::daemon::session::{self, AppId};
-use super_stt_shared::validation::get_http_socket_path;
+use super_voice_shared::daemon::http_client::{self, TranscribeOptions};
+use super_voice_shared::daemon::session::{self, AppId};
+use super_voice_shared::validation::get_http_socket_path;
 
 #[cfg(target_os = "macos")]
 mod hotkey;
 #[cfg(target_os = "macos")]
 mod service;
 
-const APP_ID: AppId = super_stt_shared::daemon::session::app_id("super-voice-cli");
+const APP_ID: AppId = super_voice_shared::daemon::session::app_id("super-voice-cli");
 const APP_NAME: &str = "Super Voice CLI";
 /// Both features' commands run on one token, so it asks for both.
 const SCOPES: &[&str] = &["transcribe", "speak", "status"];
@@ -41,7 +41,7 @@ const SCOPES: &[&str] = &["transcribe", "speak", "status"];
 fn main() -> Result<()> {
     // The CLI previously had no logging at all; initialize it like the other
     // binaries (RUST_LOG wins, else Info) (Tier 2 #6).
-    super_stt_shared::logging::init();
+    super_voice_shared::logging::init();
 
     let matches = build_cli().get_matches();
 
@@ -167,7 +167,7 @@ fn build_cli() -> Command {
                         // Drive the accepted values from the shared wire-enum
                         // table so they can't drift from the daemon (Tier 2 #8).
                         .value_parser(clap::builder::PossibleValuesParser::new(
-                            super_stt_shared::models::recording_stop_mode::RecordingStopMode::WIRE_VARIANTS
+                            super_voice_shared::models::recording_stop_mode::RecordingStopMode::WIRE_VARIANTS
                                 .iter()
                                 .copied(),
                         )),
@@ -214,7 +214,7 @@ fn platform_subcommands(cli: Command) -> Command {
 async fn run_with_token<F, Fut, T>(socket_path: PathBuf, op: F) -> Result<T>
 where
     F: Fn(String) -> Fut,
-    Fut: std::future::Future<Output = super_stt_shared::daemon::http_client::HttpResult<T>>,
+    Fut: std::future::Future<Output = super_voice_shared::daemon::http_client::HttpResult<T>>,
 {
     run_with_token_as(APP_ID, APP_NAME, socket_path, op).await
 }
@@ -228,7 +228,7 @@ async fn run_with_token_as<F, Fut, T>(
 ) -> Result<T>
 where
     F: Fn(String) -> Fut,
-    Fut: std::future::Future<Output = super_stt_shared::daemon::http_client::HttpResult<T>>,
+    Fut: std::future::Future<Output = super_voice_shared::daemon::http_client::HttpResult<T>>,
 {
     session::with_token(socket_path, app_id, app_name, SCOPES, op)
         .await
@@ -247,7 +247,7 @@ where
 async fn cmd_ping(
     socket_path: PathBuf,
     token: String,
-) -> super_stt_shared::daemon::http_client::HttpResult<()> {
+) -> super_voice_shared::daemon::http_client::HttpResult<()> {
     let msg = http_client::ping(socket_path, &token).await?;
     println!("{msg}");
     Ok(())
@@ -256,7 +256,7 @@ async fn cmd_ping(
 async fn cmd_status(
     socket_path: PathBuf,
     token: String,
-) -> super_stt_shared::daemon::http_client::HttpResult<()> {
+) -> super_voice_shared::daemon::http_client::HttpResult<()> {
     let status = http_client::status(socket_path, &token).await?;
     for (feature, part, at_work) in [
         ("Speech to text", &status.stt, "recording"),
@@ -279,7 +279,7 @@ async fn cmd_record(
     write_mode: bool,
     wait: bool,
     stop_mode: Option<String>,
-) -> super_stt_shared::daemon::http_client::HttpResult<()> {
+) -> super_voice_shared::daemon::http_client::HttpResult<()> {
     // Toggle behavior: probe `/v1/status` first. If a daemon-mic
     // capture is already in progress, this invocation acts as a stop
     // signal; otherwise we start a fresh recording. The daemon's
@@ -327,7 +327,7 @@ async fn cmd_record(
 async fn cmd_stop(
     socket_path: PathBuf,
     token: String,
-) -> super_stt_shared::daemon::http_client::HttpResult<()> {
+) -> super_voice_shared::daemon::http_client::HttpResult<()> {
     let resp = http_client::transcribe_stop(socket_path, &token).await?;
     if resp.status != "success" {
         return Err(http_client::HttpError::Other(
@@ -367,10 +367,11 @@ async fn cmd_speak(
     socket_path: PathBuf,
     token: String,
     text: String,
-) -> super_stt_shared::daemon::http_client::HttpResult<()> {
+) -> super_voice_shared::daemon::http_client::HttpResult<()> {
     // Not a toggle: a second `speak` deliberately preempts the first, which is
     // what "say this instead" means. Use `speak stop` to fall silent.
-    let resp = super_tts_shared::daemon::http_client::speak(socket_path, &token, &text).await?;
+    let resp =
+        super_voice_shared::tts::daemon::http_client::speak(socket_path, &token, &text).await?;
     if resp.status != "success" {
         return Err(http_client::HttpError::Other(
             resp.message.unwrap_or_else(|| "speak failed".to_string()),
@@ -389,8 +390,9 @@ async fn cmd_speak(
 async fn cmd_speak_stop(
     socket_path: PathBuf,
     token: String,
-) -> super_stt_shared::daemon::http_client::HttpResult<()> {
-    let resp = super_tts_shared::daemon::http_client::speak_stop(socket_path, &token).await?;
+) -> super_voice_shared::daemon::http_client::HttpResult<()> {
+    let resp =
+        super_voice_shared::tts::daemon::http_client::speak_stop(socket_path, &token).await?;
     if resp.status != "success" {
         return Err(http_client::HttpError::Other(
             resp.message.unwrap_or_else(|| "stop failed".to_string()),
@@ -414,7 +416,7 @@ fn cmd_logout() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::SCOPES;
-    use super_stt_shared::daemon::scopes::is_known_scope;
+    use super_voice_shared::daemon::scopes::is_known_scope;
 
     /// The CLI's requested scope set must be a subset of the daemon's shared
     /// catalog. Without this, a wire-scope rename in `scopes::known_scopes`

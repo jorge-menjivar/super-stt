@@ -17,9 +17,9 @@ pub(crate) mod backend;
 use crate::daemon::client::internal::response::require_unit;
 use crate::daemon::client::internal::session::with_settings_token;
 use serde::Deserialize;
-use super_stt_shared::daemon::http_client::HttpResult;
-use super_stt_shared::daemon::http_client::transport;
-use super_stt_shared::models::contexts::DictationContext;
+use super_voice_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client::transport;
+use super_voice_shared::models::contexts::DictationContext;
 
 /// Every context, and which one is in force.
 #[derive(Debug, Clone, Default, Deserialize)]

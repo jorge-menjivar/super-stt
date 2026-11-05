@@ -21,7 +21,7 @@
 //! disagree about what counts as selected.
 
 use crate::tts::daemon::types::SuperTTSDaemon;
-use super_tts_shared::models::protocol::{
+use super_voice_shared::tts::models::protocol::{
     DaemonResponse, SYNTHESIS_STAGE, StageModelReport, StageReport, StageRole, StageSwitch,
     SwitchDownload, SwitchTarget,
 };

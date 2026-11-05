@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 use futures_util::SinkExt;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-use super_stt_shared::models::self_update::InstallerAsset;
+use super_voice_shared::models::self_update::InstallerAsset;
 
 /// Mirror of super-voice-install's progress.rs wire shapes. The golden tests
 /// below pin both sides to the same strings — change them together.
@@ -87,7 +87,7 @@ type Tx = cosmic::iced::futures::channel::mpsc::Sender<UpdateRunEvent>;
 /// not an `Err` here — the caller still sends `Finished` for them via the
 /// normal exit path.
 async fn drive(asset: &InstallerAsset, target_tag: &str, tx: &mut Tx) -> Result<(), String> {
-    let base = super_stt_shared::paths::cache_dir().join("self-update");
+    let base = super_voice_shared::paths::cache_dir().join("self-update");
     tokio::fs::create_dir_all(&base)
         .await
         .map_err(|e| format!("create {}: {e}", base.display()))?;

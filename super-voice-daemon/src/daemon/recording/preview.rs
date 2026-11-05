@@ -7,7 +7,7 @@ use anyhow::Result;
 use log::{debug, info, warn};
 use std::sync::Arc;
 use std::time::Duration;
-use super_stt_shared::models::protocol::PreviewSource;
+use super_voice_shared::models::protocol::PreviewSource;
 use tokio::time::Instant;
 
 /// The shortest preview window: enough context for a batch model to transcribe
@@ -54,9 +54,9 @@ impl SuperSTTDaemon {
     pub(super) async fn spawn_recorder(
         &self,
         write_mode: bool,
-        stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
+        stop_mode: super_voice_shared::models::recording_stop_mode::RecordingStopMode,
         preview_typing: bool,
-        cue_theme: super_stt_shared::theme::AudioTheme,
+        cue_theme: super_voice_shared::theme::AudioTheme,
     ) -> Result<(RecordingSession, tokio::sync::oneshot::Receiver<()>)> {
         let silence_detection_disabled = !stop_mode.silence_detection_enabled();
         info!("🎛️ Recording mode: {stop_mode}");
@@ -313,11 +313,11 @@ impl SuperSTTDaemon {
             // (audit 2 Tier 3 #2).
             let input_len = audio_data.len();
             match tokio::task::spawn_blocking(move || {
-                super_stt_shared::utils::audio::resample(
+                super_voice_shared::utils::audio::resample(
                     &audio_data,
                     device_rate,
                     16000,
-                    super_stt_shared::audio_utils::ResampleQuality::Fast,
+                    super_voice_shared::audio_utils::ResampleQuality::Fast,
                 )
             })
             .await
@@ -629,7 +629,7 @@ mod tests {
         daemon
             .emit_preview(
                 "the words",
-                super_stt_shared::models::protocol::PreviewSource::Window,
+                super_voice_shared::models::protocol::PreviewSource::Window,
                 &session,
                 &mut typer,
                 true,
@@ -656,7 +656,7 @@ mod tests {
         daemon
             .emit_preview(
                 "hello world",
-                super_stt_shared::models::protocol::PreviewSource::Window,
+                super_voice_shared::models::protocol::PreviewSource::Window,
                 &session,
                 &mut typer,
                 true,

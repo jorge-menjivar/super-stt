@@ -14,7 +14,7 @@ mod common;
 use common::{Method, StatusCode, TestDaemon};
 
 use std::path::PathBuf;
-use super_stt_shared::daemon::http_client;
+use super_voice_shared::daemon::http_client;
 
 async fn start_daemon() -> (TestDaemon, PathBuf) {
     let daemon = common::daemon("settings").start().await;
@@ -22,7 +22,7 @@ async fn start_daemon() -> (TestDaemon, PathBuf) {
     (daemon, socket)
 }
 
-/// Tiny GET helper for endpoints `super_stt_shared::daemon::http_client`
+/// Tiny GET helper for endpoints `super_voice_shared::daemon::http_client`
 /// doesn't yet wrap. Returns (`status_code`, parsed JSON body).
 async fn raw_get_json(
     socket_path: &PathBuf,

@@ -58,7 +58,7 @@ pub struct AppModel {
     pub daemon_status: DaemonStatus,
     /// Reconnect backoff (shared `RetryStrategy`: exponential + jitter),
     /// advanced on each failed reconnect and reset on a successful connection.
-    pub reconnect_retry: super_stt_shared::daemon::retry::RetryStrategy,
+    pub reconnect_retry: super_voice_shared::daemon::retry::RetryStrategy,
     /// Current recording status
     pub recording_status: RecordingStatus,
     /// Latest transcription text
@@ -71,7 +71,7 @@ pub struct AppModel {
     /// What `preview_text` spans, as the daemon said: the whole take so far,
     /// or only the last few seconds. `None` before the first frame, and when
     /// the daemon did not say.
-    pub preview_source: Option<super_stt_shared::models::protocol::PreviewSource>,
+    pub preview_source: Option<super_voice_shared::models::protocol::PreviewSource>,
     /// Current audio level (0.0 to 1.0)
     pub audio_level: f32,
     /// Whether speech is currently detected
@@ -111,7 +111,7 @@ pub struct AppModel {
     /// model is staged.
     pub current_device: String,
     /// GPU inventory + memory from the daemon's `GET /gpu_info` (gpu-probe).
-    pub gpu_info: Vec<super_stt_shared::models::protocol::GpuInfo>,
+    pub gpu_info: Vec<super_voice_shared::models::protocol::GpuInfo>,
     /// Device switching state
     pub device_state: DeviceState,
     /// Last event timestamp for polling daemon events
@@ -154,22 +154,22 @@ pub struct AppModel {
     pub stage_catalog: crate::state::stage_catalog::StageCatalog,
 
     // Recording stop mode
-    pub recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
+    pub recording_stop_mode: super_voice_shared::models::recording_stop_mode::RecordingStopMode,
 
     // Write method
-    pub write_method: super_stt_shared::models::write_method::WriteMethod,
+    pub write_method: super_voice_shared::models::write_method::WriteMethod,
     /// Text in the Input Simulation test field — where `POST /write_method/test`
     /// lands, since the daemon types into whatever window has focus.
     pub write_method_test_text: String,
     /// Backend the last test actually typed through. `None` until a test runs;
     /// with `write_method == Auto` this is the only readout of the real backend.
-    pub resolved_write_method: Option<super_stt_shared::models::write_method::WriteMethod>,
+    pub resolved_write_method: Option<super_voice_shared::models::write_method::WriteMethod>,
     /// Seconds left before a delayed write-method test types. `None` when no
     /// countdown is running, which is also how a cancel is recorded.
     pub write_method_test_countdown: Option<u8>,
 
     // Notification method
-    pub notification_method: super_stt_shared::models::notification_method::NotificationMethod,
+    pub notification_method: super_voice_shared::models::notification_method::NotificationMethod,
 
     // Master volume (0-100)
     pub volume: u8,
@@ -220,7 +220,7 @@ pub struct AppModel {
     /// unreachable; see `macos::bundle`. `None` outside the bundle, and until
     /// first looked up.
     #[cfg(target_os = "macos")]
-    pub(crate) daemon_agent: Option<super_stt_shared::launch_agents::Status>,
+    pub(crate) daemon_agent: Option<super_voice_shared::launch_agents::Status>,
 }
 
 impl AppModel {

@@ -22,7 +22,7 @@ pub use super_engine_daemon::registry::install_dir_name;
 
 /// This daemon, as the shared registry code needs to know it.
 pub const DAEMON: super_engine_daemon::registry::Daemon = super_engine_daemon::registry::Daemon {
-    product: &super_stt_shared::SUPER_VOICE,
+    product: &super_voice_shared::SUPER_VOICE,
     version: env!("CARGO_PKG_VERSION"),
     user_agent: super_voice_registry_types::Voice::USER_AGENT,
 };

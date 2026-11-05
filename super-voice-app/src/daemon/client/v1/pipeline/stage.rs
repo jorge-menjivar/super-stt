@@ -18,8 +18,8 @@ use serde::Deserialize;
 use crate::daemon::client::internal::response::require_unit;
 use crate::daemon::client::internal::session::with_settings_token;
 use crate::state::Stage;
-use super_stt_shared::daemon::http_client::transport;
-use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
+use super_voice_shared::daemon::http_client::transport;
+use super_voice_shared::daemon::http_client::{HttpError, HttpResult};
 
 /// The backend filling one stage, and whether the stage is switched on.
 ///

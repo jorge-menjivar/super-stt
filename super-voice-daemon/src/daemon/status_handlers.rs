@@ -3,7 +3,7 @@
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::backends;
 use log::{error, info};
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_voice_shared::models::protocol::DaemonResponse;
 
 impl SuperSTTDaemon {
     /// Handle ping command — returns `pong`. The HTTP layer is the only

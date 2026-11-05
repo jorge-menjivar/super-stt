@@ -355,7 +355,7 @@ async fn an_engine_with_no_library_refuses_a_cloned_id() {
 use super::{ANALYSIS_WINDOW, BandWindows};
 use crate::tts::audio::playback::DeviceFormat;
 use crate::tts::audio::playback::mixer;
-use super_tts_shared::audio::frames::{AudioParams, SampleFormat};
+use super_voice_shared::tts::audio::frames::{AudioParams, SampleFormat};
 
 /// Qwen's rate, which is also Kokoro's.
 const BACKEND_RATE: u32 = 24_000;

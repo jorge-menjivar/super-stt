@@ -60,7 +60,7 @@ pub(crate) fn notifier() -> Option<PathBuf> {
 /// that will not be shown is reported, so [`NotificationMethod::Auto`] can
 /// fall back to typing.
 ///
-/// [`NotificationMethod::Auto`]: super_stt_shared::models::notification_method::NotificationMethod::Auto
+/// [`NotificationMethod::Auto`]: super_voice_shared::models::notification_method::NotificationMethod::Auto
 pub(crate) async fn post(notifier: &Path, summary: &str, body: &str) -> Result<()> {
     let child = tokio::process::Command::new(notifier)
         .arg(NOTIFY_FLAG)
