@@ -1517,28 +1517,41 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
     assert_eq!(response.device.as_deref(), Some("cpu"));
 }
 
-/// A framework the backend publishes a build for, but not the one installed,
-/// is refused with `build_not_installed` and nothing recorded: the build is
-/// installed first, so a model is never pointed at one it does not have.
+/// A build runs on the frameworks its `accel` lists: one listing the CPU
+/// moves a model there at once, with no CPU build to download first.
+#[tokio::test]
+async fn a_build_listing_the_cpu_moves_there_without_an_install() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/whisper";
+    let folder = folder_with_builds(source, "large", "transcription", r#"["vulkan", "cpu"]"#);
+    seed_folder_backend(&daemon, source, folder.path()).await;
+
+    let response = daemon
+        .handle_set_model_device(
+            PipelineStage::Transcription,
+            "large".to_string(),
+            "cpu".to_string(),
+        )
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    assert_eq!(
+        daemon.config.read().await.model_device(source, "large"),
+        Some("cpu")
+    );
+}
+
+/// A framework the backend publishes a build for, but the installed build
+/// does not list, is refused with `build_not_installed` and nothing recorded:
+/// the build is installed first, so a model is never pointed at one it does
+/// not have. A Vulkan build that does not list the CPU has no CPU path.
 #[tokio::test]
 async fn a_framework_whose_build_is_not_installed_is_refused() {
     use crate::daemon::device_management::PipelineStage;
     let daemon = test_daemon().await;
     let source = "github.com/super-stt/whisper";
-    let folder = folder_with_the_vulkan_build_installed(source, "large", "transcription");
-    let mut backend = fixture_backend_devices(
-        "whisper",
-        source,
-        "Whisper",
-        "large",
-        vec![
-            super_voice_registry_types::manifest::Device::Cpu,
-            super_voice_registry_types::manifest::Device::Gpu,
-        ],
-    );
-    backend.dir = folder.path().to_path_buf();
-    *daemon.backends.write().await = vec![backend];
-    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    let folder = folder_with_builds(source, "large", "transcription", r#""vulkan""#);
+    seed_folder_backend(&daemon, source, folder.path()).await;
 
     let response = daemon
         .handle_set_model_device(
@@ -1561,13 +1574,30 @@ async fn a_framework_whose_build_is_not_installed_is_refused() {
     );
 }
 
-/// A backend folder whose `backend.toml` publishes a CPU and a Vulkan build of
-/// `model`, with the Vulkan one installed: on any machine the CPU is offered
-/// (every machine runs it) and its build is not on disk.
-fn folder_with_the_vulkan_build_installed(
+/// Select a backend for stage 1 whose folder is `dir`, serving `large`.
+async fn seed_folder_backend(daemon: &SuperSTTDaemon, source: &str, dir: &std::path::Path) {
+    let mut backend = fixture_backend_devices(
+        "whisper",
+        source,
+        "Whisper",
+        "large",
+        vec![
+            super_voice_registry_types::manifest::Device::Cpu,
+            super_voice_registry_types::manifest::Device::Gpu,
+        ],
+    );
+    backend.dir = dir.to_path_buf();
+    *daemon.backends.write().await = vec![backend];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+}
+
+/// A backend folder whose `backend.toml` publishes a CPU build and a Vulkan
+/// build of `model` declaring `vulkan_accel`, with that Vulkan build on disk.
+fn folder_with_builds(
     source: &str,
     model: &str,
     role: &str,
+    vulkan_accel: &str,
 ) -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     let manifest = format!(
@@ -1595,7 +1625,7 @@ accel = "cpu"
 [[assets.subprocess]]
 file = "fixture-vulkan.tar.gz"
 target = "x86_64-unknown-linux-gnu"
-accel = "vulkan"
+accel = {vulkan_accel}
 
 [[models]]
 name = "{model}"
@@ -1609,7 +1639,7 @@ supported_devices = ["cpu", "gpu"]
     std::fs::write(dir.path().join("backend.toml"), manifest).expect("manifest");
     std::fs::write(
         dir.path().join("installed.json"),
-        r#"{"selected":{"target":"x86_64-unknown-linux-gnu","accel":"vulkan"}}"#,
+        format!(r#"{{"selected":{{"target":"x86_64-unknown-linux-gnu","accel":{vulkan_accel}}}}}"#),
     )
     .expect("record");
     dir

@@ -52,19 +52,15 @@ pub struct BackendInfo {
     /// "Online model" badge so the user sees where a cloud backend's audio goes.
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
-    /// Acceleration backends of the asset variant actually installed on this
-    /// host, e.g. `["cuda"]` or `["cpu"]`.
+    /// The frameworks the build installed on this host runs on: its
+    /// `accel`, e.g. `["cuda", "cpu"]` or `["cpu"]`. A framework it lists is
+    /// a switch away; one it does not takes installing that build first.
     ///
-    /// Empty for a backend imported from a local directory, where the binary's
-    /// accel is not knowable, for one installed before the daemon recorded it,
-    /// and for a `wasm` backend — its `installed.json` records `"wasm"` for its
-    /// own purposes, but that is a transport, not an accelerator, so it is
-    /// filtered before it reaches this field. Clients read an empty list as "no
-    /// information" and fall back to each model's `supported_devices`.
-    ///
-    /// A client offering a device picker intersects: a `cpu` asset offers the
-    /// CPU alone, an accelerated one offers both, since a GPU build still runs
-    /// on the CPU.
+    /// Empty for a backend imported from a local directory, where the
+    /// binary's accel is not knowable, and for a `wasm` backend: its
+    /// `installed.json` records `"wasm"` for its own purposes, but that is a
+    /// transport, not a framework, so it is filtered before it reaches this
+    /// field. Clients read an empty list as "no information".
     #[serde(default)]
     pub installed_accel: Vec<String>,
     /// Models this backend serves.

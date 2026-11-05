@@ -571,6 +571,16 @@ target     = "x86_64-unknown-linux-gnu"
 accel      = "vulkan"
 vulkan_api = "1.3"
 
+# A GPU build that also runs on the CPU lists both. A model on it moves to
+# the CPU without installing the CPU build; one that lists `cuda` alone has
+# no CPU path, and the CPU is not offered for it.
+[[assets.subprocess]]
+file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-sm86.tar.gz"
+target     = "x86_64-unknown-linux-gnu"
+accel      = ["cuda", "cpu"]
+cuda_major = 12
+cuda_sm    = 86
+
 # A build carrying more than one runtime — `accel` as an array — matches
 # either. Host matching then considers every accelerator listed.
 [[assets.subprocess]]
@@ -587,7 +597,7 @@ gfx        = ["gfx1030", "gfx1100"]
 | `file` | string | one of `file`/`parts` | Filename on the GitHub release. Subprocess: `.tar.gz`; wasm: `.wasm`. |
 | `parts` | array of strings | one of `file`/`parts` | **Subprocess only.** Ordered release filenames whose byte-for-byte concatenation is the variant's `.tar.gz`. Use instead of `file` when the archive would exceed the 2 GiB release-asset limit. See [Multi-part assets](#multi-part-assets). |
 | `target` | string | yes | Rust target triple. Tier-1/2 only; indexer rejects unknown. |
-| `accel` | string or array of strings | yes | A single value, or a non-empty array, drawn from `"cpu"`, `"cuda"`, `"rocm"`, `"metal"`, `"vulkan"`. An array declares one build carrying more than one runtime (e.g. a llama.cpp binary built with both CUDA and HIP support); the build then matches a host that satisfies any of the accelerators listed. |
+| `accel` | string or array of strings | yes | Every framework the build runs on, and only those: a single value, or a non-empty array, drawn from `"cpu"`, `"cuda"`, `"rocm"`, `"metal"`, `"vulkan"`. The daemon offers a model a framework only when a build lists it, and moves a model to one without another install only when the installed build lists it. A GPU build that also runs on the CPU lists `"cpu"` too (`["cuda", "cpu"]`); one that does not, does not. An array also declares one build carrying several GPU runtimes (e.g. a llama.cpp binary built with both CUDA and HIP support); the build then matches a host that satisfies any of them. When two builds serve a host equally well, the daemon installs the one listing fewer frameworks, so a CPU-only host gets the CPU build rather than a `["cuda", "cpu"]` one. |
 | `gfx` | array of strings | for `accel` containing `rocm`; forbidden otherwise | AMD architecture targets in `--offload-arch` spelling (`"gfx1030"`, `"gfx90a"`). There is deliberately no wildcard: HIP code objects are architecture-specific AMDGCN ISA with no JIT path, so a build that does not list the host's target cannot run on it. A fat build lists every target it carries. |
 | `vulkan_api` | string | no; allowed only when `accel` contains `vulkan` | Minimum Vulkan API version this build requires, as `"major.minor"` (e.g. `"1.3"`). |
 | `cuda_major` | integer | for `accel` containing `cuda` | CUDA major version this build targets. |

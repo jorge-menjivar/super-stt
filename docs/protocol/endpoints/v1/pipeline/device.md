@@ -19,6 +19,10 @@ per framework. The frameworks offered are every one a published build would
 run on this machine, installed or not. Switching to one whose build is not
 installed takes an install first: [`POST /registry/backend/install`](../registry/install.md)
 with that `accel`, then this endpoint. The model's downloaded files carry over.
+A build runs on the frameworks its [`accel`](../../../backend/config.md#assets)
+lists: Whisper's CUDA builds list `["cuda", "cpu"]`, so a model on one moves
+to the CPU at once, while Qwen's list `cuda` alone and are never offered the
+CPU.
 
 Two list endpoints sit beside it: the per-model list, which is the narrow and
 accurate answer once a model is chosen, and `/stt/pipeline/{stage}/device/list`,
@@ -121,7 +125,7 @@ the preference and the running framework separately is for.
 | HTTP | `error_code`            | Meaning                                                                    |
 |------|-------------------------|----------------------------------------------------------------------------|
 | 400  | `invalid_device`        | `device` is not a framework; or the model's manifest does not declare its axis (a CPU-only model cannot be sent to a GPU framework); or it is not one this machine can offer the model; or the model is online and has no local device. Nothing is recorded. |
-| 409  | `build_not_installed`   | The backend publishes a build for `device`, but not the one installed. Install it with `POST /registry/backend/install` and its `accel`, then ask again. Nothing is recorded. |
+| 409  | `build_not_installed`   | The backend publishes a build for `device`, but the one installed does not list it. Install it with `POST /registry/backend/install` and its `accel`, then ask again. Nothing is recorded. |
 | 409  | `recording_in_progress` | A reload is needed and a recording is in flight                            |
 | 500  | —                       | The reload failed. The `message` names the failure and the framework the model was put back on; the setting is unchanged. |
 

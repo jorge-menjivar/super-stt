@@ -104,9 +104,10 @@ pub fn staged_device(devices: &[String], current: Option<String>) -> Option<Stri
         .or_else(|| devices.first().cloned())
 }
 
-/// Whether the build for `framework` is the one installed, by the daemon's
-/// rule: an install with no record (a local import, or a WASM component) is
-/// taken at its word, and any other runs the frameworks its record names.
+/// Whether the build installed runs on `framework`, by the daemon's rule: an
+/// install with no record (a local import, or a WASM component) is taken at
+/// its word, and any other runs the frameworks its record names, copied from
+/// the build's `accel`.
 ///
 /// The daemon offers every framework a published build would run on here,
 /// installed or not, and refuses to switch to one whose build is not on disk.
@@ -243,15 +244,18 @@ mod tests {
         assert_eq!(staged_device(&[], None), None);
     }
 
-    /// No record believes the backend; a record runs only what it names.
+    /// No record believes the backend; a record runs what it names.
     #[test]
     fn a_build_is_installed_when_the_record_names_it() {
         let vulkan = vec!["vulkan".to_string()];
         assert!(build_installed("vulkan", &vulkan));
         assert!(!build_installed("cuda", &vulkan));
-        assert!(!build_installed("cpu", &vulkan));
+        assert!(
+            !build_installed("cpu", &vulkan),
+            "Qwen's builds have no CPU"
+        );
         assert!(build_installed("cuda", &[]));
-        let both = vec!["cuda".to_string(), "cpu".to_string()];
-        assert!(build_installed("cpu", &both));
+        let whisper = vec!["cuda".to_string(), "cpu".to_string()];
+        assert!(build_installed("cpu", &whisper), "no CPU build to download");
     }
 }

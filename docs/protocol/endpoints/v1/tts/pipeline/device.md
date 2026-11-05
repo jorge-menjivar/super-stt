@@ -10,6 +10,8 @@ The frameworks offered are every one a published build of the backend would
 run on this machine, installed or not; switching to one whose build is not
 installed takes an install first, with
 [`POST /registry/backend/install`](../../registry/install.md) and that `accel`.
+A build runs on the frameworks its [`accel`](../../../../backend/config.md#assets)
+lists, so one listing `["cuda", "cpu"]` moves to the CPU at once.
 
 The preference belongs to the **model**, not to the stage and not to the
 daemon: a 82M-parameter preset-voice model runs fine on the CPU while the
@@ -130,7 +132,7 @@ freed the VRAM a first attempt lacked gets the retry they were asking for.
 | HTTP | `error_code`         | Meaning                                                                    |
 |------|----------------------|----------------------------------------------------------------------------|
 | 400  | `invalid_device`      | `device` is not a framework; or the model's manifest does not declare its axis (a CPU-only model cannot be sent to a GPU framework); or it is not one this machine can offer the model; or the model is online and has no local device. Nothing is recorded. |
-| 409  | `build_not_installed` | The backend publishes a build for `device`, but not the one installed. Install it with `POST /registry/backend/install` and its `accel`, then ask again. Nothing is recorded. |
+| 409  | `build_not_installed` | The backend publishes a build for `device`, but the one installed does not list it. Install it with `POST /registry/backend/install` and its `accel`, then ask again. Nothing is recorded. |
 | 500  | *(uncoded)*           | The reload failed. The `message` names the failure and the framework the model was put back on; the setting is unchanged. |
 
 A load that cannot come up on the framework asked for falls back to the CPU,
