@@ -6,8 +6,15 @@ use super_voice_shared::registry::InstallAccepted;
 
 /// `POST /registry/backend/install` — install a backend by its registry
 /// `source` (e.g. `"github.com/super-stt/openai"`).
-pub async fn install_by_source(source: &str) -> HttpResult<InstallAccepted> {
-    let body = serde_json::json!({ "source": source });
+///
+/// `accel` asks for the build of one framework (`"cuda"`) rather than the one
+/// the daemon ranks best for this machine. Installing over an installed
+/// backend replaces its build and keeps its downloaded models.
+pub async fn install_by_source(source: &str, accel: Option<&str>) -> HttpResult<InstallAccepted> {
+    let mut body = serde_json::json!({ "source": source });
+    if let Some(accel) = accel {
+        body["accel"] = serde_json::Value::from(accel);
+    }
     with_settings_token(move |socket, token| {
         let body = body.clone();
         async move {

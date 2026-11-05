@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 mod active;
 mod add_sheet;
+mod build_dialog;
 mod chips;
 mod configure;
 mod download;
@@ -36,7 +37,9 @@ use crate::ui::messages::Message;
 pub use stage_section::{sheet as stage_sheet, sheet_title as stage_sheet_title};
 
 pub use add_sheet::{add_backend_footer, add_backend_sheet};
+pub use build_dialog::build_dialog;
 pub use configure::configure_sheet;
+pub(crate) use fmt::accel_name;
 pub use select_sheet::select_backend_sheet;
 
 /// Re-exported so the Updates page's header badge (`ui/views/updates.rs`) can

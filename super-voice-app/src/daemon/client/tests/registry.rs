@@ -54,7 +54,7 @@ async fn the_three_install_routes_are_told_apart_by_their_body_key() {
         .reply(Reply::json(&install_accepted()))
         .reply(Reply::json(&install_accepted()));
 
-    registry::install_by_source(SOURCE)
+    registry::install_by_source(SOURCE, None)
         .await
         .expect("by source");
     registry::install_by_repo_url("https://github.com/someone/backend")
@@ -86,7 +86,7 @@ async fn install_returns_the_accepted_install() {
     let daemon = FakeDaemon::start().await;
     daemon.reply(Reply::json(&install_accepted()));
 
-    let accepted = registry::install_by_source(SOURCE)
+    let accepted = registry::install_by_source(SOURCE, None)
         .await
         .expect("install accepted");
 
@@ -107,7 +107,7 @@ async fn a_refused_install_reports_the_daemon_error_not_a_parse_failure() {
         &json!({ "status": "error", "error_code": "already_installed" }),
     ));
 
-    let error = registry::install_by_source(SOURCE)
+    let error = registry::install_by_source(SOURCE, None)
         .await
         .expect_err("install refused");
 

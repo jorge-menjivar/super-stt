@@ -312,7 +312,7 @@ fn control_row<'a>(
             super::active::device_dropdown(stage.stage(), &backend.source, &model, app)
         {
             let note = super::active::device_note(app, stage.stage(), &backend.source);
-            rows.push(("Device", note, devices));
+            rows.push(("Runs on", note, devices));
         }
         // Voice before language: it is the one a user changes between
         // utterances, and the one that decides whether a cloning model can
@@ -371,7 +371,8 @@ fn control_row<'a>(
         && let Some(devices) =
             super::active::device_dropdown(stage.stage(), &backend.source, model, app)
     {
-        rows.push(("Device", None, devices));
+        let note = super::active::build_note(app, stage.stage(), &backend.source);
+        rows.push(("Runs on", note, devices));
     }
 
     // The voice, for the same model, before its language as on the running

@@ -135,8 +135,8 @@ mod tests {
     fn staging_a_new_model_clears_the_device() {
         let mut picks = StagedPicks::default();
         picks.stage_model(Stage::Transcription, "src/a".into(), "whisper".into());
-        picks.set_device(Stage::Transcription, Some("gpu".into()));
-        assert_eq!(picks.device(Stage::Transcription), Some("gpu"));
+        picks.set_device(Stage::Transcription, Some("cuda".into()));
+        assert_eq!(picks.device(Stage::Transcription), Some("cuda"));
 
         picks.stage_model(Stage::Transcription, "src/a".into(), "whisper-large".into());
         assert_eq!(picks.device(Stage::Transcription), None);
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn a_device_without_a_model_stages_nothing() {
         let mut picks = StagedPicks::default();
-        picks.set_device(Stage::Transcription, Some("gpu".into()));
+        picks.set_device(Stage::Transcription, Some("cuda".into()));
         assert!(picks.get(Stage::Transcription).is_none());
     }
 

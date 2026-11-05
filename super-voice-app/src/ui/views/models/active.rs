@@ -233,13 +233,7 @@ pub(super) fn device_dropdown<'a>(
         .staged_picks
         .device(stage)
         .and_then(|d| devices.iter().position(|x| x == d));
-    // Named by the accelerator, not the daemon's `gpu`/`cpu`, which is still
-    // what a pick sends.
-    let gpu = gpu_label(app, stage, source);
-    let labels: Vec<String> = devices
-        .iter()
-        .map(|d| super::fmt::device_name(d, &gpu))
-        .collect();
+    let labels: Vec<String> = devices.iter().map(|d| super::fmt::accel_name(d)).collect();
     let pick = devices.clone();
     Some(
         widget::dropdown(labels, selected, move |index| {
@@ -248,7 +242,7 @@ pub(super) fn device_dropdown<'a>(
                 device: pick[index].clone(),
             })
         })
-        .placeholder("Device")
+        .placeholder("Select")
         .into(),
     )
 }
@@ -268,23 +262,40 @@ fn running_accel(app: &AppModel, stage: Stage, source: &str) -> Option<String> {
     }
 }
 
-/// What a `gpu` choice is called for `source`'s backend in `stage`.
-fn gpu_label(app: &AppModel, stage: Stage, source: &str) -> String {
-    let installed = app
-        .backends
-        .iter()
-        .find(|b| b.source == source)
-        .map_or(&[][..], |b| b.installed_accel.as_slice());
-    super::fmt::gpu_name(installed, running_accel(app, stage, source).as_deref())
+/// The line under a running model's Runs on row: the build downloading for
+/// it, else a note when it is not running on the framework picked.
+pub(super) fn device_note(app: &AppModel, stage: Stage, source: &str) -> Option<String> {
+    build_note(app, stage, source).or_else(|| {
+        super::fmt::running_note(
+            app.staged_picks.device(stage),
+            &running_accel(app, stage, source)?,
+        )
+    })
 }
 
-/// The line under a running model's Device row, when it is not running on the
-/// kind of device picked.
-pub(super) fn device_note(app: &AppModel, stage: Stage, source: &str) -> Option<String> {
-    super::fmt::running_note(
-        app.staged_picks.device(stage),
-        &running_accel(app, stage, source)?,
-    )
+/// The line under a Runs on row while the build for the framework picked
+/// downloads, e.g. "Downloading the CUDA build · 45%".
+pub(super) fn build_note(app: &AppModel, stage: Stage, source: &str) -> Option<String> {
+    use super_voice_shared::registry::events::InstallPhase;
+    let pending = app
+        .models_page
+        .pending_build
+        .as_ref()
+        .filter(|p| p.downloading && p.stage == stage && p.source == source)?;
+    let name = super::fmt::accel_name(&pending.framework);
+    let Some(status) = app.registry.installs.get(source) else {
+        return Some(format!("Downloading the {name} build"));
+    };
+    Some(match (status.phase, status.bytes_total) {
+        (InstallPhase::Downloading, Some(total)) if total > 0 => {
+            let percent = status.bytes_done.saturating_mul(100) / total;
+            format!("Downloading the {name} build \u{b7} {percent}%")
+        }
+        (InstallPhase::Resolving | InstallPhase::Downloading, _) => {
+            format!("Downloading the {name} build")
+        }
+        _ => format!("Installing the {name} build"),
+    })
 }
 
 /// Summary shown in the active-backend card when a model is currently
@@ -308,7 +319,7 @@ pub(super) fn loaded_model_summary<'a>(
         app,
     ) {
         let note = device_note(app, Stage::Transcription, &backend.source);
-        rows.push(("Device", note, devices));
+        rows.push(("Runs on", note, devices));
     }
     // Per-model language, for a multilingual model.
     if let Some(lang_button) =
@@ -332,15 +343,16 @@ pub(super) fn loaded_model_summary<'a>(
 /// Pure VRAM-fit check for a staged load: given the staged `device`, the
 /// model's conservative `estimated_vram_bytes`, and the primary GPU's
 /// available bytes, returns `(needed, available)` when a **GPU** load looks
-/// too big to fit. `None` when the device isn't `gpu`, the model declares no
-/// estimate (online / unknown), no GPU memory is known, or it should fit.
+/// too big to fit. `None` when the framework is not a GPU one, the model
+/// declares no estimate (online / unknown), no GPU memory is known, or it
+/// should fit.
 /// Kept free of [`AppModel`] so the rule is directly unit-testable.
 pub(super) fn vram_shortfall(
     device: Option<&str>,
     estimated_vram_bytes: u64,
     gpu_available_bytes: Option<u64>,
 ) -> Option<(u64, u64)> {
-    if device != Some("gpu") || estimated_vram_bytes == 0 {
+    if matches!(device, None | Some("cpu" | "none")) || estimated_vram_bytes == 0 {
         return None;
     }
     let available = gpu_available_bytes?;
@@ -431,7 +443,8 @@ pub(super) fn staged_model_picker<'a>(
     if let Some(model) = staged_model
         && let Some(devices) = device_dropdown(Stage::Transcription, &backend.source, model, app)
     {
-        rows.push(("Device", None, devices));
+        let note = build_note(app, Stage::Transcription, &backend.source);
+        rows.push(("Runs on", note, devices));
     }
 
     // Per-model language, after the device — shown only for a staged
@@ -644,7 +657,7 @@ pub(super) fn card_error(message: &str) -> Element<'_, Message> {
 
 #[cfg(test)]
 mod vram_shortfall_tests {
-    //! Pin the staged-load VRAM warning: it fires only for a `gpu` target
+    //! Pin the staged-load VRAM warning: it fires only for a GPU framework
     //! whose conservative estimate exceeds the GPU's available memory.
     //! Anything else — CPU, a fitting model, an online/unknown estimate of
     //! `0`, or no GPU info — stays silent.
@@ -656,7 +669,7 @@ mod vram_shortfall_tests {
     #[test]
     fn gpu_over_budget_warns_with_amounts() {
         assert_eq!(
-            vram_shortfall(Some("gpu"), 48 * GIB, Some(24 * GIB)),
+            vram_shortfall(Some("cuda"), 48 * GIB, Some(24 * GIB)),
             Some((48 * GIB, 24 * GIB)),
         );
     }
@@ -665,14 +678,14 @@ mod vram_shortfall_tests {
     /// check is strictly-greater.
     #[test]
     fn gpu_within_budget_is_silent() {
-        assert_eq!(vram_shortfall(Some("gpu"), 8 * GIB, Some(24 * GIB)), None);
-        assert_eq!(vram_shortfall(Some("gpu"), 24 * GIB, Some(24 * GIB)), None);
+        assert_eq!(vram_shortfall(Some("cuda"), 8 * GIB, Some(24 * GIB)), None);
+        assert_eq!(vram_shortfall(Some("cuda"), 24 * GIB, Some(24 * GIB)), None);
     }
 
     /// Online / unknown models declare a `0` estimate and never warn.
     #[test]
     fn zero_estimate_is_silent() {
-        assert_eq!(vram_shortfall(Some("gpu"), 0, Some(GIB)), None);
+        assert_eq!(vram_shortfall(Some("cuda"), 0, Some(GIB)), None);
     }
 
     /// The warning is GPU-specific — CPU and an unset device stay silent
@@ -686,7 +699,7 @@ mod vram_shortfall_tests {
     /// Without known GPU memory there's nothing to judge fit against.
     #[test]
     fn no_gpu_info_is_silent() {
-        assert_eq!(vram_shortfall(Some("gpu"), 48 * GIB, None), None);
+        assert_eq!(vram_shortfall(Some("cuda"), 48 * GIB, None), None);
     }
 }
 

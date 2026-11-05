@@ -143,12 +143,11 @@ pub(super) fn no_viable_device_warning<'a>(model: &str) -> Element<'a, Message> 
     .into()
 }
 
-/// An accelerator as people name it, from the id the daemon uses: `cuda` is
+/// A framework as people name it, from the id the daemon uses: `cuda` is
 /// CUDA, `vulkan` Vulkan. An id this app does not know is shown as it is.
-pub(super) fn accel_name(accel: &str) -> String {
+pub(crate) fn accel_name(accel: &str) -> String {
     match accel {
         "cpu" => "CPU",
-        "gpu" => "GPU",
         "cuda" => "CUDA",
         "rocm" => "ROCm",
         "vulkan" => "Vulkan",
@@ -158,39 +157,26 @@ pub(super) fn accel_name(accel: &str) -> String {
     .to_string()
 }
 
-/// What a `gpu` choice is called for one backend: the GPU build it has
-/// installed, else the accelerator a running model resolved it to, else GPU.
-///
-/// The daemon's device setting is `gpu` or `cpu` whatever the build, and says
-/// which accelerator `gpu` became only once a model runs. The installed build
-/// says it before that, so the picker can name the real thing from the start.
-pub(super) fn gpu_name(installed: &[String], running: Option<&str>) -> String {
-    installed
-        .iter()
-        .map(String::as_str)
-        .find(|accel| *accel != "cpu")
-        .or_else(|| running.filter(|accel| !matches!(*accel, "" | "cpu" | "none" | "remote")))
-        .map_or_else(|| "GPU".to_string(), accel_name)
-}
-
-/// The label a device choice shows: `gpu` by its accelerator's name.
-pub(super) fn device_name(device: &str, gpu: &str) -> String {
-    if device == "gpu" {
-        gpu.to_string()
+/// A download's size, e.g. `"640 MB"` or `"1.4 GB"`.
+// reason: display-only; the imprecision is cosmetic
+#[allow(clippy::cast_precision_loss)]
+pub(super) fn fmt_size(bytes: u64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    let mb = bytes as f64 / MB;
+    if mb < 1024.0 {
+        format!("{} MB", mb.ceil())
     } else {
-        accel_name(device)
+        format!("{:.1} GB", mb / 1024.0)
     }
 }
 
-/// The line under a Device row when the model is not running on the kind of
-/// device picked, which is a GPU choice that fell back to the CPU. `None` when
-/// they agree, as they nearly always do, and for a model that runs nowhere
-/// local.
+/// The line under a Runs on row when the model is not running on the
+/// framework picked, which is one that fell back to the CPU. `None` when they
+/// agree, as they nearly always do, and for a model that runs nowhere local.
 pub(super) fn running_note(chosen: Option<&str>, running: &str) -> Option<String> {
-    let on_cpu = |device: &str| device == "cpu";
     match (chosen, running) {
         (None, _) | (_, "" | "none" | "remote") => None,
-        (Some(chosen), running) if on_cpu(chosen) == on_cpu(running) => None,
+        (Some(chosen), running) if chosen == running => None,
         (Some(_), running) => Some(format!("Running on {}", accel_name(running))),
     }
 }
@@ -200,7 +186,7 @@ mod device_name_tests {
     use super::*;
 
     #[test]
-    fn accelerators_go_by_their_names() {
+    fn frameworks_go_by_their_names() {
         assert_eq!(accel_name("cuda"), "CUDA");
         assert_eq!(accel_name("rocm"), "ROCm");
         assert_eq!(accel_name("vulkan"), "Vulkan");
@@ -208,28 +194,20 @@ mod device_name_tests {
         assert_eq!(accel_name("tpu"), "tpu");
     }
 
-    /// The installed build names the GPU before anything has loaded.
     #[test]
-    fn gpu_is_the_installed_build() {
-        assert_eq!(gpu_name(&["vulkan".to_string()], None), "Vulkan");
-        assert_eq!(
-            gpu_name(&["cpu".to_string(), "cuda".to_string()], None),
-            "CUDA"
-        );
-        assert_eq!(gpu_name(&[], Some("rocm")), "ROCm");
-        assert_eq!(gpu_name(&[], Some("cpu")), "GPU");
-        assert_eq!(gpu_name(&[], None), "GPU");
-        assert_eq!(device_name("gpu", "Vulkan"), "Vulkan");
-        assert_eq!(device_name("cpu", "Vulkan"), "CPU");
+    fn a_download_reads_in_mb_then_gb() {
+        assert_eq!(fmt_size(640 * 1024 * 1024), "640 MB");
+        assert_eq!(fmt_size(1536 * 1024 * 1024), "1.5 GB");
+        assert_eq!(fmt_size(1), "1 MB");
     }
 
-    /// Only a model running on another kind of device than picked says so.
+    /// Only a model running on another framework than picked says so.
     #[test]
     fn a_fallback_is_noted() {
-        assert_eq!(running_note(Some("gpu"), "vulkan"), None);
+        assert_eq!(running_note(Some("vulkan"), "vulkan"), None);
         assert_eq!(running_note(Some("cpu"), "cpu"), None);
         assert_eq!(
-            running_note(Some("gpu"), "cpu").as_deref(),
+            running_note(Some("cuda"), "cpu").as_deref(),
             Some("Running on CPU")
         );
         assert_eq!(running_note(Some("cpu"), "remote"), None);

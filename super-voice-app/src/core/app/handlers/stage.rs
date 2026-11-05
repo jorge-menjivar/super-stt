@@ -80,7 +80,12 @@ impl AppModel {
                 Task::none()
             }
             StageMessage::StageModel { stage, model } => self.stage_model(stage, model),
-            StageMessage::StageDevice { stage, device } => self.choose_device(stage, device),
+            StageMessage::StageDevice { stage, device } => self.pick_device(stage, device),
+            StageMessage::ConfirmBuild => self.confirm_build(),
+            StageMessage::CancelBuild => {
+                self.cancel_build();
+                Task::none()
+            }
             StageMessage::DeviceChangeFailed {
                 stage,
                 prev_device,
@@ -335,7 +340,7 @@ impl AppModel {
     /// wants: the daemon puts the model back on the device it had, so it is
     /// still up, and dropping stage 1's identity here would blank a card whose
     /// model never stopped running.
-    fn report_stage_error(&mut self, stage: Stage, err: &str) {
+    pub(in crate::core::app) fn report_stage_error(&mut self, stage: Stage, err: &str) {
         log::warn!("Stage {stage} operation failed: {err}");
         let home = std::env::var("HOME").unwrap_or_default();
         let sanitized = super::model::sanitize_home(err, &home);
@@ -488,7 +493,11 @@ impl AppModel {
     /// running the choice goes straight to the daemon, which reloads it onto
     /// the new device in place — something it has always done, and that the
     /// card used to make the user do by hand as unload, re-pick, load.
-    fn choose_device(&mut self, stage: Stage, device: String) -> Task<cosmic::Action<Message>> {
+    pub(in crate::core::app) fn choose_device(
+        &mut self,
+        stage: Stage,
+        device: String,
+    ) -> Task<cosmic::Action<Message>> {
         // Re-picking the same device is not a change; sending it would reload a
         // running model for nothing.
         let previous = self.staged_picks.device(stage).map(ToString::to_string);
@@ -518,13 +527,15 @@ impl AppModel {
         let source = self.selected_backend(stage).unwrap_or_default();
         let prev_device = if stage == Stage::Transcription {
             let prev = self.current_device.clone();
-            self.set_device_switching(device.clone(), format!("Switching to {device}..."));
+            let name = crate::ui::views::models::accel_name(&device);
+            self.set_device_switching(device.clone(), format!("Switching to {name}..."));
             self.current_device.clone_from(&device);
             (!prev.is_empty()).then_some(prev)
         } else {
             // Stage 2 publishes no device events of its own, so its card needs
             // a progress line put up here or the reload passes unremarked.
-            self.set_model_loading(running.clone(), format!("Loading on {device}..."), stage);
+            let name = crate::ui::views::models::accel_name(&device);
+            self.set_model_loading(running.clone(), format!("Loading on {name}..."), stage);
             previous
         };
 
@@ -923,10 +934,10 @@ mod tests {
                 &installed,
                 "github.com/x/whisper",
                 "whisper-tiny",
-                Some("gpu")
+                Some("cuda")
             ),
             StagedLoad::Load {
-                device_to_set: Some("gpu".to_string())
+                device_to_set: Some("cuda".to_string())
             },
         );
     }

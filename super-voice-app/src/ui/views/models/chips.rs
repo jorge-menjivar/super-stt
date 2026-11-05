@@ -163,7 +163,7 @@ pub(super) fn stage_device_support(
 ) -> StageCompute {
     match offered {
         Some(devices) => StageCompute {
-            gpu: devices.iter().any(|d| d == "gpu"),
+            gpu: devices.iter().any(|d| d != "cpu"),
             cpu: devices.iter().any(|d| d == "cpu"),
         },
         None => StageCompute {
@@ -889,7 +889,7 @@ mod capability_tests {
             }
         );
         assert_eq!(
-            stage_device_support(Some(&["cpu".to_string(), "gpu".to_string()]), &backend),
+            stage_device_support(Some(&["vulkan".to_string(), "cpu".to_string()]), &backend),
             StageCompute {
                 gpu: true,
                 cpu: true

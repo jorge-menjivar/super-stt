@@ -16,7 +16,7 @@ impl AppModel {
                 self.registry.install_errors.remove(&source);
                 let s = source.clone();
                 Task::perform(
-                    async move { crate::daemon::registry::install_by_source(&s).await },
+                    async move { crate::daemon::registry::install_by_source(&s, None).await },
                     move |res| {
                         cosmic::Action::App(Message::ModelsPage(match res {
                             Ok(a) => ModelsPageMessage::InstallAccepted {
@@ -58,6 +58,7 @@ impl AppModel {
                 // record the reason so the Browse card shows "Failed" + a note
                 // instead of silently snapping back to the Install button.
                 self.registry.installs.remove(&source);
+                self.fail_build(&source, &error);
                 self.registry.install_errors.insert(source, error);
                 Task::none()
             }
@@ -175,6 +176,10 @@ impl AppModel {
                 }
                 self.registry.installs.remove(&source);
                 self.registry.install_errors.remove(&source);
+                // A build the user asked for moves the model onto it. The
+                // daemon reads the install from disk, so this need not wait
+                // for the catalogs below.
+                let switch = self.finish_build(&source);
                 // Both catalogs, because they carry different halves of what
                 // just changed. The backends list is what the Installed tab
                 // draws; the registry catalog carries `installed_version`, and
@@ -183,7 +188,10 @@ impl AppModel {
                 // does nothing when clicked. No index refresh: the annotation
                 // is computed from local install state, so the cached index is
                 // enough and a network round-trip would only slow this down.
-                crate::core::app::handlers::tasks::reload_backend_catalogs()
+                Task::batch([
+                    crate::core::app::handlers::tasks::reload_backend_catalogs(),
+                    switch,
+                ])
             }
 
             ModelsPageMessage::InstallFailed {
@@ -195,8 +203,10 @@ impl AppModel {
                 if let Some(s) = self.registry.installs.get_mut(&source)
                     && s.install_id == install_id
                 {
+                    let reason = error.to_string();
                     s.error = Some(error);
                     s.phase = phase;
+                    self.fail_build(&source, &reason);
                 }
                 Task::none()
             }

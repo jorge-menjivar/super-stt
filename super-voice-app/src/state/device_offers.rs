@@ -89,16 +89,14 @@ impl DeviceOffers {
     }
 }
 
-/// The device a freshly staged model starts on: its own recorded device when
-/// the daemon offers it, otherwise the first device offered.
+/// The framework a freshly staged model starts on: the one the daemon says it
+/// loads on when that is offered, otherwise the first one offered.
 ///
-/// `None` — nothing offered — is the answer that matters: a model declaring
-/// `gpu` on a backend whose installed asset is CPU-only can run on no device
-/// here, and staging one anyway would leave Load enabled next to the advisory
-/// saying so, sending a device the user was just told is unusable. Falling
-/// back to the first offered device likewise keeps the staged device inside
-/// the set the dropdown renders, so the picker never shows an unselected
-/// value.
+/// `None` (nothing offered) is the answer that matters: a model that can run
+/// on no framework here must not be staged on one, or Load would stay enabled
+/// beside the advisory saying it cannot run. Falling back to the first offered
+/// framework likewise keeps the staged one inside the set the dropdown
+/// renders, so the picker never shows an unselected value.
 #[must_use]
 pub fn staged_device(devices: &[String], current: Option<String>) -> Option<String> {
     current
@@ -106,9 +104,21 @@ pub fn staged_device(devices: &[String], current: Option<String>) -> Option<Stri
         .or_else(|| devices.first().cloned())
 }
 
+/// Whether the build for `framework` is the one installed, by the daemon's
+/// rule: an install with no record (a local import, or a WASM component) is
+/// taken at its word, and any other runs the frameworks its record names.
+///
+/// The daemon offers every framework a published build would run on here,
+/// installed or not, and refuses to switch to one whose build is not on disk.
+/// This is how the app knows to offer the download first.
+#[must_use]
+pub fn build_installed(framework: &str, installed_accel: &[String]) -> bool {
+    installed_accel.is_empty() || installed_accel.iter().any(|a| a == framework)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DeviceOffers, Stage, staged_device};
+    use super::{DeviceOffers, Stage, build_installed, staged_device};
 
     /// A stage keeps only the selected backend's answers: switching backends
     /// must not leave the previous one's devices readable under the new
@@ -116,12 +126,12 @@ mod tests {
     #[test]
     fn a_new_backends_answer_drops_the_previous_ones() {
         let mut offers = DeviceOffers::default();
-        offers.record(Stage::Transcription, "a".into(), None, vec!["gpu".into()]);
+        offers.record(Stage::Transcription, "a".into(), None, vec!["cuda".into()]);
         offers.record(
             Stage::Transcription,
             "a".into(),
             Some("m".into()),
-            vec!["gpu".into()],
+            vec!["cuda".into()],
         );
         offers.record(Stage::Transcription, "b".into(), None, vec!["cpu".into()]);
 
@@ -139,12 +149,12 @@ mod tests {
     #[test]
     fn the_stages_do_not_overwrite_each_other() {
         let mut offers = DeviceOffers::default();
-        offers.record(Stage::Transcription, "a".into(), None, vec!["gpu".into()]);
+        offers.record(Stage::Transcription, "a".into(), None, vec!["cuda".into()]);
         offers.record(Stage::PostProcessing, "a".into(), None, vec!["cpu".into()]);
 
         assert_eq!(
             offers.backend(Stage::Transcription, "a"),
-            Some(["gpu".to_string()].as_slice())
+            Some(["cuda".to_string()].as_slice())
         );
         assert_eq!(
             offers.backend(Stage::PostProcessing, "a"),
@@ -186,34 +196,33 @@ mod tests {
             Stage::Transcription,
             "a".into(),
             Some("m".into()),
-            vec!["cpu".into(), "gpu".into()],
+            vec!["cpu".into(), "cuda".into()],
         );
 
         assert_eq!(
             offers.model(Stage::Transcription, "a", "m"),
-            Some(["cpu".to_string(), "gpu".to_string()].as_slice())
+            Some(["cpu".to_string(), "cuda".to_string()].as_slice())
         );
     }
 
-    /// A model the user once put on the GPU is staged there again.
+    /// A model the user once put on CUDA is staged there again.
     #[test]
     fn a_recorded_device_the_daemon_offers_is_restaged() {
-        let devices = vec!["cpu".to_string(), "gpu".to_string()];
+        let devices = vec!["cpu".to_string(), "cuda".to_string()];
         assert_eq!(
-            staged_device(&devices, Some("gpu".to_string())),
-            Some("gpu".to_string())
+            staged_device(&devices, Some("cuda".to_string())),
+            Some("cuda".to_string())
         );
     }
 
-    /// The recorded device outliving what this install can run — a `gpu`
-    /// preference on a machine whose asset is CPU-only — must not be staged
+    /// A recorded framework this machine no longer offers must not be staged
     /// back: the dropdown would render with nothing selected while Load sent
-    /// a device the install cannot use. The first offered device stands in.
+    /// a framework the daemon refuses. The first offered one stands in.
     #[test]
     fn a_recorded_device_the_daemon_no_longer_offers_falls_back() {
         let devices = vec!["cpu".to_string()];
         assert_eq!(
-            staged_device(&devices, Some("gpu".to_string())),
+            staged_device(&devices, Some("cuda".to_string())),
             Some("cpu".to_string())
         );
     }
@@ -221,8 +230,8 @@ mod tests {
     /// Never loaded, so nothing recorded: the first offered device.
     #[test]
     fn no_recorded_device_takes_the_first_offered() {
-        let devices = vec!["gpu".to_string(), "cpu".to_string()];
-        assert_eq!(staged_device(&devices, None), Some("gpu".to_string()));
+        let devices = vec!["cuda".to_string(), "cpu".to_string()];
+        assert_eq!(staged_device(&devices, None), Some("cuda".to_string()));
     }
 
     /// Nothing offered stages nothing — an online model, or a local model
@@ -230,7 +239,19 @@ mod tests {
     /// the Load button disabled beside the advisory that says why.
     #[test]
     fn an_empty_offer_stages_nothing() {
-        assert_eq!(staged_device(&[], Some("gpu".to_string())), None);
+        assert_eq!(staged_device(&[], Some("cuda".to_string())), None);
         assert_eq!(staged_device(&[], None), None);
+    }
+
+    /// No record believes the backend; a record runs only what it names.
+    #[test]
+    fn a_build_is_installed_when_the_record_names_it() {
+        let vulkan = vec!["vulkan".to_string()];
+        assert!(build_installed("vulkan", &vulkan));
+        assert!(!build_installed("cuda", &vulkan));
+        assert!(!build_installed("cpu", &vulkan));
+        assert!(build_installed("cuda", &[]));
+        let both = vec!["cuda".to_string(), "cpu".to_string()];
+        assert!(build_installed("cpu", &both));
     }
 }

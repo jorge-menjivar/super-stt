@@ -28,6 +28,28 @@ pub struct ModelsPageState {
     pub installed_filters: crate::state::registry::InstalledFilters,
     /// The pipeline step whose card the Models page shows under the rows.
     pub pipeline_step: crate::state::Stage,
+    /// A framework picked whose build is not installed: asked about in a
+    /// dialog, then downloaded, then switched to.
+    pub pending_build: Option<PendingBuild>,
+}
+
+/// A framework picked for a stage's model whose backend does not have that
+/// build installed.
+///
+/// Picking one asks first, every time, because it is a download. Once the
+/// user agrees the build is installed in place of the one there, keeping the
+/// downloaded models, and the model is moved to the framework when the
+/// install completes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingBuild {
+    pub stage: crate::state::Stage,
+    /// The backend whose build this is.
+    pub source: String,
+    /// The framework picked, as the daemon names it (`cuda`).
+    pub framework: String,
+    /// The user agreed and the build is downloading. Until then the dialog
+    /// is up.
+    pub downloading: bool,
 }
 
 impl Default for ModelsPageState {
@@ -50,6 +72,7 @@ impl Default for ModelsPageState {
             browse_menu_open: false,
             installed_filters: crate::state::registry::InstalledFilters::default(),
             pipeline_step: crate::state::Stage::Transcription,
+            pending_build: None,
         }
     }
 }

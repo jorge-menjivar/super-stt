@@ -356,6 +356,11 @@ impl cosmic::Application for AppModel {
         self.context_drawer_impl()
     }
 
+    /// The question asked before downloading another build of a backend.
+    fn dialog(&self) -> Option<Element<'_, Self::Message>> {
+        crate::ui::views::models::build_dialog(self)
+    }
+
     /// Describes the interface based on the current state of the application model.
     ///
     /// Application events will be processed through the view. Any messages emitted by

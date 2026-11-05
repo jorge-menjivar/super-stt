@@ -373,6 +373,11 @@ pub enum StageMessage {
     /// device in place, so switching device no longer means unload, re-pick,
     /// load.
     StageDevice { stage: Stage, device: String },
+    /// The user agreed to download the build for the framework they picked
+    /// ([`crate::state::models_page::PendingBuild`]).
+    ConfirmBuild,
+    /// The user declined it. Nothing changes.
+    CancelBuild,
     /// A device change the daemon refused or could not apply.
     ///
     /// Distinct from [`StageMessage::LoadFailed`]: the model is still up, on
