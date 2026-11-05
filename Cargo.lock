@@ -7285,6 +7285,7 @@ dependencies = [
  "strum_macros",
  "super-engine-daemon",
  "super-engine-forge",
+ "super-engine-spec",
  "super-engine-test-daemon",
  "super-stt-shared",
  "super-tts-shared",

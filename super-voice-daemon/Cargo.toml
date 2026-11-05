@@ -71,6 +71,8 @@
     strum_macros.workspace = true
     super-engine-daemon = { workspace = true, features = ["beeper"] }
     super-engine-forge.workspace = true
+    # `fs::write_atomic_private`, for a cloned voice's clip and metadata.
+    super-engine-spec.workspace = true
     super-voice-registry-types = { path = "../super-voice-registry-types", features = ["openapi"] }
     # Shared crate
     super-stt-shared = {
