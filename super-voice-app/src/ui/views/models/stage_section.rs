@@ -63,7 +63,7 @@ fn copy(stage: BlockStage) -> Copy {
     match stage {
         BlockStage::PostProcessing => Copy {
             none_installed: "Install a post-processor from the Library to clean up text before \
-                             is is typed and remove filler words.",
+                             it is typed and remove filler words.",
             unselected: "Optional. Clean up text before it is typed. Remove filler words. \
                          Improve punctuation and formatting.",
             select: "Select post-processor backend",
