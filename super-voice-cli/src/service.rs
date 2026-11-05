@@ -6,7 +6,7 @@
 //! someone who drags Super STT into Applications needs. This is for the rest:
 //! the justfile's install and uninstall, and anyone stopping the daemon from
 //! a terminal. It works only as the CLI inside the bundle — through `stt`, or
-//! `Super STT.app/Contents/MacOS/super-voice-cli` — because `ServiceManagement`
+//! `Super Voice.app/Contents/MacOS/super-voice-cli` — because `ServiceManagement`
 //! finds the agents through the calling executable's bundle.
 
 use anyhow::{Result, bail};

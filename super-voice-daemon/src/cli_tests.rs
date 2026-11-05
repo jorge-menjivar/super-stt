@@ -23,7 +23,7 @@ const PACKAGING: &[&str] = &["super-voice-daemon/systemd/super-voice.service", "
 /// `KeepAlive` exactly as one added to `ExecStart=` crash-loops the unit
 /// under `Restart=always`, and the daemon's clap surface is the same one on
 /// both platforms.
-const PACKAGING_PLISTS: &[&str] = &["super-voice-daemon/launchd/ai.menjivar.super-stt.plist"];
+const PACKAGING_PLISTS: &[&str] = &["super-voice-daemon/launchd/ai.menjivar.super-voice.plist"];
 
 /// The `ProgramArguments` array of a launchd plist, as the argument tokens
 /// that follow the program itself.

@@ -42,8 +42,8 @@ mod tests {
             .unwrap();
         let key = format!("<key>{}</key>", SUPER_VOICE.env("LOG_FILE"));
         for plist in [
-            "super-voice-daemon/launchd/ai.menjivar.super-stt.plist",
-            "super-voice-cli/launchd/ai.menjivar.super-stt.hotkey.plist",
+            "super-voice-daemon/launchd/ai.menjivar.super-voice.plist",
+            "super-voice-cli/launchd/ai.menjivar.super-voice.hotkey.plist",
         ] {
             let text = std::fs::read_to_string(root.join(plist)).unwrap();
             assert!(text.contains(&key), "{plist} does not set {key}");

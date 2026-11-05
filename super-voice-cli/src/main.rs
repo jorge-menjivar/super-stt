@@ -501,7 +501,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn hotkey_launch_agent_arguments_parse() {
-        let plist = include_str!("../launchd/ai.menjivar.super-stt.hotkey.plist");
+        let plist = include_str!("../launchd/ai.menjivar.super-voice.hotkey.plist");
         let array = plist
             .split("<key>ProgramArguments</key>")
             .nth(1)
