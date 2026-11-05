@@ -31,12 +31,12 @@ use cpal_playback as cpal;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use super_tts_shared::models::protocol::DaemonStatusEvent;
+use super_voice_shared::tts::models::protocol::DaemonStatusEvent;
 
 use anyhow::{Result, anyhow, bail};
 use log::{debug, info, warn};
 use parking_lot::Mutex;
-use super_tts_shared::audio::frames::{AudioParams, Frame, FrameKind};
+use super_voice_shared::tts::audio::frames::{AudioParams, Frame, FrameKind};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::tts::audio::playback::{DeviceFormat, Playback, mixer};
@@ -135,7 +135,7 @@ impl OwnedSpeakOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SpeechEvent {
     /// The backend aligned a span of audio to a span of the text.
-    Mark(super_tts_shared::audio::frames::Mark),
+    Mark(super_voice_shared::tts::audio::frames::Mark),
 }
 
 /// Why a speak request could not be served.
@@ -1128,7 +1128,7 @@ struct BandFrame {
 /// the FFT takes power-of-two lengths only, and a chunk's odd-sized remainder
 /// analyzed on its own came back flat.
 struct BandWindows {
-    analyzer: super_tts_shared::audio::AudioAnalyzer,
+    analyzer: super_voice_shared::tts::audio::AudioAnalyzer,
     /// The backend's rate, which the analyzer was built for. Analysis runs
     /// before `push` resamples.
     rate: u32,
@@ -1142,7 +1142,7 @@ struct BandWindows {
 impl BandWindows {
     fn new(rate: u32, device: DeviceFormat) -> Self {
         Self {
-            analyzer: super_tts_shared::audio::AudioAnalyzer::new(rate, ANALYSIS_WINDOW),
+            analyzer: super_voice_shared::tts::audio::AudioAnalyzer::new(rate, ANALYSIS_WINDOW),
             rate,
             device,
             pending: Vec::with_capacity(ANALYSIS_WINDOW),
@@ -1422,9 +1422,9 @@ impl crate::tts::daemon::types::SuperTTSDaemon {
     pub async fn handle_speak(
         &self,
         text: String,
-    ) -> super_tts_shared::models::protocol::DaemonResponse {
+    ) -> super_voice_shared::tts::models::protocol::DaemonResponse {
         use crate::tts::output::notice::{Failure, Origin};
-        use super_tts_shared::models::protocol::{DaemonResponse, ErrorCode};
+        use super_voice_shared::tts::models::protocol::{DaemonResponse, ErrorCode};
 
         // The request is `text`; how it is spoken comes from the user's
         // settings, the same way the streaming path gets it — see
@@ -1550,8 +1550,10 @@ impl crate::tts::daemon::types::SuperTTSDaemon {
     /// Handle `Command::StopSpeaking`. Stopping when nothing is speaking is a
     /// success, not an error — a client that cancels on a keypress should not
     /// have to know whether it won the race.
-    pub async fn handle_stop_speaking(&self) -> super_tts_shared::models::protocol::DaemonResponse {
-        use super_tts_shared::models::protocol::DaemonResponse;
+    pub async fn handle_stop_speaking(
+        &self,
+    ) -> super_voice_shared::tts::models::protocol::DaemonResponse {
+        use super_voice_shared::tts::models::protocol::DaemonResponse;
         match self.speech.cancel().await {
             Some(id) => DaemonResponse::success().with_utterance_id(id),
             None => DaemonResponse::success(),

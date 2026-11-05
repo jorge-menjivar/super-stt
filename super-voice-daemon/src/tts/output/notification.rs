@@ -15,7 +15,7 @@ use crate::tts::output::notice::Failure;
 use anyhow::{Context, Result};
 use log::{debug, info, warn};
 use std::collections::HashMap;
-use super_tts_shared::models::notification_method::NotificationMethod;
+use super_voice_shared::tts::models::notification_method::NotificationMethod;
 use zbus::Connection;
 use zbus::zvariant::Value;
 
@@ -161,9 +161,9 @@ impl Notifier {
 /// nobody is typing. Both read as `auto`; `off` stays off.
 #[must_use]
 pub(crate) fn method_for_speech(
-    setting: super_stt_shared::models::notification_method::NotificationMethod,
+    setting: super_voice_shared::models::notification_method::NotificationMethod,
 ) -> NotificationMethod {
-    use super_stt_shared::models::notification_method::NotificationMethod as Setting;
+    use super_voice_shared::models::notification_method::NotificationMethod as Setting;
     match setting {
         Setting::Off => NotificationMethod::Off,
         Setting::Auto | Setting::Desktop | Setting::Typed => NotificationMethod::Auto,

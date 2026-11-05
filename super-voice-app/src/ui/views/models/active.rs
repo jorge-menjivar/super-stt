@@ -3,7 +3,7 @@ use cosmic::Element;
 use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, text};
-use super_stt_shared::models::protocol::{DownloadProgress, LoadProgress, load_progress};
+use super_voice_shared::models::protocol::{DownloadProgress, LoadProgress, load_progress};
 
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::backends::BackendInfo;

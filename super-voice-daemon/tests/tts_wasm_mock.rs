@@ -11,10 +11,10 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use super_tts_shared::audio::frames::{FrameKind, Mark, SampleFormat};
 use super_voice_daemon::tts::tts_models::synthesize::ModelInfoData;
 use super_voice_daemon::tts::tts_models::v1::{CollectingSink, SynthesizeRequest};
 use super_voice_daemon::tts::tts_models::wasm::WasmBackend;
+use super_voice_shared::tts::audio::frames::{FrameKind, Mark, SampleFormat};
 
 /// Path to the prebuilt mock component (`just build-mock-wasm-backend`).
 fn mock_component() -> Option<PathBuf> {

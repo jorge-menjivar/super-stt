@@ -75,22 +75,14 @@
     super-engine-spec.workspace = true
     super-voice-registry-types = { path = "../super-voice-registry-types", features = ["openapi"] }
     # Shared crate
-    super-stt-shared = {
-        path = "../super-stt-shared",
+    super-voice-shared = {
+        path = "../super-voice-shared",
         features = [
             "analysis",
             "audio",
             # The protocol types the daemon publishes in its OpenAPI document
             # carry their own `ToSchema`, so the spec describes each one where it
             # is defined instead of restating its fields at the router.
-            "openapi",
-        ]
-    }
-    super-tts-shared = {
-        path = "../super-tts-shared",
-        features = [
-            "analysis",
-            "audio",
             "openapi",
         ]
     }

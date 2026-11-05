@@ -109,7 +109,7 @@ impl AppModel {
         }
 
         // The /events subscription is self-healing
-        // (`run_widget_subscription` in super-stt-shared owns
+        // (`run_widget_subscription` in super-voice-shared owns
         // its own reconnect loop), so we deliberately do NOT
         // bump `udp_restart_counter` on reconnect. Restarting
         // the iced subscription would cancel the helper
@@ -191,7 +191,7 @@ impl AppModel {
                 // Drop the cached settings token so the next
                 // session::obtain fires /auth/request and (after a
                 // daemon restart) spawns a fresh consent popup.
-                if let Err(e) = super_stt_shared::daemon::session::forget(SETTINGS_APP_ID) {
+                if let Err(e) = super_voice_shared::daemon::session::forget(SETTINGS_APP_ID) {
                     warn!("Failed to forget settings session before retry: {e}");
                 }
                 // Bump the iced subscription key so the audio-events

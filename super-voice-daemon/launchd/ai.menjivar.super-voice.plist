@@ -12,7 +12,7 @@
 
   It ships inside the app bundle, at
   Super Voice.app/Contents/Library/LaunchAgents/, and is never copied out:
-  the app registers it with SMAppService (super-stt-shared/src/launch_agents.rs),
+  the app registers it with SMAppService (super-voice-shared/src/launch_agents.rs),
   which has launchd load it from there. So this file is the same for every
   user and every install location, and says nothing that depends on either —
   `just bundle-macos` copies it into the bundle as it is.
@@ -80,7 +80,7 @@
           an absolute path, launchd expands neither `~` nor `$HOME`, and a
           plist inside a signed bundle cannot be edited per user. The daemon
           resolves this against `$HOME` itself; see
-          super-stt-shared/src/logging.rs.
+          super-voice-shared/src/logging.rs.
         -->
         <key>SUPER_VOICE_LOG_FILE</key>
         <string>Library/Logs/super-voice/daemon.log</string>

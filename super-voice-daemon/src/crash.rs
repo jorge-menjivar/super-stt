@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// Where the note goes: `<state>/super-voice/crashed`.
 #[must_use]
 pub fn note_path() -> PathBuf {
-    super_stt_shared::paths::state_dir().join("crashed")
+    super_voice_shared::paths::state_dir().join("crashed")
 }
 
 /// Which feature the code at `file` belongs to, as the log names it: text to
@@ -81,7 +81,7 @@ impl crate::daemon::types::SuperSTTDaemon {
     /// Tell the user the daemon restarted after a crash, unless they turned
     /// notifications off. Called once, at the start that found the note.
     pub async fn announce_crash_restart(&self) {
-        use super_stt_shared::models::notification_method::NotificationMethod;
+        use super_voice_shared::models::notification_method::NotificationMethod;
         let method = self.config.read().await.notification_method;
         if !matches!(
             method,
@@ -133,7 +133,7 @@ mod tests {
     #[tokio::test]
     async fn the_restart_is_announced_unless_notifications_are_off() {
         use crate::output::notification::Notifier;
-        use super_stt_shared::models::notification_method::NotificationMethod;
+        use super_voice_shared::models::notification_method::NotificationMethod;
 
         for (method, shown) in [
             (NotificationMethod::Auto, 1),

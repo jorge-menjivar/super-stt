@@ -195,7 +195,7 @@ fn count_label(filled: usize) -> String {
 mod tests {
     use super::{count_label, editor_title};
     use crate::state::contexts::ContextDraft;
-    use super_stt_shared::models::contexts::DictationContext;
+    use super_voice_shared::models::contexts::DictationContext;
 
     #[test]
     fn the_title_says_what_the_user_is_doing() {

@@ -27,8 +27,8 @@ fn pick_folder_task() -> Task<cosmic::Action<Message>> {
 /// land in the same panel, which is the point: a failed resolve is as visible
 /// as a successful one.
 fn preview_outcome(
-    res: super_stt_shared::daemon::http_client::HttpResult<
-        super_stt_shared::registry::PreviewResponse,
+    res: super_voice_shared::daemon::http_client::HttpResult<
+        super_voice_shared::registry::PreviewResponse,
     >,
 ) -> cosmic::Action<Message> {
     cosmic::Action::App(Message::ModelsPage(match res {
@@ -38,7 +38,7 @@ fn preview_outcome(
             // daemon's sentence. The log keeps the token and status, which is
             // what made issue #423 diagnosable from a log alone.
             log::error!("preview failed: {e}");
-            ModelsPageMessage::AddPreviewFailed(e.user_message(&super_stt_shared::SUPER_VOICE))
+            ModelsPageMessage::AddPreviewFailed(e.user_message(&super_voice_shared::SUPER_VOICE))
         }
     }))
 }

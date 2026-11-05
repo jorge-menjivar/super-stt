@@ -34,7 +34,7 @@ impl Drop for CleanupDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
         if let Some(name) = self.0.file_name() {
-            let cache = super_stt_shared::paths::cache_dir()
+            let cache = super_voice_shared::paths::cache_dir()
                 .join("backends")
                 .join(name);
             let _ = std::fs::remove_dir_all(cache);
@@ -509,7 +509,7 @@ async fn serve_model_files() -> String {
 
 /// The cache directory the daemon grants the backend in `dir`.
 fn backend_cache_dir(dir: &std::path::Path) -> std::path::PathBuf {
-    super_stt_shared::paths::cache_dir()
+    super_voice_shared::paths::cache_dir()
         .join("backends")
         .join(dir.file_name().unwrap())
 }

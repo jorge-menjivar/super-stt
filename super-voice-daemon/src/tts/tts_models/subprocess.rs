@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use http_body_util::BodyExt;
 use log::info;
 use super_engine_daemon::subprocess::{self as engine, Start, json_headers};
-use super_tts_shared::models::protocol::LoadProgress;
+use super_voice_shared::tts::models::protocol::LoadProgress;
 
 use crate::tts::tts_models::backends::manifest::{FileSpec, Manifest};
 use crate::tts::tts_models::download::DownloadItem;
@@ -131,13 +131,13 @@ impl SubprocessBackend {
         let mut backend = if model.prepare_files.is_empty() {
             provision(model_name, &rest_items, tracker, 0).await?;
             mark_loading();
-            engine::SubprocessBackend::start(&super_stt_shared::SUPER_VOICE, start).await?
+            engine::SubprocessBackend::start(&super_voice_shared::SUPER_VOICE, start).await?
         } else {
             provision(model_name, &prepare_items, tracker, 0).await?;
             // Dropping the backend stops it, so a download that fails or is
             // cancelled below takes the prepare down with it.
             let backend =
-                engine::SubprocessBackend::start(&super_stt_shared::SUPER_VOICE, start).await?;
+                engine::SubprocessBackend::start(&super_voice_shared::SUPER_VOICE, start).await?;
             backend.prepare().await;
             provision(model_name, &rest_items, tracker, prepare_items.len()).await?;
             mark_loading();

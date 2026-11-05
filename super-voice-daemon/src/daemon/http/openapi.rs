@@ -71,8 +71,8 @@ curl --unix-socket \"${XDG_RUNTIME_DIR:-$TMPDIR}/voice/super-voice-http.sock\" \
     // reached only through a type parameter is not collected from the routes
     // on its own. See `super_engine_spec::registry`.
     components(schemas(
-        super_stt_shared::registry::RegistryBackend,
-        super_stt_shared::registry::RegistryModel,
+        super_voice_shared::registry::RegistryBackend,
+        super_voice_shared::registry::RegistryModel,
     )),
     tags(
         (name = "auth", description = "Consent handshake and token probing."),

@@ -21,7 +21,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use super_tts_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_shared::tts::models::protocol::{DaemonResponse, ErrorCode};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;

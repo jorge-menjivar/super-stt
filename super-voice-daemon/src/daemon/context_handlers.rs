@@ -24,8 +24,8 @@
 use crate::daemon::backend_config_handlers::with_apply_warning;
 use crate::daemon::types::SuperSTTDaemon;
 use log::info;
-use super_stt_shared::models::contexts::DictationContext;
-use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_shared::models::contexts::DictationContext;
+use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
 
 impl SuperSTTDaemon {
     /// The SSE `settings_changed` topic every context write announces.

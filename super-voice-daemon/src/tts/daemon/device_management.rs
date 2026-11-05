@@ -28,10 +28,10 @@ pub(crate) use super_engine_daemon::devices::{
 use super_engine_daemon::devices::{
     device_rejection, device_switch_message, preference_axis, switch_is_satisfied,
 };
-use super_tts_shared::models::protocol::{
+use super_voice_registry_types::manifest::Device;
+use super_voice_shared::tts::models::protocol::{
     Command, DaemonResponse, DaemonStatusEvent, ErrorCode, StageModelDevice,
 };
-use super_voice_registry_types::manifest::Device;
 
 /// Which stored preference a device switch is changing, and therefore what a
 /// completed — or recovered — switch writes back.

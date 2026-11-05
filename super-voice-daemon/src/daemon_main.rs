@@ -51,7 +51,7 @@ pub async fn run() -> Result<()> {
     // Init logging BEFORE loading config so a "config invalid, reset to
     // defaults" warning emitted during the load is actually captured, instead
     // of being dropped before any logger exists (Tier 2 #6).
-    super_stt_shared::logging::init_with(if verbose {
+    super_voice_shared::logging::init_with(if verbose {
         log::LevelFilter::Debug
     } else {
         log::LevelFilter::Info
@@ -66,7 +66,7 @@ pub async fn run() -> Result<()> {
     // without overriding `$XDG_RUNTIME_DIR`, which would break the Wayland
     // connection for spawned consent helpers). Clients resolve through the
     // same helper, so daemon and clients always agree on the path.
-    let socket_path = super_stt_shared::validation::get_http_socket_path();
+    let socket_path = super_voice_shared::validation::get_http_socket_path();
     let instance = match InstanceLock::acquire(&socket_path) {
         Ok(instance) => instance,
         Err(e) => {

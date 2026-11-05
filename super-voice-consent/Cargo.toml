@@ -26,7 +26,7 @@
     }
     libc.workspace = true
     log.workspace = true
-    super-stt-shared = { path = "../super-stt-shared" }
+    super-voice-shared = { path = "../super-voice-shared" }
 
 [dev-dependencies]
     libc.workspace = true

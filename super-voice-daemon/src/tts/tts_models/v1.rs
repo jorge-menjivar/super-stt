@@ -7,7 +7,7 @@
 //! so they live here. Feature-agnostic: compiled whenever either backend is on.
 
 use anyhow::{Result, anyhow};
-use super_tts_shared::audio::frames::{AudioParams, Frame, FrameKind};
+use super_voice_shared::tts::audio::frames::{AudioParams, Frame, FrameKind};
 
 /// A `POST /v1/synthesize` request.
 ///
@@ -209,7 +209,7 @@ where
 {
     use anyhow::bail;
     use http_body_util::BodyExt;
-    use super_tts_shared::audio::frames::FrameDecoder;
+    use super_voice_shared::tts::audio::frames::FrameDecoder;
 
     let params = AudioParams::from_headers(|name| headers.get(name).and_then(|v| v.to_str().ok()))?;
     sink.on_params(params)?;

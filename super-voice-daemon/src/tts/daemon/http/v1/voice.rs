@@ -29,7 +29,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use super_tts_shared::models::voices::{
+use super_voice_shared::tts::models::voices::{
     VoiceDeletedResponse, VoiceInfo, VoiceListResponse, VoiceModelSupport, VoiceResponse,
 };
 use utoipa::ToSchema;

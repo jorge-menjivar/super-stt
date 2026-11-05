@@ -4,7 +4,7 @@ use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope, RegistryError};
 use axum::extract::State;
 use axum::response::Response;
 use super_engine_daemon::registry::endpoints;
-use super_stt_shared::registry::RefreshResponse;
+use super_voice_shared::registry::RefreshResponse;
 
 /// `POST /registry/backend/refresh` — force-refetch the registry index.
 #[utoipa::path(

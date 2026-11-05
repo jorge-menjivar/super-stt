@@ -16,7 +16,7 @@
 //! `send_request`, not the mapping.
 
 use serde::Deserialize;
-use super_stt_shared::daemon::http_client::transport;
+use super_voice_shared::daemon::http_client::transport;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Stands in for any endpoint's success type — the point is that none of its
@@ -137,10 +137,11 @@ async fn streaming_endpoints_share_the_same_mapping() {
         "429 Too Many Requests",
         r#"{"status":"error","message":"rate_limited"}"#,
     );
-    let err = super_stt_shared::daemon::http_client::events_stream(socket.clone(), "token", &["a"])
-        .await
-        .err()
-        .expect("a 429 is not a subscription");
+    let err =
+        super_voice_shared::daemon::http_client::events_stream(socket.clone(), "token", &["a"])
+            .await
+            .err()
+            .expect("a 429 is not a subscription");
     assert_eq!(err.to_string(), "rate_limited (HTTP 429)");
     let _ = std::fs::remove_file(&socket);
 
@@ -150,10 +151,10 @@ async fn streaming_endpoints_share_the_same_mapping() {
         "409 Conflict",
         r#"{"status":"error","message":"recording_in_progress"}"#,
     );
-    let err = super_stt_shared::daemon::http_client::transcribe_stream(
+    let err = super_voice_shared::daemon::http_client::transcribe_stream(
         socket.clone(),
         "token",
-        super_stt_shared::daemon::http_client::TranscribeOptions::default(),
+        super_voice_shared::daemon::http_client::TranscribeOptions::default(),
     )
     .await
     .err()

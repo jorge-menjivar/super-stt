@@ -18,9 +18,9 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use log::info;
 use super_engine_daemon::subprocess::{self as engine, Start, json_headers};
-use super_stt_shared::models::protocol::LoadProgress;
+use super_voice_shared::models::protocol::LoadProgress;
 
-use super_stt_shared::utils::audio::{ResampleQuality, resample};
+use super_voice_shared::utils::audio::{ResampleQuality, resample};
 
 use crate::stt_models::backends::manifest::{FileSpec, Manifest};
 use crate::stt_models::download::DownloadItem;
@@ -116,13 +116,13 @@ impl SubprocessBackend {
         let mut backend = if model.prepare_files.is_empty() {
             provision(model_name, &rest_items, tracker, 0).await?;
             mark_loading();
-            engine::SubprocessBackend::start(&super_stt_shared::SUPER_VOICE, start).await?
+            engine::SubprocessBackend::start(&super_voice_shared::SUPER_VOICE, start).await?
         } else {
             provision(model_name, &prepare_items, tracker, 0).await?;
             // Dropping the backend stops it, so a download that fails or is
             // cancelled below takes the prepare down with it.
             let backend =
-                engine::SubprocessBackend::start(&super_stt_shared::SUPER_VOICE, start).await?;
+                engine::SubprocessBackend::start(&super_voice_shared::SUPER_VOICE, start).await?;
             backend.prepare().await;
             provision(model_name, &rest_items, tracker, prepare_items.len()).await?;
             mark_loading();
@@ -250,5 +250,5 @@ impl Transcribe for SubprocessBackend {
 /// Stop backends left behind by a previous daemon run. See
 /// [`super_engine_daemon::subprocess::cleanup_orphans`].
 pub async fn cleanup_orphan_units() {
-    engine::cleanup_orphans(&super_stt_shared::SUPER_VOICE).await;
+    engine::cleanup_orphans(&super_voice_shared::SUPER_VOICE).await;
 }

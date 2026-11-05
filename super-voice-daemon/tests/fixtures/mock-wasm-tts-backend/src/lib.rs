@@ -28,7 +28,7 @@ pub fn mock_samples() -> Vec<i16> {
         .collect()
 }
 
-/// Frame kinds, mirroring `super_tts_shared::audio::frames::FrameKind`. Spelled
+/// Frame kinds, mirroring `super_voice_shared::tts::audio::frames::FrameKind`. Spelled
 /// out rather than imported: this fixture builds for `wasm32-wasip2` and is
 /// deliberately outside the workspace, so it shares no dependency with the
 /// daemon — which also means it independently exercises the wire format

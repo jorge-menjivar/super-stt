@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use super_engine_client::http_client::HttpResult;
 use super_engine_client::http_client::transport;
 
-use crate::models::protocol::DaemonResponse;
+use crate::tts::models::protocol::DaemonResponse;
 
 /// `POST /tts/speak` — synthesize `text` with the active model and play it.
 ///

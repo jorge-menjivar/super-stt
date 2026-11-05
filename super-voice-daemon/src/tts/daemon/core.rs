@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::tts::daemon::types::SuperTTSDaemon;
-use super_tts_shared::models::protocol::{Command, DaemonRequest, DaemonResponse};
+use super_voice_shared::tts::models::protocol::{Command, DaemonRequest, DaemonResponse};
 
 impl SuperTTSDaemon {
     /// Route a text-to-speech command to its handler.

@@ -5,7 +5,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::response::Response;
 use super_engine_daemon::registry::endpoints::{self, InstallBody};
-use super_stt_shared::registry::{InstallAccepted, InstallRequest};
+use super_voice_shared::registry::{InstallAccepted, InstallRequest};
 
 /// `POST /registry/backend/install` — kick off a background install.
 #[utoipa::path(

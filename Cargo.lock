@@ -7120,51 +7120,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-stt-shared"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyhow",
- "async-stream",
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-util",
- "log",
- "objc2 0.6.5",
- "objc2-foundation 0.3.2",
- "objc2-service-management",
- "rubato 5.0.1",
- "serde",
- "serde_json",
- "super-engine-client",
- "super-engine-protocol",
- "super-engine-spec",
- "super-voice-registry-types",
- "thiserror 2.0.21",
- "tokio",
- "utoipa",
- "uuid",
-]
-
-[[package]]
-name = "super-tts-shared"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyhow",
- "log",
- "rubato 3.0.0",
- "serde",
- "serde_json",
- "super-engine-client",
- "super-engine-protocol",
- "super-stt-shared",
- "super-voice-registry-types",
- "thiserror 2.0.21",
- "utoipa",
- "uuid",
-]
-
-[[package]]
 name = "super-voice-app"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -7200,10 +7155,9 @@ dependencies = [
  "strum",
  "strum_macros",
  "super-engine-forge",
- "super-stt-shared",
- "super-tts-shared",
  "super-voice-daemon",
  "super-voice-registry-types",
+ "super-voice-shared",
  "tempfile",
  "tokio",
  "urlencoding",
@@ -7222,8 +7176,7 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "super-engine-test-daemon",
- "super-stt-shared",
- "super-tts-shared",
+ "super-voice-shared",
  "tempfile",
  "tokio",
 ]
@@ -7235,7 +7188,7 @@ dependencies = [
  "libc",
  "libcosmic",
  "log",
- "super-stt-shared",
+ "super-voice-shared",
 ]
 
 [[package]]
@@ -7280,9 +7233,8 @@ dependencies = [
  "super-engine-forge",
  "super-engine-spec",
  "super-engine-test-daemon",
- "super-stt-shared",
- "super-tts-shared",
  "super-voice-registry-types",
+ "super-voice-shared",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -7338,6 +7290,34 @@ dependencies = [
  "thiserror 2.0.21",
  "toml 1.1.0+spec-1.1.0",
  "utoipa",
+]
+
+[[package]]
+name = "super-voice-shared"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "log",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-service-management",
+ "rubato 3.0.0",
+ "rubato 5.0.1",
+ "serde",
+ "serde_json",
+ "super-engine-client",
+ "super-engine-protocol",
+ "super-engine-spec",
+ "super-voice-registry-types",
+ "thiserror 2.0.21",
+ "tokio",
+ "utoipa",
+ "uuid",
 ]
 
 [[package]]

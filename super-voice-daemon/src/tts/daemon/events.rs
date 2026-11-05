@@ -54,7 +54,7 @@ impl EventBus {
     /// `json!` maps whose keys can silently drift (audit 2 Tier 2 #9).
     pub fn publish_synthesis_status(
         &self,
-        event: super_tts_shared::models::protocol::DaemonStatusEvent,
+        event: super_voice_shared::tts::models::protocol::DaemonStatusEvent,
     ) {
         let mut payload = serde_json::to_value(event).unwrap_or_else(|_| serde_json::json!({}));
         if let Some(obj) = payload.as_object_mut() {

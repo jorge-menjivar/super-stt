@@ -17,7 +17,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use std::sync::Arc;
-use super_stt_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
+use super_voice_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
 
 /// Abort a realtime session whose consumer has sent no frame for this long.
 /// During an active session the client streams audio continuously, so an idle
@@ -532,7 +532,7 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
 /// is driven by the spawned task.
 fn transcribe_mic_sse(
     s: &AppState,
-    req: super_stt_shared::models::protocol::DaemonRequest,
+    req: super_voice_shared::models::protocol::DaemonRequest,
     stream_realtime: bool,
 ) -> axum::response::Response {
     // mpsc channel that produces SSE byte chunks into the HTTP response body.

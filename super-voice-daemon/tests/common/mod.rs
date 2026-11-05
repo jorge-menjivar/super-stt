@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 pub use super_engine_test_daemon::{Method, StatusCode, TestDaemon, shutdown};
-use super_stt_shared::product::SUPER_VOICE;
+use super_voice_shared::product::SUPER_VOICE;
 
 /// The daemon binary under test.
 pub const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-voice-daemon");

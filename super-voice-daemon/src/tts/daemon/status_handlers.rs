@@ -3,7 +3,7 @@
 use crate::tts::daemon::types::SuperTTSDaemon;
 use crate::tts::tts_models::backends;
 use log::{error, info};
-use super_tts_shared::models::protocol::DaemonResponse;
+use super_voice_shared::tts::models::protocol::DaemonResponse;
 
 impl SuperTTSDaemon {
     /// Handle ping command — returns `pong`. The HTTP layer is the only

@@ -49,7 +49,7 @@ fn launchd_target() -> String {
     format!(
         "gui/{}/{}",
         unsafe { libc::getuid() },
-        super_stt_shared::launch_agents::Agent::Daemon.label()
+        super_voice_shared::launch_agents::Agent::Daemon.label()
     )
 }
 
@@ -119,7 +119,7 @@ fn not_running<'a>(
     // registered and switched on, and a launchctl command fixes neither.
     #[cfg(target_os = "macos")]
     match app.daemon_agent {
-        Some(super_stt_shared::launch_agents::Status::RequiresApproval) => {
+        Some(super_voice_shared::launch_agents::Status::RequiresApproval) => {
             return section
                 .add(settings::item(
                     "No daemon",
@@ -134,7 +134,7 @@ fn not_running<'a>(
                         .on_press(Message::Shell(ShellMessage::OpenLoginItems)),
                 ));
         }
-        Some(super_stt_shared::launch_agents::Status::NotRegistered) => {
+        Some(super_voice_shared::launch_agents::Status::NotRegistered) => {
             return section
                 .add(settings::item(
                     "No daemon",

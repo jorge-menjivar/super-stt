@@ -6,7 +6,7 @@
 
 use serde::Serialize;
 use super_engine_daemon::download_progress as engine;
-use super_stt_shared::models::protocol::DownloadProgress;
+use super_voice_shared::models::protocol::DownloadProgress;
 
 pub use super_engine_daemon::download_progress::{Progress, status};
 
@@ -82,7 +82,7 @@ mod tests {
     use std::sync::atomic::AtomicBool;
 
     use super::*;
-    use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
+    use super_voice_shared::models::protocol::POST_PROCESSOR_STAGE;
 
     /// The reported bug: a post-processor's download reported progress a
     /// client could only attribute by looking its model name up in the

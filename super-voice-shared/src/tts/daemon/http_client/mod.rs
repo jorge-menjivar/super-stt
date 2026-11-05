@@ -3,7 +3,7 @@
 //! plus text to speech's own endpoints.
 //!
 //! The transport is HTTP/1.1 over the daemon's Unix socket
-//! (`super_stt_shared::validation::get_http_socket_path()`). Authentication is
+//! (`crate::validation::get_http_socket_path()`). Authentication is
 //! per-request: callers pass a session token and it is attached as
 //! `Authorization: Bearer <token>` on every call except [`auth_request`].
 
@@ -17,7 +17,7 @@ pub use super_engine_client::http_client::{
     events_stream, ping,
 };
 
-use super_stt_shared::models::status::VoiceStatus;
+use crate::models::status::VoiceStatus;
 
 /// `GET /status` — each feature's model, device and whether it is at work.
 /// Text to speech's is `tts`.
@@ -40,7 +40,7 @@ pub mod transport {
     pub use super_engine_client::http_client::transport::*;
 
     use super::HttpResult;
-    use crate::models::protocol::DaemonResponse;
+    use crate::tts::models::protocol::DaemonResponse;
 
     /// `GET <path>` → `DaemonResponse`. The standard settings read.
     ///

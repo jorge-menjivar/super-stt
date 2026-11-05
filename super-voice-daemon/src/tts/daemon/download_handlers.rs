@@ -2,7 +2,7 @@
 
 use crate::tts::daemon::types::SuperTTSDaemon;
 use log::{info, warn};
-use super_tts_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_shared::tts::models::protocol::{DaemonResponse, ErrorCode};
 
 impl SuperTTSDaemon {
     /// Handle cancel download command

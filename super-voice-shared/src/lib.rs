@@ -1,10 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
+//! What Super Voice's daemon and clients share: the session, scopes, paths,
+//! status and protocol types, and speech to text's own. Text to speech's own
+//! are in [`tts`].
+pub mod consent;
 pub mod daemon;
+#[cfg(target_os = "macos")]
+pub mod launch_agents;
+pub mod logging;
 pub mod models;
+pub mod paths;
+pub mod product;
+pub mod registry;
+pub mod tts;
 pub mod utils;
 pub mod validation;
 
-pub use super_engine_protocol::logging;
+pub use product::SUPER_VOICE;
+pub use super_engine_protocol::sandbox;
 
 pub mod audio;
 

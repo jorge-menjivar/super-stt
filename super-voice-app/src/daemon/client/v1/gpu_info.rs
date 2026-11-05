@@ -7,11 +7,11 @@
 
 use crate::daemon::client::internal::response::require_success;
 use crate::daemon::client::internal::session::with_settings_token;
-use super_stt_shared::daemon::http_client::HttpResult;
-use super_stt_shared::daemon::http_client::transport;
+use super_voice_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client::transport;
 
 /// GPU inventory + memory (HTTP `GET /gpu_info`). Empty when no GPU is detected.
-pub async fn get_gpu_info() -> HttpResult<Vec<super_stt_shared::models::protocol::GpuInfo>> {
+pub async fn get_gpu_info() -> HttpResult<Vec<super_voice_shared::models::protocol::GpuInfo>> {
     log::debug!("get_gpu_info: requesting GET /gpu_info");
     let result = with_settings_token(|socket, token| async move {
         let resp = transport::settings_get(socket, &token, "/gpu_info").await?;

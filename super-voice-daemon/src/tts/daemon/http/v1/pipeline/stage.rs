@@ -14,7 +14,7 @@ use crate::tts::daemon::http::state::AppState;
 use axum::extract::{Path, State};
 use axum::response::Response;
 use serde::Deserialize;
-use super_tts_shared::models::protocol::DaemonResponse;
+use super_voice_shared::tts::models::protocol::DaemonResponse;
 
 use super::{Stage, unknown_stage};
 use crate::tts::daemon::http::v1::wire::{

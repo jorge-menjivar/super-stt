@@ -9,7 +9,7 @@
 //! it owns the side effects, this module owns the logic.
 
 use crate::core::app::updater::{InstallerEvent, UpdateRunEvent};
-use super_stt_shared::models::self_update::SelfUpdateStatus;
+use super_voice_shared::models::self_update::SelfUpdateStatus;
 
 /// Self-update state: last known daemon status, a settings-toggle error
 /// banner, and the in-flight apply run (if any).
@@ -381,7 +381,7 @@ pub enum RunPhase {
 mod tests {
     use super::{RunOutcome, RunPhase, UpdateRun, UpdateState};
     use crate::core::app::updater::{InstallerEvent, UpdateRunEvent};
-    use super_stt_shared::models::self_update::{InstallerAsset, SelfUpdateStatus};
+    use super_voice_shared::models::self_update::{InstallerAsset, SelfUpdateStatus};
 
     /// All non-terminal (mid-flight) phases — used to sweep invariants that
     /// must hold across every phase before `Done`/`Failed`.

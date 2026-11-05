@@ -2,7 +2,7 @@
 use crate::tts::daemon::types::SuperTTSDaemon;
 use axum::http::StatusCode;
 use serde_json::Value;
-use super_tts_shared::models::protocol::{DaemonRequest, DaemonResponse};
+use super_voice_shared::tts::models::protocol::{DaemonRequest, DaemonResponse};
 
 pub(crate) async fn dispatch(daemon: &SuperTTSDaemon, request: DaemonRequest) -> DaemonResponse {
     daemon.handle_command(request).await
@@ -41,7 +41,7 @@ pub(crate) fn build_request(command: &str, data: Option<Value>) -> DaemonRequest
 /// | un-coded error   | `500` (unclassified server-side failure)          |
 ///
 /// Error identity is the machine-readable
-/// [`ErrorCode`](super_tts_shared::models::protocol::ErrorCode) the daemon
+/// [`ErrorCode`](super_voice_shared::tts::models::protocol::ErrorCode) the daemon
 /// attaches (see `docs/protocol/transport.md`); the earlier
 /// substring-on-`message` matcher — which had drifted from the live wire
 /// strings — has been retired in favor of it.
@@ -93,7 +93,7 @@ pub(crate) fn narrowed<T: serde::Serialize>(
 mod tests {
     use super::status_code_for_response;
     use axum::http::StatusCode;
-    use super_tts_shared::models::protocol::{DaemonResponse, ErrorCode};
+    use super_voice_shared::tts::models::protocol::{DaemonResponse, ErrorCode};
 
     /// The status is derived from the machine-readable `error_code`, not the
     /// human `message`. Covers the classes the retired substring matcher used to

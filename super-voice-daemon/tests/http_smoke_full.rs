@@ -35,7 +35,7 @@ use common::TestDaemon;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
-use super_stt_shared::daemon::http_client;
+use super_voice_shared::daemon::http_client;
 
 const APP_NAME: &str = "super-stt full smoke test";
 const SCOPES: &[&str] = &["transcribe", "status"];

@@ -3,7 +3,7 @@ use crate::tts::daemon::types::{SuperTTSDaemon, normalize_device};
 use crate::tts::tts_models::synthesize::Synthesize;
 use anyhow::Result;
 use log::{error, info, warn};
-use super_tts_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
+use super_voice_shared::tts::models::protocol::{DaemonResponse, DaemonStatusEvent};
 
 impl SuperTTSDaemon {
     /// Load a model on an explicit device (used during device switching).

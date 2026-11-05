@@ -3,7 +3,7 @@
 //!
 //! Mirrors the daemon's server `v1/` tree: one module per endpoint
 //! family under [`v1`], built on the shared Unix-socket transport
-//! (`super_stt_shared::daemon::http_client::transport`) and the cached
+//! (`super_voice_shared::daemon::http_client::transport`) and the cached
 //! `settings`-scope token ([`internal::session`]).
 
 #[cfg(test)]

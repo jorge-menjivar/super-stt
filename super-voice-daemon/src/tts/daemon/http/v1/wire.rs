@@ -13,8 +13,8 @@
 
 use crate::tts::daemon::http::wire::Ack;
 use serde::{Deserialize, Serialize};
-use super_tts_shared::models::backends::BackendInfo;
-use super_tts_shared::models::protocol::{DaemonResponse, StageModelReport, StageReport};
+use super_voice_shared::tts::models::backends::BackendInfo;
+use super_voice_shared::tts::models::protocol::{DaemonResponse, StageModelReport, StageReport};
 use utoipa::ToSchema;
 
 /// Build a narrow response body from the command bus's wide one.
@@ -130,7 +130,7 @@ impl FromDaemon for StageModelEnvelope {
             // empty slot is reported as an empty slot rather than as an absent
             // key it would have to guard against.
             model: resp.stage_model.unwrap_or(StageModelReport {
-                stage: super_tts_shared::models::protocol::SYNTHESIS_STAGE,
+                stage: super_voice_shared::tts::models::protocol::SYNTHESIS_STAGE,
                 model: None,
                 loaded: false,
                 device: None,

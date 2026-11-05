@@ -10,7 +10,7 @@
 //! serializes it, the app deserializes it and matches (audit 2 Tier 2 #9).
 //!
 //! Every event also carries a `timestamp` (RFC 3339); it is injected by the
-//! publish path (mirroring [`crate::models::protocol::DownloadProgress`]) and
+//! publish path (mirroring [`crate::tts::models::protocol::DownloadProgress`]) and
 //! ignored on deserialize, so it is not modeled as a field here.
 
 use serde::{Deserialize, Serialize};

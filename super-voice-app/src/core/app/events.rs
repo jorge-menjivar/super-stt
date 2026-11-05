@@ -16,12 +16,12 @@ use log::warn;
 /// [`DaemonStatus::Error`], which the caller pairs with the 5s retry. The
 /// decision is on the typed variant; the human string is kept only for display.
 ///
-/// [`HttpError`]: super_stt_shared::daemon::http_client::HttpError
-/// [`is_user_denied`]: super_stt_shared::daemon::widget_subscription::is_user_denied
+/// [`HttpError`]: super_voice_shared::daemon::http_client::HttpError
+/// [`is_user_denied`]: super_voice_shared::daemon::widget_subscription::is_user_denied
 pub(super) fn classify_daemon_error(
-    err: super_stt_shared::daemon::http_client::HttpError,
+    err: super_voice_shared::daemon::http_client::HttpError,
 ) -> DaemonStatus {
-    if super_stt_shared::daemon::widget_subscription::is_user_denied(&err) {
+    if super_voice_shared::daemon::widget_subscription::is_user_denied(&err) {
         DaemonStatus::Blocked(err.into())
     } else {
         DaemonStatus::Error(err.into())
@@ -33,7 +33,7 @@ pub(super) fn classify_daemon_error(
 /// recording-status badge. Returns `None` for events we don't render
 /// (e.g. `subscribed`, `error`, `revoked`).
 pub(super) fn settings_widget_event_to_message(
-    evt: &super_stt_shared::daemon::http_client::WidgetEvent,
+    evt: &super_voice_shared::daemon::http_client::WidgetEvent,
 ) -> Option<Message> {
     use serde_json::Value;
     let p: &Value = &evt.payload;
@@ -93,7 +93,7 @@ pub(super) fn settings_widget_event_to_message(
                 .map(|n| Message::Daemon(DaemonMessage::DaemonEventsReceived(vec![n])))
         }
         "registry_install" => {
-            use super_stt_shared::registry::events::RegistryEvent;
+            use super_voice_shared::registry::events::RegistryEvent;
             let p = &evt.payload;
             if let Ok(reg_evt) = serde_json::from_value::<RegistryEvent>(p.clone()) {
                 match reg_evt {
@@ -152,8 +152,8 @@ pub(super) fn settings_widget_event_to_message(
 /// protocol violation and the event should be dropped rather than
 /// patched up with a fake clock value.
 pub(super) fn widget_event_to_notification(
-    evt: &super_stt_shared::daemon::http_client::WidgetEvent,
-) -> Option<super_stt_shared::models::protocol::NotificationEvent> {
+    evt: &super_voice_shared::daemon::http_client::WidgetEvent,
+) -> Option<super_voice_shared::models::protocol::NotificationEvent> {
     let Some(timestamp) = evt
         .payload
         .get("timestamp")
@@ -166,7 +166,7 @@ pub(super) fn widget_event_to_notification(
         );
         return None;
     };
-    Some(super_stt_shared::models::protocol::NotificationEvent {
+    Some(super_voice_shared::models::protocol::NotificationEvent {
         event_type_field: evt.name.clone(),
         event_type: evt.name.clone(),
         client_id: "daemon".to_string(),
@@ -196,7 +196,7 @@ mod classify_daemon_error_tests {
     //! Locking this in protects against a regression of the deny
     //! spam loop the helper change already fixed for the applet.
     use super::*;
-    use super_stt_shared::daemon::http_client::HttpError;
+    use super_voice_shared::daemon::http_client::HttpError;
 
     fn auth_denied(reason: &str) -> HttpError {
         HttpError::AuthDenied {
@@ -256,7 +256,7 @@ mod widget_event_to_notification_tests {
     //! `timestamp`) are dropped rather than patched up with a
     //! consumer-side clock value.
     use super::*;
-    use super_stt_shared::daemon::http_client::WidgetEvent;
+    use super_voice_shared::daemon::http_client::WidgetEvent;
 
     #[test]
     fn well_formed_event_produces_notification() {
@@ -302,7 +302,7 @@ mod feature_filter_tests {
     //! on the daemon's one event stream, and the app shows both. A feature it
     //! does not know is dropped rather than read as one of its own.
     use super::*;
-    use super_stt_shared::daemon::http_client::WidgetEvent;
+    use super_voice_shared::daemon::http_client::WidgetEvent;
 
     fn event(name: &str, feature: &str) -> WidgetEvent {
         WidgetEvent {

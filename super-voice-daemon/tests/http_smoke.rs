@@ -23,7 +23,7 @@ use common::TestDaemon;
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use super_stt_shared::daemon::http_client::{self, TranscribeOptions};
+use super_voice_shared::daemon::http_client::{self, TranscribeOptions};
 
 const APP_NAME: &str = "super-stt smoke test";
 const SCOPES: &[&str] = &["transcribe", "status"];

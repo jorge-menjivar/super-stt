@@ -4,7 +4,7 @@ use crate::tts::tts_models::ModelDefinition;
 use crate::tts::tts_models::backends;
 use crate::tts::tts_models::synthesize::Synthesize;
 use log::{error, info, warn};
-use super_tts_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
+use super_voice_shared::tts::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
 
 impl SuperTTSDaemon {
     /// Handle get current model command, and stage 1's model slot with it.

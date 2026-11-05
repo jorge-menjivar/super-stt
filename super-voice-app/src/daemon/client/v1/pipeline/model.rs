@@ -14,8 +14,8 @@ use serde::Deserialize;
 use crate::daemon::client::internal::response::require_unit;
 use crate::daemon::client::internal::session::with_settings_token;
 use crate::state::Stage;
-use super_stt_shared::daemon::http_client::HttpResult;
-use super_stt_shared::daemon::http_client::transport;
+use super_voice_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client::transport;
 
 /// Which accelerator a stage's model runs on.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -102,7 +102,7 @@ struct StageSwitch {
     started_at: Option<String>,
     download: Option<StageDownload>,
     #[serde(default)]
-    load: Option<super_stt_shared::models::protocol::LoadProgress>,
+    load: Option<super_voice_shared::models::protocol::LoadProgress>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -127,7 +127,7 @@ pub async fn get_stage_model(stage: Stage) -> HttpResult<StageModel> {
         let envelope =
             transport::get_json::<ModelEnvelope>(socket, &token, &model_path(stage)).await?;
         if envelope.status != "success" {
-            return Err(super_stt_shared::daemon::http_client::HttpError::Other(
+            return Err(super_voice_shared::daemon::http_client::HttpError::Other(
                 format!("get_stage_model: daemon answered {}", envelope.status),
             ));
         }
@@ -145,7 +145,7 @@ pub async fn get_stage_model(stage: Stage) -> HttpResult<StageModel> {
 /// `download_progress` event, for the ticks a client may have missed.
 pub async fn get_download_status(
     stage: Stage,
-) -> HttpResult<Option<super_stt_shared::models::protocol::DownloadProgress>> {
+) -> HttpResult<Option<super_voice_shared::models::protocol::DownloadProgress>> {
     with_settings_token(move |socket, token| async move {
         let status =
             transport::get_json::<ModelEnvelope>(socket, &token, &model_path(stage)).await?;
@@ -163,26 +163,28 @@ pub async fn get_download_status(
                 .unwrap_or("")
                 .to_string()
         };
-        Ok(Some(super_stt_shared::models::protocol::DownloadProgress {
-            model_name: target_field("model"),
-            source: target_field("source"),
-            // The stage that was asked: the slot reports only its own stage's
-            // switch, so the answer belongs to the stage in the path.
-            stage: stage.number(),
-            current_file: download.current_file,
-            file_index: download.file_index,
-            total_files: download.total_files,
-            bytes_downloaded: download.bytes_downloaded,
-            total_bytes: download.total_bytes,
-            percentage: download.percentage,
-            status: switch.phase,
-            started_at: switch.started_at.unwrap_or_default(),
-            eta_seconds: download.eta_seconds,
-            // The polled `switch` shape carries no error detail; failure text
-            // arrives on the `download_progress` SSE event.
-            error: None,
-            load: switch.load,
-        }))
+        Ok(Some(
+            super_voice_shared::models::protocol::DownloadProgress {
+                model_name: target_field("model"),
+                source: target_field("source"),
+                // The stage that was asked: the slot reports only its own stage's
+                // switch, so the answer belongs to the stage in the path.
+                stage: stage.number(),
+                current_file: download.current_file,
+                file_index: download.file_index,
+                total_files: download.total_files,
+                bytes_downloaded: download.bytes_downloaded,
+                total_bytes: download.total_bytes,
+                percentage: download.percentage,
+                status: switch.phase,
+                started_at: switch.started_at.unwrap_or_default(),
+                eta_seconds: download.eta_seconds,
+                // The polled `switch` shape carries no error detail; failure text
+                // arrives on the `download_progress` SSE event.
+                error: None,
+                load: switch.load,
+            },
+        ))
     })
     .await
 }

@@ -5,7 +5,7 @@ use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends;
 use crate::stt_models::transcribe::Transcribe;
 use log::{error, info, warn};
-use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
+use super_voice_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
 
 impl SuperSTTDaemon {
     /// Reject a model/backend/device mutation while a daemon-mic recording is in

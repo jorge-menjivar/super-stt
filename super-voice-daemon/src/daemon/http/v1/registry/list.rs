@@ -4,7 +4,7 @@ use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope, RegistryError};
 use axum::extract::{Query, State};
 use axum::response::Response;
 use super_engine_daemon::registry::endpoints::{self, ListQuery};
-use super_stt_shared::registry::RegistryListResponse;
+use super_voice_shared::registry::RegistryListResponse;
 
 /// `GET /registry/backend/list` — list installable backends from the registry.
 #[utoipa::path(

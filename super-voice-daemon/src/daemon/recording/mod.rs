@@ -13,9 +13,9 @@ use chrono::Utc;
 use log::{error, info, warn};
 use std::collections::VecDeque;
 use std::sync::Arc;
-use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
-use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-use super_stt_shared::theme::AudioTheme;
+use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::theme::AudioTheme;
 use tokio::time::Instant;
 
 /// `client_id` reported on every daemon-mic lifecycle event.

@@ -118,7 +118,7 @@ the daemon under a name of its own, since the daemon binds a session to the
 path that obtained it.
 
 The agents are never copied into `~/Library/LaunchAgents`. They are
-registered with `SMAppService` (`super-stt-shared/src/launch_agents.rs`),
+registered with `SMAppService` (`super-voice-shared/src/launch_agents.rs`),
 which has launchd load them from the bundle and lists them under System
 Settings › General › Login Items. The app registers them whenever it opens
 and finds them unregistered, which is all a drag-and-drop install needs;
@@ -247,7 +247,7 @@ Super Voice is a Rust workspace:
 | `super-voice-app`          | Desktop settings & management app                                |
 | `super-voice-cli`          | The `voice` command-line client, for both features               |
 | `super-voice-consent`        | Consent-popup helper for the auth handshake                      |
-| `super-stt-shared`         | Common types, protocol definitions, validation                   |
+| `super-voice-shared`         | Common types, protocol definitions, validation                   |
 | `super-voice-registry-types` | Super Voice's backend contract, on `super-engine-spec`         |
 | `super-voice-indexer`      | CI tool that builds the published registry `index.json`          |
 
@@ -278,7 +278,7 @@ against live in [`docs/protocol/`](./docs/protocol/).
 
 - Never bypass the process authentication system
 - All network communication must validate inputs
-- Use the shared validation framework in `super-stt-shared/src/validation/`
+- Use the shared validation framework in `super-voice-shared/src/validation/`
 - Follow the development vs production security model (debug vs release builds)
 - Run security audits before proposing changes: `cargo audit`
 

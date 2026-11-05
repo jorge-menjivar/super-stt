@@ -2,8 +2,8 @@
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, settings, space::horizontal as horizontal_space, text};
 use cosmic::{Apply, Element};
-use super_stt_shared::models::notification_method::NotificationMethod;
-use super_stt_shared::theme::AudioTheme;
+use super_voice_shared::models::notification_method::NotificationMethod;
+use super_voice_shared::theme::AudioTheme;
 
 use super::common::{error_banner, page_layout};
 use crate::ui::messages::{LanguageMessage, Message, NotificationMethodMessage, RecordingMessage};

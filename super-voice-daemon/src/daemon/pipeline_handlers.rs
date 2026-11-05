@@ -20,11 +20,11 @@
 //! its own endpoint always used, so there is one implementation of "select a
 //! backend" per stage, not two.
 
-use super_stt_shared::models::protocol::{
+use super_voice_registry_types::manifest::Device;
+use super_voice_shared::models::protocol::{
     DaemonResponse, POST_PROCESSOR_STAGE, StageModelDevice, StageModelReport, StageReport,
     StageRole, StageSwitch, SwitchDownload, SwitchTarget, TRANSCRIPTION_STAGE,
 };
-use super_voice_registry_types::manifest::Device;
 
 use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::{SuperSTTDaemon, normalize_device};

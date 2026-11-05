@@ -20,7 +20,7 @@ use common::TestDaemon;
 use futures_util::{SinkExt, StreamExt};
 use std::path::PathBuf;
 use std::time::Duration;
-use super_tts_shared::daemon::http_client;
+use super_voice_shared::tts::daemon::http_client;
 use tokio::net::UnixStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;

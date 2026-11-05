@@ -391,7 +391,7 @@ fn default_update_config() {
     assert!(config.update.check_enabled);
     assert_eq!(
         config.update.beta_optin,
-        super_stt_shared::models::update_beta_optin::UpdateBetaOptIn::Auto
+        super_voice_shared::models::update_beta_optin::UpdateBetaOptIn::Auto
     );
 }
 
@@ -409,7 +409,7 @@ fn bad_beta_optin_falls_back_preserving_rest() {
     );
     assert_eq!(
         cfg.update.beta_optin,
-        super_stt_shared::models::update_beta_optin::UpdateBetaOptIn::Auto
+        super_voice_shared::models::update_beta_optin::UpdateBetaOptIn::Auto
     );
     assert!(!cfg.update.check_enabled); // sibling field preserved
     assert_eq!(cfg.audio.volume, 80); // other sections preserved
@@ -419,7 +419,7 @@ fn bad_beta_optin_falls_back_preserving_rest() {
 fn update_config_round_trips() {
     let mut cfg = DaemonConfig::default();
     cfg.update.check_enabled = false;
-    cfg.update.beta_optin = super_stt_shared::models::update_beta_optin::UpdateBetaOptIn::Enabled;
+    cfg.update.beta_optin = super_voice_shared::models::update_beta_optin::UpdateBetaOptIn::Enabled;
     let serialized = written(&cfg);
     assert!(serialized.contains("beta_optin: \"enabled\""));
     let back = from_ron(&serialized);
@@ -768,6 +768,6 @@ fn a_pin_to_a_deleted_context_does_not_fall_back_to_the_active_one() {
 fn the_default_tcp_port_is_super_stts() {
     assert_eq!(
         crate::config::DEFAULT_TCP_PORT,
-        super_stt_shared::product::SUPER_VOICE.tcp_port
+        super_voice_shared::product::SUPER_VOICE.tcp_port
     );
 }

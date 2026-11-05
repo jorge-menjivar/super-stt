@@ -7,5 +7,5 @@ pub use super_engine_daemon::self_update::*;
 /// Super STT's checker, comparing its releases against this build's version.
 #[must_use]
 pub fn checker() -> SelfUpdateChecker {
-    SelfUpdateChecker::new(&super_stt_shared::SUPER_VOICE, env!("CARGO_PKG_VERSION"))
+    SelfUpdateChecker::new(&super_voice_shared::SUPER_VOICE, env!("CARGO_PKG_VERSION"))
 }

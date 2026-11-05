@@ -7,8 +7,8 @@
 //! endpoint wrapper reduces to "call transport, then read the field it
 //! cares about".
 
-use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_voice_shared::daemon::http_client::{HttpError, HttpResult};
+use super_voice_shared::models::protocol::DaemonResponse;
 
 /// Return `resp` when `status == "success"`, otherwise the daemon's `message`
 /// (or `"<context> failed"` when absent) as an [`HttpError::Other`]. A daemon

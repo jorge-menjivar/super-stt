@@ -11,7 +11,7 @@
 
 use anyhow::{Result, bail};
 use clap::{ArgMatches, Command};
-use super_stt_shared::launch_agents::{Agent, Status};
+use super_voice_shared::launch_agents::{Agent, Status};
 
 pub fn command() -> Command {
     Command::new("service")

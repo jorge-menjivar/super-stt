@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
 use crate::daemon::types::test_daemon;
-use super_stt_shared::models::protocol::ErrorCode;
-use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-use super_stt_shared::theme::AudioTheme;
+use super_voice_shared::models::protocol::ErrorCode;
+use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::theme::AudioTheme;
 use tokio::time::{Duration, timeout};
 
 fn make_request(command: &str) -> DaemonRequest {
@@ -66,7 +66,7 @@ async fn stop_signal_sent_on_second_press_with_default_mode() {
 
 #[tokio::test]
 async fn guard_model_mutation_flags_recording_in_progress() {
-    use super_stt_shared::models::protocol::ErrorCode;
+    use super_voice_shared::models::protocol::ErrorCode;
     let daemon = test_daemon().await;
     // Idle: the mutation is allowed.
     assert!(daemon.guard_model_mutation("switch models").await.is_none());
@@ -88,7 +88,7 @@ async fn second_press_ignored_in_silence_only_mode() {
 
     // Set daemon config to SilenceOnly
     {
-        use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+        use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
         let mut config = daemon.config.write().await;
         config.transcription.recording_stop_mode = RecordingStopMode::SilenceOnly;
     }
@@ -123,7 +123,7 @@ async fn per_request_stop_mode_overrides_config() {
 
     // Daemon config is SilenceOnly (no manual stop)
     {
-        use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+        use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
         let mut config = daemon.config.write().await;
         config.transcription.recording_stop_mode = RecordingStopMode::SilenceOnly;
     }
@@ -1243,7 +1243,7 @@ async fn an_option_write_reconfigures_the_running_model() {
 /// asserted — the refusal, and that nothing was written behind it.
 #[tokio::test]
 async fn an_option_value_a_header_cannot_carry_is_refused() {
-    use super_stt_shared::models::protocol::ErrorCode;
+    use super_voice_shared::models::protocol::ErrorCode;
 
     let daemon = test_daemon().await;
     let source = "github.com/x/opts";
@@ -1999,7 +1999,7 @@ async fn a_stage_reports_only_its_own_download() {
     use crate::download_progress::DownloadProgressTracker;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
-    use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
+    use super_voice_shared::models::protocol::POST_PROCESSOR_STAGE;
 
     let daemon = test_daemon().await;
     let tracker = Arc::new(DownloadProgressTracker::new(
@@ -2221,7 +2221,7 @@ async fn cancel_abandons_only_the_addressed_stages_download() {
     use crate::download_progress::DownloadProgressTracker;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
-    use super_stt_shared::models::protocol::{ErrorCode, POST_PROCESSOR_STAGE};
+    use super_voice_shared::models::protocol::{ErrorCode, POST_PROCESSOR_STAGE};
 
     let daemon = test_daemon().await;
     let stage_two = Arc::new(DownloadProgressTracker::new(
@@ -2794,7 +2794,7 @@ async fn write_method_test_refuses_while_recording() {
 async fn a_recording_without_write_mode_builds_no_keyboard() {
     let daemon = test_daemon().await;
     daemon.config.write().await.transcription.write_method =
-        super_stt_shared::models::write_method::WriteMethod::Ydotool;
+        super_voice_shared::models::write_method::WriteMethod::Ydotool;
 
     let request = make_record_request(Some(serde_json::json!({ "write_mode": false })));
     let resp = daemon.handle_command(request).await;

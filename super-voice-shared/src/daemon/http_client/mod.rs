@@ -3,7 +3,7 @@
 //! plus speech to text's own endpoints.
 //!
 //! The transport is HTTP/1.1 over the daemon's Unix socket
-//! (`super_stt_shared::validation::get_http_socket_path()`). Authentication is
+//! (`super_voice_shared::validation::get_http_socket_path()`). Authentication is
 //! per-request: callers pass a session token (obtained from
 //! [`crate::daemon::session::obtain`]) and it is attached as
 //! `Authorization: Bearer <token>` on every call except [`auth_request`].

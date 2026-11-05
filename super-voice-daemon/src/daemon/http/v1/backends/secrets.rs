@@ -259,7 +259,7 @@ async fn declared_secret(s: &AppState, source: &str, name: &str) -> Guard {
 /// failure to write the secrets file — safely collapsed to
 /// `500 secrets_write_failed`.
 fn secret_result(
-    resp: &super_stt_shared::models::protocol::DaemonResponse,
+    resp: &super_voice_shared::models::protocol::DaemonResponse,
     configured: bool,
 ) -> Response {
     if resp.status == "success" {

@@ -5,7 +5,7 @@ use crate::stt_models::ModelDefinition;
 use crate::stt_models::transcribe::Transcribe;
 use anyhow::Result;
 use log::{error, info, warn};
-use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
+use super_voice_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
 
 impl SuperSTTDaemon {
     /// Load a model on an explicit device (used during device switching).

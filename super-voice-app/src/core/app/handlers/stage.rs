@@ -686,7 +686,7 @@ impl AppModel {
                 let current = get_model_device(stage, model).await.ok().map(|d| d.device);
                 Ok((devices, current))
             },
-            move |result: super_stt_shared::daemon::http_client::HttpResult<_>| match result {
+            move |result: super_voice_shared::daemon::http_client::HttpResult<_>| match result {
                 Ok((devices, current)) => {
                     cosmic::Action::App(Message::Stage(StageMessage::StagedDevicesLoaded {
                         stage,

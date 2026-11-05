@@ -3,7 +3,7 @@
 use anyhow::Result;
 use log::warn;
 
-use super_stt_shared::audio_utils::{
+use super_voice_shared::audio_utils::{
     ResampleQuality, apply_pre_emphasis, normalize_audio, resample,
 };
 

@@ -39,7 +39,7 @@ impl AppModel {
     pub(in crate::core::app) fn set_model_provisioning(
         &mut self,
         target_model: String,
-        progress: super_stt_shared::models::protocol::DownloadProgress,
+        progress: super_voice_shared::models::protocol::DownloadProgress,
         stage: Stage,
     ) {
         // A tick is progress, so it restarts that stage's stall clock.
@@ -68,7 +68,7 @@ impl AppModel {
         target_model: String,
         status_message: String,
         stage: Stage,
-        load: Option<super_stt_shared::models::protocol::LoadProgress>,
+        load: Option<super_voice_shared::models::protocol::LoadProgress>,
     ) {
         // Entering a switch starts that stage's stall clock (see PingTimeout).
         self.model_operations.start(
@@ -112,7 +112,7 @@ impl AppModel {
     pub(in crate::core::app) fn apply_download_progress(
         &mut self,
         stage: Stage,
-        progress: &super_stt_shared::models::protocol::DownloadProgress,
+        progress: &super_voice_shared::models::protocol::DownloadProgress,
     ) {
         let target_model = progress.model_name.clone();
         match progress.status.as_str() {

@@ -9,7 +9,7 @@ use crate::state::{AudioTheme, ErrorScope, RecordingStatus};
 use crate::ui::messages::{Message, RecordingMessage};
 use cosmic::prelude::*;
 use futures_util::StreamExt;
-use super_stt_shared::daemon::http_client::HttpError;
+use super_voice_shared::daemon::http_client::HttpError;
 
 /// Build the audio-theme rollback message: restore the captured pre-save theme
 /// fields and raise a Customization banner (audit Tier 3 #37).

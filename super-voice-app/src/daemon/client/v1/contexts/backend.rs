@@ -11,9 +11,9 @@
 
 use crate::daemon::client::internal::session::with_settings_token;
 use serde::Deserialize;
-use super_stt_shared::daemon::http_client::HttpResult;
-use super_stt_shared::daemon::http_client::transport;
-use super_stt_shared::models::contexts::DictationContext;
+use super_voice_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client::transport;
+use super_voice_shared::models::contexts::DictationContext;
 
 /// Which of the three a backend is in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]

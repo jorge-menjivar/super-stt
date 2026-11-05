@@ -9,7 +9,7 @@
 use crate::daemon::language::resolve_language;
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::ModelDefinition;
-use super_stt_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
+use super_voice_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
 
 impl SuperSTTDaemon {
     pub async fn handle_get_primary_language(&self) -> DaemonResponse {

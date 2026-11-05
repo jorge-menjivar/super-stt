@@ -24,7 +24,7 @@ use futures::StreamExt;
 use log::{debug, info, warn};
 #[cfg(target_os = "linux")]
 use std::collections::HashMap;
-use super_stt_shared::models::notification_method::NotificationMethod;
+use super_voice_shared::models::notification_method::NotificationMethod;
 #[cfg(target_os = "linux")]
 use zbus::Connection;
 #[cfg(target_os = "linux")]

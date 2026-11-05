@@ -2,8 +2,8 @@
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::dispatch::{DispatchError, dispatch_transcription};
 use log::{debug, error, info, warn};
-use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
-use super_stt_shared::utils::audio::validate_audio;
+use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_shared::utils::audio::validate_audio;
 
 /// Distinguishes a genuine backend failure from "no model is loaded" so
 /// [`SuperSTTDaemon::handle_transcribe`] can attach

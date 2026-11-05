@@ -149,7 +149,7 @@ impl VoiceLibrary {
     /// The default location, `$XDG_DATA_HOME/super-voice/voices`.
     #[must_use]
     pub fn default_dir() -> PathBuf {
-        super_stt_shared::paths::data_dir().join("voices")
+        super_voice_shared::paths::data_dir().join("voices")
     }
 
     /// The directory this library reads and writes.
@@ -242,11 +242,11 @@ impl VoiceLibrary {
         let samples = if decoded.sample_rate == CLIP_SAMPLE_RATE {
             decoded.samples
         } else {
-            super_tts_shared::utils::audio::resample(
+            super_voice_shared::tts::utils::audio::resample(
                 &decoded.samples,
                 decoded.sample_rate,
                 CLIP_SAMPLE_RATE,
-                super_tts_shared::utils::audio::ResampleQuality::HighQuality,
+                super_voice_shared::tts::utils::audio::ResampleQuality::HighQuality,
             )
             .map_err(|e| VoiceError::Io(format!("resampling the clip failed: {e}")))?
         };

@@ -19,7 +19,7 @@
 
 use serde::Serialize;
 use super_engine_daemon::events::STATE_BUF_CAPACITY;
-use super_stt_shared::models::protocol::PreviewSource;
+use super_voice_shared::models::protocol::PreviewSource;
 
 // ---------- Event payload types ----------------------------------------------
 
@@ -177,7 +177,7 @@ impl EventBus {
     /// number their stages from 1, and both report on this one topic.
     pub fn publish_daemon_status(
         &self,
-        event: super_stt_shared::models::protocol::DaemonStatusEvent,
+        event: super_voice_shared::models::protocol::DaemonStatusEvent,
     ) {
         self.publish_status(event, Some("stt"));
     }
@@ -187,14 +187,14 @@ impl EventBus {
     /// both features read. It names no feature, so every client takes it.
     pub fn publish_shared_status(
         &self,
-        event: super_stt_shared::models::protocol::DaemonStatusEvent,
+        event: super_voice_shared::models::protocol::DaemonStatusEvent,
     ) {
         self.publish_status(event, None);
     }
 
     fn publish_status(
         &self,
-        event: super_stt_shared::models::protocol::DaemonStatusEvent,
+        event: super_voice_shared::models::protocol::DaemonStatusEvent,
         feature: Option<&str>,
     ) {
         let mut payload = serde_json::to_value(event).unwrap_or_else(|_| serde_json::json!({}));
@@ -296,7 +296,7 @@ mod tests {
     /// none, so a client of either feature takes it.
     #[tokio::test]
     async fn only_a_features_status_names_the_feature() {
-        use super_stt_shared::models::protocol::DaemonStatusEvent;
+        use super_voice_shared::models::protocol::DaemonStatusEvent;
         let bus = EventBus::new();
         let mut rx = bus.subscribe(Topic::DaemonStatusChanged);
 
@@ -374,11 +374,11 @@ mod tests {
 
     #[test]
     fn required_scope_matches_shared_mapping() {
-        // The daemon enum and the client-facing helper in `super-stt-shared`
+        // The daemon enum and the client-facing helper in `super-voice-shared`
         // must agree on every topic's scope, so a client validating its
         // (scopes, topics) against the shared mapping sees the same gate the
         // daemon enforces here. This pins the two sources of truth together.
-        use super_stt_shared::daemon::widget_subscription::required_scope_for_topic;
+        use super_voice_shared::daemon::widget_subscription::required_scope_for_topic;
         for &topic in Topic::ALL {
             assert_eq!(
                 required_scope_for_topic(topic.as_str()),

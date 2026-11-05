@@ -2,7 +2,7 @@
 //! Voices-page state: the library, what the loaded model can do with it, and
 //! the half-finished sample the user is assembling.
 
-use super_tts_shared::models::voices::{VoiceInfo, VoiceModelSupport};
+use super_voice_shared::tts::models::voices::{VoiceInfo, VoiceModelSupport};
 
 use crate::state::scripts::{self, Script};
 

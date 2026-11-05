@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use super_engine_daemon::registry::install as engine;
 pub use super_engine_daemon::registry::install::{Pipeline, PipelineError};
-use super_stt_shared::registry::events::{InstallError, InstallPhase};
 use super_voice_registry_types::Voice;
+use super_voice_shared::registry::events::{InstallError, InstallPhase};
 
 use crate::registry::compat::Selection;
 use crate::registry::index_schema::IndexBackend;

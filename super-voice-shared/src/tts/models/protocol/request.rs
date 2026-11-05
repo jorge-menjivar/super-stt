@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::validation::{self, Validate, ValidationError};
+use crate::tts::validation::{self, Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

@@ -12,9 +12,9 @@ pub(crate) mod secrets;
 use crate::daemon::backends::BackendInfo;
 use crate::daemon::client::internal::response::require_success;
 use crate::daemon::client::internal::session::with_settings_token;
-use super_stt_shared::daemon::http_client::transport;
-use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
-use super_stt_shared::registry::UninstallResponse;
+use super_voice_shared::daemon::http_client::transport;
+use super_voice_shared::daemon::http_client::{HttpError, HttpResult};
+use super_voice_shared::registry::UninstallResponse;
 
 /// List installed backends with the models, secrets, and options they
 /// declare (HTTP `GET /backend/list`). An empty or absent catalog yields an

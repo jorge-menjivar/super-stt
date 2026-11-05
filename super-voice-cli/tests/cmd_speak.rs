@@ -22,7 +22,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use super_engine_test_daemon::TestDaemon;
-use super_stt_shared::product::SUPER_VOICE;
+use super_voice_shared::product::SUPER_VOICE;
 
 const CLI_BIN: &str = env!("CARGO_BIN_EXE_super-voice-cli");
 

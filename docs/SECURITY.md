@@ -97,7 +97,7 @@ ls -la "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-ht
 
 ### 5. Consent &amp; Peer Identity
 - **Session tokens + scopes**: Every request other than `/auth/request` requires a `Bearer` session token; each token carries the user-approved scopes that gate what it may do (`transcribe`, `speak`, `voices`, `settings`, `secrets`, `status`, and the event-topic scopes, `playback_events` among them — see [`protocol/auth.md`](protocol/auth.md) for the full catalog)
-- **One-time consent**: Tokens are minted only after a popup naming the requesting binary (resolved from the kernel's peer credentials) and the scopes it asks for, which the user approves or denies. The popup is the `super-voice-consent` helper on Linux and an `osascript` dialog on macOS, where the helper's Wayland layer-shell surface has no counterpart; both render the same scope descriptions, from `super_stt_shared::consent`
+- **One-time consent**: Tokens are minted only after a popup naming the requesting binary (resolved from the kernel's peer credentials) and the scopes it asks for, which the user approves or denies. The popup is the `super-voice-consent` helper on Linux and an `osascript` dialog on macOS, where the helper's Wayland layer-shell surface has no counterpart; both render the same scope descriptions, from `super_voice_shared::consent`
 - **Same-UID only**: A peer whose UID differs from the daemon's is rejected before any prompt
 - See [`protocol/auth.md`](protocol/auth.md) for the full token, scope, and consent contract
 

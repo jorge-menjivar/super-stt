@@ -5,10 +5,10 @@ use crate::daemon::client::internal::response::require_unit;
 use crate::daemon::client::internal::session::{
     APP_ID_NAME, APP_NAME, SETTINGS_SCOPES, socket_path, with_settings_token,
 };
-use super_stt_shared::daemon::http_client;
-use super_stt_shared::daemon::http_client::HttpResult;
-use super_stt_shared::daemon::session;
-use super_stt_shared::models::protocol::PreviewSource;
+use super_voice_shared::daemon::http_client;
+use super_voice_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::session;
+use super_voice_shared::models::protocol::PreviewSource;
 
 /// Result type for streaming record responses.
 pub enum RecordEvent {
@@ -39,7 +39,7 @@ pub fn record_command_stream() -> impl futures_util::Stream<Item = RecordEvent> 
         32,
         move |mut channel: cosmic::iced::futures::channel::mpsc::Sender<RecordEvent>| async move {
             use futures_util::{SinkExt, StreamExt};
-            use super_stt_shared::daemon::http_client::{
+            use super_voice_shared::daemon::http_client::{
                 HttpError, TranscribeEvent, TranscribeOptions,
             };
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::models::theme::AudioTheme;
+use crate::tts::models::theme::AudioTheme;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

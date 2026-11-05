@@ -204,7 +204,7 @@ fn preview_panel(app: &AppModel, muted: cosmic::iced::Color) -> Element<'_, Mess
 /// The resolved backend: identity, the facts a person is agreeing to, and the
 /// models it serves.
 fn resolved_preview(
-    b: &super_stt_shared::registry::RegistryBackend,
+    b: &super_voice_shared::registry::RegistryBackend,
     muted: cosmic::iced::Color,
 ) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
@@ -314,7 +314,7 @@ enum FactStyle {
 }
 
 /// The label/value rows: what a person is actually agreeing to run.
-fn facts(b: &super_stt_shared::registry::RegistryBackend) -> Vec<(String, String, FactStyle)> {
+fn facts(b: &super_voice_shared::registry::RegistryBackend) -> Vec<(String, String, FactStyle)> {
     let mut out = Vec::with_capacity(5);
 
     out.push((

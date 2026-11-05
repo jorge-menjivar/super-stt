@@ -17,11 +17,11 @@ use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use super_stt_shared::AudioAnalyzer;
-use super_stt_shared::audio_utils::ResampleQuality;
-use super_stt_shared::models::audio_level::AudioLevel;
-use super_stt_shared::theme::AudioTheme;
-use super_stt_shared::utils::audio::resample;
+use super_voice_shared::AudioAnalyzer;
+use super_voice_shared::audio_utils::ResampleQuality;
+use super_voice_shared::models::audio_level::AudioLevel;
+use super_voice_shared::theme::AudioTheme;
+use super_voice_shared::utils::audio::resample;
 use tokio::sync::broadcast;
 use tokio::time;
 

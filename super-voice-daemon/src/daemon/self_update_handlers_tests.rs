@@ -8,7 +8,7 @@ use crate::daemon::events::Topic;
 use crate::daemon::types::test_daemon;
 use crate::output::notification::Notifier;
 use std::time::Duration;
-use super_stt_shared::models::notification_method::NotificationMethod;
+use super_voice_shared::models::notification_method::NotificationMethod;
 
 /// Serializes every test in this file that points the daemon's self-update
 /// forge client at a mock server via `GITHUB_API_BASE`: the env var is
@@ -78,7 +78,7 @@ async fn overlapping_checks_notify_at_most_once() {
     // Route the daemon's self-update forge client at the mock instead of the
     // real GitHub API (mirrors the existing
     // `unsafe { set_var(XDG_RUNTIME_DIR, ..) }` idiom in
-    // `super-stt-shared/src/validation/paths.rs`). Serialized against the
+    // `super-voice-shared/src/validation/paths.rs`). Serialized against the
     // other `GITHUB_API_BASE`-touching tests in this file by
     // `github_env_lock()` above; restored on drop (even on panic) by
     // `GithubApiBaseGuard`.

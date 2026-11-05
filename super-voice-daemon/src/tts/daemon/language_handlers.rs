@@ -9,7 +9,7 @@
 use crate::tts::daemon::language::resolve_language;
 use crate::tts::daemon::types::SuperTTSDaemon;
 use crate::tts::tts_models::ModelDefinition;
-use super_tts_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
+use super_voice_shared::tts::models::protocol::{Command, DaemonResponse, ErrorCode};
 
 impl SuperTTSDaemon {
     /// Route the three per-model language commands to their handlers. Keeps the

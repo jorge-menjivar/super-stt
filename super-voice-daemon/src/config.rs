@@ -2,12 +2,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use super_stt_shared::models::contexts::DictationContext;
-use super_stt_shared::models::notification_method::NotificationMethod;
-use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
-use super_stt_shared::models::write_method::WriteMethod;
-use super_stt_shared::theme::AudioTheme;
+use super_voice_shared::models::contexts::DictationContext;
+use super_voice_shared::models::notification_method::NotificationMethod;
+use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::models::update_beta_optin::UpdateBetaOptIn;
+use super_voice_shared::models::write_method::WriteMethod;
+use super_voice_shared::theme::AudioTheme;
 
 /// Super Voice's one config file. What the daemon has once comes first; then a
 /// section per feature: speech to text's `transcription`, `post_processor` and
@@ -21,7 +21,7 @@ pub struct DaemonConfig {
     /// rather than failing the whole config load.
     #[serde(
         default,
-        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub notification_method: NotificationMethod,
     /// The global default language every model starts from: a BCP-47 tag,
@@ -59,7 +59,7 @@ pub struct UpdateConfig {
     /// failing the whole config load.
     #[serde(
         default,
-        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub beta_optin: UpdateBetaOptIn,
 }
@@ -143,7 +143,7 @@ pub struct DeviceConfig {
 pub struct AudioConfig {
     #[serde(
         default,
-        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub theme: AudioTheme,
     #[serde(default = "default_volume")]
@@ -276,12 +276,12 @@ pub struct TranscriptionConfig {
     pub preview_typing_enabled: bool, // Beta feature: show preview while typing
     #[serde(
         default,
-        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub recording_stop_mode: RecordingStopMode,
     #[serde(
         default,
-        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub write_method: WriteMethod,
     /// Relative install dir (subdir of [`DaemonConfig::backends_dir`]) of the selected active
@@ -442,7 +442,7 @@ impl DaemonConfig {
         }
         #[cfg(not(test))]
         {
-            super_engine_daemon::config::config_path(&super_stt_shared::product::SUPER_VOICE)
+            super_engine_daemon::config::config_path(&super_voice_shared::product::SUPER_VOICE)
         }
     }
 

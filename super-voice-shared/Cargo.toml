@@ -1,9 +1,9 @@
 [package]
-    name = "super-stt-shared"
+    name = "super-voice-shared"
     version.workspace = true
     authors.workspace = true
     edition.workspace = true
-    description = "Speech to text's shared types and utilities for Super Voice"
+    description = "Super Voice's shared types and utilities, for both features"
 
 [dependencies]
     anyhow.workspace = true
@@ -17,6 +17,9 @@
     }
     log.workspace = true
     rubato = { workspace = true, optional = true }
+    # Text to speech's resampler is written against rubato 3, not the
+    # workspace's 5.
+    rubato3 = { package = "rubato", version = "3.0", optional = true }
     serde.workspace = true
     serde_json.workspace = true
     super-engine-client.workspace = true
@@ -53,7 +56,7 @@
 [features]
     default = []
     analysis = ["super-engine-protocol/analysis"]
-    audio = ["rubato"]
+    audio = ["rubato", "rubato3"]
     # Derive `utoipa::ToSchema` on the protocol types the daemon publishes in its
     # OpenAPI document. Off by default: only the daemon (and the spec generator)
     # needs it, so the app, applet and CLI don't pay to compile utoipa's derive.

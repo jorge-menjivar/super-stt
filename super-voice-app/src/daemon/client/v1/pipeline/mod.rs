@@ -21,7 +21,7 @@ pub(crate) mod stage;
 pub(crate) mod voice;
 
 use crate::state::Stage;
-use super_stt_shared::daemon::http_client::HttpResult;
+use super_voice_shared::daemon::http_client::HttpResult;
 
 pub use model::StageDevice;
 

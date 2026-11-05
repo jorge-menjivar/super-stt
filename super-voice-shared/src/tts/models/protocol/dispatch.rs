@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::command::Command;
 use super::request::DaemonRequest;
-use crate::validation::{self, Validate};
+use crate::tts::validation::{self, Validate};
 
 impl TryFrom<DaemonRequest> for Command {
     type Error = String;

@@ -19,7 +19,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::response::Response;
 use super_engine_daemon::registry::endpoints::{self, InstallBody};
-use super_stt_shared::registry::{InstallRequest, PreviewResponse};
+use super_voice_shared::registry::{InstallRequest, PreviewResponse};
 
 /// `POST /registry/backend/preview` — describe what a source would install.
 #[utoipa::path(

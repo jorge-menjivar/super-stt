@@ -30,7 +30,7 @@ fn main() -> cosmic::iced::Result {
         core::app::macos::notifier::run();
     }
 
-    super_stt_shared::logging::init();
+    super_voice_shared::logging::init();
 
     // Install the rustls crypto provider before any HTTP client is built —
     // the app's first direct download (the self-update installer binary,

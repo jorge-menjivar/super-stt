@@ -6,7 +6,7 @@
   - `super-voice-consent`, `super-voice-registry-types`, `super-voice-indexer`: the consent dialog, the backend manifest spec, the registry indexer.
   - `super-voice-app`: the settings app (COSMIC/iced), for both features.
   - `super-voice-cli`: the `voice` command, for both features.
-  - `super-stt-shared`, `super-tts-shared`: each feature's client library.
+  - `super-voice-shared`: the client library, for both features. Text to speech's own types are its `tts` module.
 - Tests/tooling: Python scripts at repo root (e.g., `test_download_progress.py`).
 - Assets: app `i18n/`, `resources/`. The COSMIC panel applet lives in super-libre/super-cosmic-applet, which publishes its own releases; the installer installs the newest one.
 
@@ -31,7 +31,7 @@
 - Runtime/UX tests: Python against daemon socket at `/run/user/$UID/voice/super-voice-http.sock`.
   - Example: `python3 test_download_progress.py` (ensure daemon is running).
 - Rust unit tests live next to code (`#[cfg(test)]`) or in `tests/` per crate.
-- For protocol changes, add tests in `super-stt-shared` first.
+- For protocol changes, add tests in `super-voice-shared` first.
 
 ## Commit & Pull Request Guidelines
 - Commits: prefer `type(scope): summary` (e.g., `feat(daemon): track model download progress`).

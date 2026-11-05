@@ -11,7 +11,7 @@ use crate::output::preview::{
     sanitize_for_typing,
 };
 use log::{debug, info, warn};
-use super_stt_shared::models::protocol::PreviewSource;
+use super_voice_shared::models::protocol::PreviewSource;
 
 /// The running transcript of the current recording.
 #[derive(Default)]

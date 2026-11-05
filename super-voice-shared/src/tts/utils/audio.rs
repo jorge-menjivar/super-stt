@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use anyhow::Result;
-use rubato::audioadapter_buffers::direct::InterleavedSlice;
-use rubato::{
+use rubato3::audioadapter_buffers::direct::InterleavedSlice;
+use rubato3::{
     Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
 };

@@ -340,7 +340,7 @@ async fn the_write_method_test_reports_the_backend_that_typed() {
     assert_eq!(requests[0].json(), json!({}));
     assert_eq!(
         resolved,
-        Some(super_stt_shared::models::write_method::WriteMethod::Ydotool)
+        Some(super_voice_shared::models::write_method::WriteMethod::Ydotool)
     );
     assert_eq!(unnameable, None);
 }

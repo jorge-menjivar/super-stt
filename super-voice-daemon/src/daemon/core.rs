@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{daemon::types::SuperSTTDaemon, output::keyboard::Simulator, output::typer::Typer};
-use super_stt_shared::models::protocol::{Command, DaemonRequest, DaemonResponse};
-use super_stt_shared::theme::AudioTheme;
+use super_voice_shared::models::protocol::{Command, DaemonRequest, DaemonResponse};
+use super_voice_shared::theme::AudioTheme;
 
 impl SuperSTTDaemon {
     /// Main command handler - routes commands to appropriate handlers
@@ -148,7 +148,7 @@ impl SuperSTTDaemon {
     async fn handle_record_command(
         &self,
         write_mode: bool,
-        stop_mode: Option<super_stt_shared::models::recording_stop_mode::RecordingStopMode>,
+        stop_mode: Option<super_voice_shared::models::recording_stop_mode::RecordingStopMode>,
         preview: Option<bool>,
         language: Option<String>,
         audio_cues: Option<bool>,

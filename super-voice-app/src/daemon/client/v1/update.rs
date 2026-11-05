@@ -2,9 +2,9 @@
 //! GET /v1/update and POST /v1/update/check.
 //! Contract: docs/protocol/endpoints/v1/update.md
 
-use super_stt_shared::daemon::http_client::transport;
-use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
-use super_stt_shared::models::self_update::SelfUpdateStatus;
+use super_voice_shared::daemon::http_client::transport;
+use super_voice_shared::daemon::http_client::{HttpError, HttpResult};
+use super_voice_shared::models::self_update::SelfUpdateStatus;
 
 use crate::daemon::client::internal::session::with_settings_token;
 
@@ -61,7 +61,7 @@ fn is_not_found(e: &HttpError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::is_not_found;
-    use super_stt_shared::daemon::http_client::HttpError;
+    use super_voice_shared::daemon::http_client::HttpError;
 
     /// The shape an *old* daemon (no `/update` route registered) actually
     /// produces: axum's default fallback has no body, so `daemon_error` has

@@ -35,8 +35,7 @@
     super-engine-forge.workspace = true
     super-voice-registry-types = { path = "../super-voice-registry-types" }
     # Workspace dependencies
-    super-stt-shared = { path = "../super-stt-shared" }
-    super-tts-shared = { path = "../super-tts-shared" }
+    super-voice-shared = { path = "../super-voice-shared" }
     tokio.workspace = true
     urlencoding = "2.1.3"
     uuid.workspace = true

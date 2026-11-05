@@ -97,7 +97,7 @@ impl AppModel {
             }
             #[cfg(target_os = "macos")]
             ShellMessage::OpenLoginItems => {
-                super_stt_shared::launch_agents::open_login_items_settings();
+                super_voice_shared::launch_agents::open_login_items_settings();
                 Task::none()
             }
 
