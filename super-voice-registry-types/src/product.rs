@@ -17,8 +17,9 @@ pub use super_engine_spec::product::{Generation, Product};
 use super_engine_spec::product::{SchemaNames, generation_from_str};
 
 /// Where Super Voice's backend registry is published, for every daemon that
-/// reads it.
-pub const INDEX_URL: &str = "https://jorge-menjivar.github.io/super-voice/index.json";
+/// reads it. This repo's Pages site, which keeps its name until the repo is
+/// renamed.
+pub const INDEX_URL: &str = "https://jorge-menjivar.github.io/super-stt/index.json";
 
 /// Super Voice's names: everything its daemon and its clients meet on, from
 /// the socket to the scopes a token can carry. See [`ProductSpec`].
