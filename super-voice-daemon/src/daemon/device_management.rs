@@ -19,7 +19,7 @@ pub(crate) use super_engine_daemon::devices::{
     backend_available_devices, backend_frameworks, model_available_devices, parse_device_preference,
 };
 use super_engine_daemon::devices::{
-    build_installed, default_framework, device_rejection, device_switch_message,
+    build_installed, device_rejection, device_switch_message, effective_framework,
     switch_is_satisfied,
 };
 use super_voice_registry_types::manifest::Device;
@@ -391,11 +391,11 @@ impl SuperSTTDaemon {
         }
     }
 
-    /// The device the target loads on: its own, else the global default.
-    /// The framework `target` loads on: its own when that is one it can run
-    /// on here, else the best one the build on disk runs, so a client
-    /// staging a load from this answer never asks for a build that is not
-    /// installed.
+    /// The framework `target` loads on: its own when it can run on it here
+    /// and that build is installed, else the best one the build on disk runs.
+    /// A client staging a load from this answer never asks for a build that
+    /// is not installed. A choice whose build was replaced since stays stored,
+    /// and is used again once that build is back.
     async fn effective_device(&self, target: &DeviceTarget) -> String {
         let configured = self
             .config
@@ -404,10 +404,7 @@ impl SuperSTTDaemon {
             .effective_device(&target.definition.source, &target.definition.name);
         let install = self.install_context(&target.backend_dir).await;
         let offered = install.offer(&target.definition);
-        if offered.contains(&configured) {
-            return configured;
-        }
-        default_framework(&offered, &install.installed_accel).unwrap_or(configured)
+        effective_framework(&configured, &offered, &install.installed_accel)
     }
 
     /// Record the target's device and persist it. A persist failure is logged,

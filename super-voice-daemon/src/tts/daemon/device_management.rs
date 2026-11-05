@@ -26,7 +26,7 @@ pub(crate) use super_engine_daemon::devices::{
     parse_device_preference,
 };
 use super_engine_daemon::devices::{
-    build_installed, default_framework, device_rejection, device_switch_message,
+    build_installed, device_rejection, device_switch_message, effective_framework,
     switch_is_satisfied,
 };
 use super_voice_registry_types::manifest::Device;
@@ -80,14 +80,10 @@ impl InstallContext {
         build_installed(framework, &self.installed_accel)
     }
 
-    /// The framework `model` loads on when `configured` is not one it can run
-    /// on here: the best one the build on disk runs.
-    fn effective(&self, model: &ModelDefinition, configured: String) -> String {
-        let offered = self.offer(model);
-        if offered.contains(&configured) {
-            return configured;
-        }
-        default_framework(&offered, &self.installed_accel).unwrap_or(configured)
+    /// The framework `model` loads on: `configured` when it can run on it here
+    /// and that build is installed, else the best one the build on disk runs.
+    fn effective(&self, model: &ModelDefinition, configured: &str) -> String {
+        effective_framework(configured, &self.offer(model), &self.installed_accel)
     }
 }
 
@@ -860,9 +856,9 @@ impl SuperTTSDaemon {
     }
 
     /// The framework the target loads on: its own, else the global default,
-    /// when that is one it can run on here; else the best one the build on
-    /// disk runs, so a client staging a load from this answer never asks for
-    /// a build that is not installed.
+    /// when it can run on it here and that build is installed; else the best
+    /// one the build on disk runs. A client staging a load from this answer
+    /// never asks for a build that is not installed.
     async fn effective_device(&self, target: &DeviceTarget) -> String {
         let configured = self
             .config
@@ -871,7 +867,7 @@ impl SuperTTSDaemon {
             .effective_device(&target.definition.source, &target.definition.name);
         self.install_context(&target.backend_dir)
             .await
-            .effective(&target.definition, configured)
+            .effective(&target.definition, &configured)
     }
 
     /// Record the target's device and persist it, for the paths that store
@@ -951,7 +947,7 @@ impl SuperTTSDaemon {
             Some((dir, definition)) => self
                 .install_context(&dir)
                 .await
-                .effective(&definition, configured),
+                .effective(&definition, &configured),
             None => configured,
         };
         let resolved_accel = match running {
