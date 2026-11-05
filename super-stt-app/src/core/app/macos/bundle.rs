@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! What the settings app does as the main executable of `Super STT.app`:
+//! What the settings app does as the main executable of `Super Voice.app`:
 //! register the bundle's `LaunchAgent`s, ask to show notifications, and say
 //! where the daemon's agent stands while the daemon cannot be reached.
 //!

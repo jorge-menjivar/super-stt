@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! macOS Notification Center, for a daemon running from inside
-//! `Super STT.app`, by way of the app's own executable.
+//! `Super Voice.app`, by way of the app's own executable.
 //!
 //! Notification Center serves only an app bundle's own executable. The daemon
 //! sits beside it in `Contents/MacOS` and has the app as its main bundle, and

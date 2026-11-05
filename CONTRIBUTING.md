@@ -61,7 +61,7 @@ by design — use the platform-scoped recipes, which select the members that do
 build:
 
 ```bash
-just install            # Super STT.app into /Applications; see below
+just install            # Super Voice.app into /Applications; see below
 just check-macos        # clippy over the members that build here
 just test-macos         # their tests
 just doctest-macos      # their doctests
@@ -79,13 +79,13 @@ right thing instead: they skip the parts that have no macOS counterpart.
 
 ##### The app bundle
 
-On macOS Super STT installs as one bundle, `Super STT.app`. `just
+On macOS Super STT installs as one bundle, `Super Voice.app`. `just
 bundle-macos` builds it into `target/release/`, and `just install` (or
 `install-daemon`, `install-app`, `install-cli`: the bundle carries all of
 them) puts it in `/Applications`:
 
 ```
-Super STT.app/Contents/
+Super Voice.app/Contents/
   Info.plist                      super-stt-app/resources/macos/Info.plist
   MacOS/super-stt-app             the settings app, the bundle's executable
   MacOS/super-voice-daemon
@@ -143,7 +143,7 @@ just run-cli hotkey --key ctrl+alt+shift+F19
 ```
 
 Pick a binding the installed listener is not already holding, or stop it
-first with `launchctl bootout gui/$(id -u)/ai.menjivar.super-stt.hotkey`.
+first with `launchctl bootout gui/$(id -u)/ai.menjivar.super-voice.hotkey`.
 
 Two constraints shape that module. The crate's macOS backend needs an event
 loop on the main thread, so `hotkey` is dispatched before `main` builds a
@@ -196,7 +196,7 @@ ad-hoc (what the linker gives you)
   designated => cdhash H"828ac4ed4175c86a6aa18c6b618d923a22eafca5"
 
 Developer ID
-  designated => identifier "ai.menjivar.super-stt-daemon"
+  designated => identifier "ai.menjivar.super-voice-daemon"
                 and anchor apple generic
                 and certificate leaf[subject.OU] = "8JDTBFQ3F5"
 ```

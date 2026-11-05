@@ -319,7 +319,7 @@ pub struct UpdateRun {
     pub bytes_total: u64,
     pub error: Option<String>,
     /// The installer's typed error code for a `Failed` run (its closed set
-    /// lives in `super-tts-install`'s `InstallError::code`). `None` for a
+    /// lives in `super-voice-install`'s `InstallError::code`). `None` for a
     /// failure raised app-side, which has no installer code to report.
     ///
     /// Kept beside `error` because the message is for the user to read and
@@ -416,7 +416,7 @@ mod tests {
             last_check_error: None,
             beta_optin_effective: false,
             installer_asset: Some(InstallerAsset {
-                name: "super-tts-installer".to_string(),
+                name: "super-voice-installer".to_string(),
                 url: "https://example.invalid/installer".to_string(),
                 size: 1024,
                 sha256: "0".repeat(64),

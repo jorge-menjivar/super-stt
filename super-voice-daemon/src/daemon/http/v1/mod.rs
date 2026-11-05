@@ -192,12 +192,24 @@ pub(crate) fn router(state: AppState) -> Router {
 /// they add no paths — what each endpoint requires is stated in its own
 /// `security` and prose.
 pub(crate) fn openapi() -> utoipa::openapi::OpenApi {
+    let mut spec = stt_and_shared_openapi();
+    let tts = crate::daemon::http::openapi::name_colliding_schemas(
+        &spec,
+        crate::tts::daemon::http::openapi_document(),
+        "Tts",
+    );
+    spec.merge(tts);
+    crate::daemon::http::openapi::name_feature_operations(&mut spec);
+    spec
+}
+
+/// The document for speech to text's routes and the ones the daemon has once,
+/// before text to speech's are merged in.
+pub(super) fn stt_and_shared_openapi() -> utoipa::openapi::OpenApi {
     let (_router, mut spec) = assemble(scope_groups()).split_for_parts();
     // Has to happen here, not as an `ApiDoc` modifier: the paths only exist
     // once the router has been assembled.
     crate::daemon::http::openapi::annotate_scopes(&mut spec);
-    spec.merge(crate::tts::daemon::http::openapi_document());
-    crate::daemon::http::openapi::name_feature_operations(&mut spec);
     spec
 }
 

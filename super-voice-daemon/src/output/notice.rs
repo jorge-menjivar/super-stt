@@ -218,7 +218,7 @@ mod tests {
     fn a_keyboard_failure_carries_its_remedy_whole() {
         let remedy = "Super STT is not allowed to control your keyboard. Add \
                       /usr/local/bin/super-voice-daemon under Accessibility, then restart \
-                      it: launchctl kickstart -k gui/501/ai.menjivar.super-stt.";
+                      it: launchctl kickstart -k gui/501/ai.menjivar.super-voice.";
         let f = Failure::keyboard_unavailable(remedy);
         assert_eq!(f.summary, "Cannot type");
         assert_eq!(f.body, remedy);

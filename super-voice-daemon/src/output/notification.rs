@@ -8,7 +8,7 @@
 //! path covers all of them; nothing there is desktop-specific.
 //!
 //! On macOS it is Notification Center: through `UNUserNotificationCenter` when
-//! the daemon runs from inside `Super STT.app`, and through `osascript` when it
+//! the daemon runs from inside `Super Voice.app`, and through `osascript` when it
 //! is a bare binary. See [`Inner`] for what each costs relative to the Linux
 //! path.
 //!
@@ -81,7 +81,7 @@ enum Inner {
     /// Session-bus connection, established on first send and cached.
     #[cfg(target_os = "linux")]
     Dbus(Option<Connection>),
-    /// macOS Notification Center, for a daemon inside `Super STT.app`, posted
+    /// macOS Notification Center, for a daemon inside `Super Voice.app`, posted
     /// by the app's executable at this path; see `notification_center`. The
     /// banner carries the app's name and icon, and a post the user has not
     /// allowed is reported as a failure.

@@ -15,7 +15,7 @@ fn status_body() -> serde_json::Value {
         "last_check_error": null,
         "beta_optin_effective": false,
         "installer_asset": {
-            "name": "super-stt-install-x86_64-unknown-linux-gnu",
+            "name": "super-voice-install-x86_64-unknown-linux-gnu",
             "url": "https://example.test/installer",
             "size": 12_345_678_u64,
             "sha256": "0".repeat(64),
@@ -40,7 +40,7 @@ async fn the_status_comes_back_typed() {
     assert_eq!(status.latest_version.as_deref(), Some("v0.2.5"));
     assert_eq!(
         status.installer_asset.expect("an asset").name,
-        "super-stt-install-x86_64-unknown-linux-gnu"
+        "super-voice-install-x86_64-unknown-linux-gnu"
     );
 }
 

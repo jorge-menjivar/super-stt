@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Super STT Installation Bootstrap
+# Super Voice Installation Bootstrap
 #
 # Documented entry point:
 #
@@ -8,7 +8,7 @@
 #   curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/install.sh | bash -s -- --beta
 #
 # This script is deliberately tiny: it detects the architecture, resolves
-# the requested release, downloads the `super-stt-install` binary attached
+# the requested release, downloads the `super-voice-install` binary attached
 # to that release, and execs it. All installer logic lives in that binary
 # (rustup-style), so the bootstrap can never disagree with the release
 # layout it installs.
@@ -207,7 +207,7 @@ main() {
         exit 1
     fi
 
-    INSTALLER_ASSET="super-stt-install-$TRIPLE"
+    INSTALLER_ASSET="super-voice-install-$TRIPLE"
     INSTALLER_URL="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$INSTALLER_ASSET"
 
     TEMP_DIR=$(mktemp -d)
@@ -243,7 +243,7 @@ main() {
             *-apple-darwin)
                 print_error "Pre-built macOS binaries are not published yet. Build from source instead:"
                 print_error "  git clone https://github.com/$GITHUB_REPO.git && cd super-stt && just install"
-                print_error "That installs Super STT.app — the settings app, the daemon and the stt CLI — in"
+                print_error "That installs Super Voice.app — the settings app, the daemon and the voice CLI — in"
                 print_error "/Applications. The COSMIC applet is Linux-only."
                 ;;
             *)

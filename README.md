@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src=".github/assets/super-stt-icon.svg" width="128" height="128" alt="Super STT">
+<img src=".github/assets/super-stt-icon.svg" width="128" height="128" alt="Super Voice">
 
-# Super STT
+# Super Voice
 
 **Speak into any app on Linux. Your words appear as text.**
 
@@ -15,14 +15,16 @@
 https://github.com/user-attachments/assets/bbbe20c3-6802-4797-afc8-aa81d1b48415
 
 
-## What is Super STT?
+## What is Super Voice?
 
-Super STT makes speech-to-text with automatic text input **trivial on Linux, for everyone**. Bind a shortcut (Super+Space by convention), speak, and your words are typed straight into whatever app is focused, e.g. your editor, browser, chat, terminal. No copy-paste, no fiddling.
+Super Voice does two things on Linux: speech to text, typed into whatever app you're in, and text to speech, read aloud by a model you pick. Super STT and Super TTS were its two halves; they are one product now, with one daemon.
+
+It makes speech-to-text with automatic text input **trivial on Linux, for everyone**. Bind a shortcut (Super+Space by convention), speak, and your words are typed straight into whatever app is focused, e.g. your editor, browser, chat, terminal. No copy-paste, no fiddling.
 
 Under the hood it's two things:
 
 - **A model-agnostic engine.** A background daemon installs speech models from a **library** of backends (local or cloud), loads one, and keeps it warm for instant transcription. You pick the model that fits your hardware and swap it whenever you like.
-- **An open protocol.** The daemon speaks a documented HTTP protocol over a local socket, so *any* app, in any language, can request transcriptions, stream live audio visualizations, or drive recording, with per-app consent. Super STT's own desktop app, CLI, and COSMIC applet are just the first clients. See [Developers](#-developers).
+- **An open protocol.** The daemon speaks a documented HTTP protocol over a local socket, so *any* app, in any language, can request transcriptions, stream live audio visualizations, or drive recording, with per-app consent. Super Voice's own desktop apps, CLI, and COSMIC applet are just the first clients. See [Developers](#-developers).
 
 ## 🚀 Installation
 
@@ -42,7 +44,17 @@ cd super-stt
 just install
 ```
 
-Either way you get the daemon, the `voice` CLI, a consent helper, the desktop app, and (on COSMIC) the panel applet, wired up as a `systemctl --user` service. Everything installs system-wide (root-owned, so the installer asks for sudo), while the daemon itself runs unprivileged in your user session. On COSMIC the installer offers to bind Super+Space → `voice record --write` for you. GPU acceleration comes from the model you run (see [Models](#-models)).
+Either way you get the daemon, the `voice` CLI, a consent helper, the two desktop apps (one for speech to text, one for text to speech), and (on COSMIC) the panel applet, wired up as a `systemctl --user` service. Everything installs system-wide (root-owned, so the installer asks for sudo), while the daemon itself runs unprivileged in your user session. On COSMIC the installer offers to bind Super+Space → `voice record --write` for you. GPU acceleration comes from the model you run (see [Models](#-models)).
+
+### Upgrading from Super STT
+
+Run the quick install above once. Super STT's app can't update itself to Super Voice. The installer stops and removes Super STT's daemon, its `super-stt.service` unit and its `stt` command. On COSMIC it moves any shortcut that ran `stt` to `voice`.
+
+Super Voice starts fresh:
+
+1. Settings and API keys aren't carried over. Set them again in the app.
+2. Installed backends, downloaded models and cloned voices are kept.
+3. A shortcut you bound to `stt …` on another desktop stops working. Bind it to `voice …` instead: `stt record` is `voice record`, and `stt stop` is `voice record stop`.
 
 ## ⌨️ Using it
 
@@ -159,7 +171,7 @@ This is a snapshot. The app always shows the current catalog, published live at 
 
 ## 🧑‍💻 Developers
 
-Super STT is built to be built on. The details live in developer-facing docs:
+Super Voice is built to be built on. The details live in developer-facing docs:
 
 - **Build a client** — get transcriptions, event streams, or recording control into your own app, in any language, over the documented HTTP protocol → **[docs/protocol/](./docs/protocol/)**, with every endpoint in the **[API reference](https://jorge-menjivar.github.io/super-stt/protocol/)**
 - **Add your own model** — package a speech model as a backend the daemon can install and run, then publish it to the catalog → **[docs/protocol/](./docs/protocol/)** and **[registry/README.md](./registry/README.md)**

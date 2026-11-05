@@ -19,7 +19,7 @@ on:
     paths:
       - install.sh
       - uninstall.sh
-      - super-stt-install/**
+      - super-voice-install/**
       # Pins the super-engine crates the installer is built from:
       # super-engine-installer, and super-engine-forge, which it downloads with.
       - Cargo.toml
@@ -29,7 +29,7 @@ on:
     paths:
       - install.sh
       - uninstall.sh
-      - super-stt-install/**
+      - super-voice-install/**
       # Pins the super-engine crates the installer is built from:
       # super-engine-installer, and super-engine-forge, which it downloads with.
       - Cargo.toml
@@ -59,7 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: super-libre/super-engine/.github/actions/install-e2e@8cc91b21c82bcf2d275ee1e981c5ddae0d79afc5
+      - uses: super-libre/super-engine/.github/actions/install-e2e@c19754dc6399b752a66ca1e4bfe1ca3bf048fdf3
         with:
           slug: super-stt
           short-name: stt

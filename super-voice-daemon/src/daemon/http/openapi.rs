@@ -265,6 +265,97 @@ pub(crate) fn name_feature_operations(openapi: &mut utoipa::openapi::OpenApi) {
     }
 }
 
+/// `other`'s document, ready to merge into `base`: each of its schemas that
+/// shares a name with one of `base`'s but has another structure is renamed
+/// `<prefix><name>`, and every reference to it follows.
+///
+/// A merge keeps the first schema of a name, so without this one feature's
+/// endpoints would be documented with the other feature's body. Both features
+/// define types named alike — `StageReport`, `ModelList`, `ErrorCode` — and
+/// most differ in more than prose. Two that differ only in their descriptions
+/// or examples are the same shape, and stay one.
+pub(crate) fn name_colliding_schemas(
+    base: &utoipa::openapi::OpenApi,
+    other: utoipa::openapi::OpenApi,
+    prefix: &str,
+) -> utoipa::openapi::OpenApi {
+    let base = serde_json::to_value(base).expect("the document serializes");
+    let mut other = serde_json::to_value(other).expect("the document serializes");
+    let base_schemas = base["components"]["schemas"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    // Until nothing collides: renaming a schema changes every schema that
+    // refers to it, and one that matched `base` before may not any more.
+    while let Some(schemas) = other["components"]["schemas"].as_object_mut() {
+        let renamed: Vec<String> = schemas
+            .iter()
+            .filter(|(name, shape)| {
+                base_schemas
+                    .get(*name)
+                    .is_some_and(|theirs| structure(theirs) != structure(shape))
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        if renamed.is_empty() {
+            break;
+        }
+        for name in &renamed {
+            if let Some(shape) = schemas.remove(name) {
+                schemas.insert(format!("{prefix}{name}"), shape);
+            }
+        }
+        for name in &renamed {
+            rename_refs(
+                &mut other,
+                &format!("#/components/schemas/{name}"),
+                &format!("#/components/schemas/{prefix}{name}"),
+            );
+        }
+    }
+    serde_json::from_value(other).expect("the document deserializes")
+}
+
+/// A schema with its prose taken out: what a client parses, not what a reader
+/// is told.
+#[must_use]
+pub(crate) fn structure(schema: &serde_json::Value) -> serde_json::Value {
+    match schema {
+        serde_json::Value::Object(fields) => serde_json::Value::Object(
+            fields
+                .iter()
+                .filter(|(key, _)| !matches!(key.as_str(), "description" | "example" | "examples"))
+                .map(|(key, value)| (key.clone(), structure(value)))
+                .collect(),
+        ),
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(structure).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// Point every `$ref` to `from` in `doc` at `to`.
+fn rename_refs(doc: &mut serde_json::Value, from: &str, to: &str) {
+    match doc {
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields.iter_mut() {
+                if key == "$ref" && value.as_str() == Some(from) {
+                    *value = serde_json::Value::String(to.to_string());
+                } else {
+                    rename_refs(value, from, to);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                rename_refs(item, from, to);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// How an operation's `security` reads in plain words.
 ///
 /// `None` means the operation declared none, which is the genuinely

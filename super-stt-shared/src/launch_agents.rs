@@ -3,7 +3,7 @@
 //! with launchd through `SMAppService`.
 //!
 //! The daemon and the shortcut listener run as `LaunchAgent`s whose plists
-//! ship in `Super STT.app/Contents/Library/LaunchAgents/`. Nothing copies them
+//! ship in `Super Voice.app/Contents/Library/LaunchAgents/`. Nothing copies them
 //! into `~/Library/LaunchAgents`: registering them through `ServiceManagement`
 //! is what has launchd load them from the bundle, list them under System
 //! Settings › General › Login Items as part of Super STT, and drop them when
@@ -52,8 +52,8 @@ impl Agent {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Daemon => "ai.menjivar.super-stt",
-            Self::Hotkey => "ai.menjivar.super-stt.hotkey",
+            Self::Daemon => "ai.menjivar.super-voice",
+            Self::Hotkey => "ai.menjivar.super-voice.hotkey",
         }
     }
 
@@ -139,7 +139,7 @@ impl Agent {
     fn not_in_bundle(self) -> anyhow::Error {
         anyhow!(
             "{} is not in this executable's app bundle; run the copy inside \
-             Super STT.app/Contents/MacOS",
+             Super Voice.app/Contents/MacOS",
             self.plist_name()
         )
     }

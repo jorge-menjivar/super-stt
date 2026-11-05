@@ -197,7 +197,7 @@ impl AppModel {
             app.core.window.is_maximized = true;
         }
 
-        // Opened from `Super STT.app`, the app is what installs the daemon;
+        // Opened from `Super Voice.app`, the app is what installs the daemon;
         // see `macos::bundle`.
         #[cfg(target_os = "macos")]
         if super::macos::bundle::in_bundle() {

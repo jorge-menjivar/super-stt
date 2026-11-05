@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Info.plist for Super STT.app, which `just bundle-macos` assembles. It holds
+  Info.plist for Super Voice.app, which `just bundle-macos` assembles. It holds
   the settings app (the bundle's executable), the daemon and the CLI, and the
   LaunchAgents that run the latter two.
 
@@ -32,7 +32,7 @@
       be let in whenever the other has run.
     -->
     <key>CFBundleIdentifier</key>
-    <string>ai.menjivar.super-stt-app</string>
+    <string>ai.menjivar.super-voice-app</string>
 
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>

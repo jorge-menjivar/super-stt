@@ -30,7 +30,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>ai.menjivar.super-stt.hotkey</string>
+    <string>ai.menjivar.super-voice.hotkey</string>
 
     <!--
       A copy of the CLI in Contents/Helpers, not the one in Contents/MacOS.
@@ -79,7 +79,7 @@
         <string>info</string>
         <!-- See the daemon's agent for why this is not StandardErrorPath. -->
         <key>SUPER_VOICE_LOG_FILE</key>
-        <string>Library/Logs/super-stt/hotkey.log</string>
+        <string>Library/Logs/super-voice/hotkey.log</string>
     </dict>
 </dict>
 </plist>
