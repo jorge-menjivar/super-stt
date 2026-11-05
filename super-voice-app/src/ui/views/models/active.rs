@@ -233,9 +233,16 @@ pub(super) fn device_dropdown<'a>(
         .staged_picks
         .device(stage)
         .and_then(|d| devices.iter().position(|x| x == d));
+    // Named by the accelerator, not the daemon's `gpu`/`cpu`, which is still
+    // what a pick sends.
+    let gpu = gpu_label(app, stage, source);
+    let labels: Vec<String> = devices
+        .iter()
+        .map(|d| super::fmt::device_name(d, &gpu))
+        .collect();
     let pick = devices.clone();
     Some(
-        widget::dropdown(devices, selected, move |index| {
+        widget::dropdown(labels, selected, move |index| {
             Message::Stage(StageMessage::StageDevice {
                 stage,
                 device: pick[index].clone(),
@@ -246,17 +253,38 @@ pub(super) fn device_dropdown<'a>(
     )
 }
 
-/// What a loaded model is *running* on, when that is not simply the device the
-/// picker already shows.
-///
-/// "cpu · cpu" is noise; a `gpu` choice running on `cuda`, or one that fell
-/// back to the CPU, is the thing worth saying. Returns `None` when there is
-/// nothing to add.
-pub(super) fn resolved_suffix(running: &str, chosen: Option<&str>) -> String {
-    if running.is_empty() || running == "none" || Some(running) == chosen {
-        return String::new();
+/// The accelerator `stage`'s model from `source` runs on, when it runs.
+fn running_accel(app: &AppModel, stage: Stage, source: &str) -> Option<String> {
+    match stage.block() {
+        None => (app.current_source == source && !app.current_model.is_empty())
+            .then(|| app.current_device.clone()),
+        Some(block) => {
+            let block = app.block(block);
+            if block.source.as_deref() != Some(source) {
+                return None;
+            }
+            block.running_device().map(ToString::to_string)
+        }
     }
-    format!(" \u{00b7} {running}")
+}
+
+/// What a `gpu` choice is called for `source`'s backend in `stage`.
+fn gpu_label(app: &AppModel, stage: Stage, source: &str) -> String {
+    let installed = app
+        .backends
+        .iter()
+        .find(|b| b.source == source)
+        .map_or(&[][..], |b| b.installed_accel.as_slice());
+    super::fmt::gpu_name(installed, running_accel(app, stage, source).as_deref())
+}
+
+/// The line under a running model's Device row, when it is not running on the
+/// kind of device picked.
+pub(super) fn device_note(app: &AppModel, stage: Stage, source: &str) -> Option<String> {
+    super::fmt::running_note(
+        app.staged_picks.device(stage),
+        &running_accel(app, stage, source)?,
+    )
 }
 
 /// Summary shown in the active-backend card when a model is currently
@@ -267,16 +295,8 @@ pub(super) fn loaded_model_summary<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
 ) -> Element<'a, Message> {
-    let running = text::body(format!(
-        "{}{}",
-        app.current_model,
-        resolved_suffix(
-            &app.current_device,
-            app.staged_picks.device(Stage::Transcription)
-        )
-    ))
-    .class(cosmic::theme::Text::Accent);
-    let mut rows: Vec<(&'static str, Element<'a, Message>)> = vec![("Model", running.into())];
+    let running = text::body(app.current_model.clone()).class(cosmic::theme::Text::Accent);
+    let mut rows: Vec<super::surface::ControlRow<'a>> = vec![("Model", None, running.into())];
     let mut buttons = Vec::new();
     // The same picker the unloaded card shows, in the same place. Changing it
     // now reloads the model onto the new device rather than staging a choice
@@ -287,13 +307,14 @@ pub(super) fn loaded_model_summary<'a>(
         &app.current_model,
         app,
     ) {
-        rows.push(("Device", devices));
+        let note = device_note(app, Stage::Transcription, &backend.source);
+        rows.push(("Device", note, devices));
     }
     // Per-model language, for a multilingual model.
     if let Some(lang_button) =
         language_button(Stage::Transcription, backend, &app.current_model, app)
     {
-        rows.push(("Language", lang_button));
+        rows.push(("Language", None, lang_button));
     }
     // A leading stop glyph fronts the Unload label, mirroring the Load button's
     // play icon so load/unload read as a play/stop pair.
@@ -392,8 +413,8 @@ pub(super) fn staged_model_picker<'a>(
     })
     .placeholder("Select model");
 
-    let mut rows: Vec<(&'static str, Element<'a, Message>)> =
-        vec![("Model", model_dropdown.into())];
+    let mut rows: Vec<super::surface::ControlRow<'a>> =
+        vec![("Model", None, model_dropdown.into())];
     let mut buttons = Vec::new();
 
     // Device dropdown — only once the daemon has answered what the staged
@@ -410,7 +431,7 @@ pub(super) fn staged_model_picker<'a>(
     if let Some(model) = staged_model
         && let Some(devices) = device_dropdown(Stage::Transcription, &backend.source, model, app)
     {
-        rows.push(("Device", devices));
+        rows.push(("Device", None, devices));
     }
 
     // Per-model language, after the device — shown only for a staged
@@ -418,7 +439,7 @@ pub(super) fn staged_model_picker<'a>(
     if let Some(model) = staged_model
         && let Some(lang_button) = language_button(Stage::Transcription, backend, model, app)
     {
-        rows.push(("Language", lang_button));
+        rows.push(("Language", None, lang_button));
     }
 
     // Load button — enabled only when a model is staged AND (the staged

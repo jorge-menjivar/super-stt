@@ -303,23 +303,16 @@ fn control_row<'a>(
             .model
             .clone()
             .unwrap_or_else(|| stage.noun().to_string());
-        // What it is actually running on, the way the transcription card
-        // suffixes its active model — and only when that differs from the
-        // device the picker beside it already shows.
-        let device_suffix = super::active::resolved_suffix(
-            block.running_device().unwrap_or_default(),
-            app.staged_picks.device(stage.stage()),
-        );
-        let running =
-            text::body(format!("{model}{device_suffix}")).class(cosmic::theme::Text::Accent);
-        let mut rows: Vec<(&'static str, Element<'a, Message>)> = vec![("Model", running.into())];
+        let running = text::body(model.clone()).class(cosmic::theme::Text::Accent);
+        let mut rows: Vec<super::surface::ControlRow<'a>> = vec![("Model", None, running.into())];
         let mut buttons = Vec::new();
         // The same picker the disabled card shows, in the same place: a running
         // post-processor's device can be changed in place too.
         if let Some(devices) =
             super::active::device_dropdown(stage.stage(), &backend.source, &model, app)
         {
-            rows.push(("Device", devices));
+            let note = super::active::device_note(app, stage.stage(), &backend.source);
+            rows.push(("Device", note, devices));
         }
         // Voice before language: it is the one a user changes between
         // utterances, and the one that decides whether a cloning model can
@@ -327,12 +320,12 @@ fn control_row<'a>(
         if stage == BlockStage::Synthesis
             && let Some(voice) = super::voice::voice_dropdown(backend, &model, app)
         {
-            rows.push(("Voice", voice));
+            rows.push(("Voice", None, voice));
         }
         // The same control the transcription card shows under its active
         // model, from the same function.
         if let Some(lang_button) = language_button(stage.stage(), backend, &model, app) {
-            rows.push(("Language", lang_button));
+            rows.push(("Language", None, lang_button));
         }
         if stage == BlockStage::Synthesis {
             buttons.push(reload_button(app, stage));
@@ -365,7 +358,7 @@ fn control_row<'a>(
     })
     .placeholder("Select model");
 
-    let mut rows: Vec<(&'static str, Element<'a, Message>)> = vec![("Model", dropdown.into())];
+    let mut rows: Vec<super::surface::ControlRow<'a>> = vec![("Model", None, dropdown.into())];
     let mut buttons = Vec::new();
 
     // Device dropdown — keyed on the same model the dropdown above shows, so
@@ -378,7 +371,7 @@ fn control_row<'a>(
         && let Some(devices) =
             super::active::device_dropdown(stage.stage(), &backend.source, model, app)
     {
-        rows.push(("Device", devices));
+        rows.push(("Device", None, devices));
     }
 
     // The voice, for the same model, before its language as on the running
@@ -387,7 +380,7 @@ fn control_row<'a>(
         && let Some(model) = shown.as_deref()
         && let Some(voice) = super::voice::voice_dropdown(backend, model, app)
     {
-        rows.push(("Voice", voice));
+        rows.push(("Voice", None, voice));
     }
 
     // Per-model language, inline after the device dropdown — the same position
@@ -395,7 +388,7 @@ fn control_row<'a>(
     if let Some(model) = shown.as_deref()
         && let Some(lang_button) = language_button(stage.stage(), backend, model, app)
     {
-        rows.push(("Language", lang_button));
+        rows.push(("Language", None, lang_button));
     }
 
     // Load — enabled only when a model is staged AND (a device is staged OR the

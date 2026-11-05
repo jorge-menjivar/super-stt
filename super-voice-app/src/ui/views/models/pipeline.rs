@@ -59,10 +59,12 @@ fn empty(stage: Stage) -> StepSummary {
     }
 }
 
-/// `model · device`, or `model` alone when the device is unknown.
+/// `model · accelerator`, or `model` alone when the accelerator is unknown.
 fn running(model: &str, device: Option<&str>) -> String {
     match device {
-        Some(device) if !device.is_empty() && device != "none" => format!("{model} · {device}"),
+        Some(device) if !device.is_empty() && device != "none" => {
+            format!("{model} · {}", super::fmt::accel_name(device))
+        }
         _ => model.to_string(),
     }
 }
@@ -409,7 +411,7 @@ mod tests {
             transcription_summary(Some("Whisper"), "whisper-base", true, "cuda"),
             StepSummary {
                 title: "Whisper".into(),
-                detail: "whisper-base · cuda".into()
+                detail: "whisper-base · CUDA".into()
             }
         );
     }

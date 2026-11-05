@@ -486,6 +486,10 @@ pub(super) fn card_header<'a>(
         .into()
 }
 
+/// One of a card's control rows: its label, the line under the label when
+/// there is something to add, and the control.
+pub(super) type ControlRow<'a> = (&'static str, Option<String>, Element<'a, Message>);
+
 /// A card's controls: one labeled settings row per choice (the model, its
 /// device, voice and language), then the buttons at the end.
 ///
@@ -493,17 +497,21 @@ pub(super) fn card_header<'a>(
 /// pages, so a control sits at the end of its row at its natural width and
 /// moves under its label when the card runs out of room for both.
 pub(super) fn control_rows<'a>(
-    rows: Vec<(&'static str, Element<'a, Message>)>,
+    rows: Vec<ControlRow<'a>>,
     buttons: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let mut column = widget::column::with_capacity(2 * rows.len() + 1).spacing(spacing.space_xs);
-    for (index, (label, control)) in rows.into_iter().enumerate() {
+    for (index, (label, note, control)) in rows.into_iter().enumerate() {
         if index > 0 {
             column = column.push(widget::divider::horizontal::light());
         }
+        let mut item = widget::settings::item::builder(label);
+        if let Some(note) = note {
+            item = item.description(note);
+        }
         column = column.push(
-            widget::settings::flex_item(label, control)
+            item.flex_control(control)
                 .align_items(cosmic::iced::Alignment::Center),
         );
     }
