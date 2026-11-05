@@ -54,10 +54,10 @@
 
     <!--
       Shown when macOS asks whether Super Voice may use the microphone. The
-      daemon records, but it runs from this bundle, so this is the text it is
-      asked with.
+      daemon records dictation and the app records voices to clone; both run
+      from this bundle, so this is the text they are asked with.
     -->
     <key>NSMicrophoneUsageDescription</key>
-    <string>Super Voice listens while you dictate and turns what you say into text.</string>
+    <string>Super Voice turns what you say into text. It also records the voices you clone.</string>
 </dict>
 </plist>

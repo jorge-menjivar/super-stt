@@ -7147,40 +7147,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-tts-app"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyhow",
- "cpal 0.18.2",
- "dirs 7.0.0",
- "futures-util",
- "hound",
- "i18n-embed",
- "i18n-embed-fl",
- "libc",
- "libcosmic",
- "log",
- "mockito",
- "open",
- "rfd 0.17.2",
- "rust-embed",
- "serde",
- "serde_json",
- "slab",
- "slotmap",
- "super-engine-forge",
- "super-tts-shared",
- "super-voice-daemon",
- "super-voice-registry-types",
- "tempfile",
- "tokio",
- "toml 1.1.0+spec-1.1.0",
- "urlencoding",
- "uuid",
- "vergen",
-]
-
-[[package]]
 name = "super-tts-shared"
 version = "0.3.0-beta.2"
 dependencies = [

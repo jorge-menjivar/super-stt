@@ -14,8 +14,8 @@ wrapper_name := 'voice'
 shared_applet := 'super-cosmic-applet'
 shared_applet_dir := env('SHARED_APPLET_DIR', '..' / 'super-cosmic-applet')
 old_applets := 'super-stt-cosmic-applet super-tts-cosmic-applet'
-# Super STT's settings app, which Super Voice's replaced.
-old_apps := 'super-stt-app'
+# The settings apps Super Voice's replaced.
+old_apps := 'super-stt-app super-tts-app'
 
 # Installation paths — root-owned under /usr/local, matching the
 # release installers, so install/uninstall recipes escalate with sudo
@@ -882,21 +882,11 @@ install-app:
         exit 1
     fi
 
-    # Text to speech's settings app, which ships beside speech to text's
-    # until the two merge. Linux only: the macOS bundle carries one app.
-    echo "Building the text-to-speech app..."
-    if ! cargo build --release --bin super-tts-app; then
-        echo "❌ Text-to-speech app build failed or was interrupted"
-        exit 1
-    fi
-
+    echo "Installing {{ app_name }} to {{ app_dst }}"
     sudo mkdir -p {{ bin_dir }}
-    for app in {{ app_name }} super-tts-app; do
-        echo "Installing $app to {{ bin_dir }}/$app"
-        sudo install -m755 "target/release/$app" "{{ bin_dir }}/$app"
-        sudo install -Dm0644 "$app/resources/$app.desktop" "{{ desktop_dir }}/$app.desktop"
-        sudo install -Dm0644 "$app/resources/icons/hicolor/scalable/apps/$app.svg" "{{ icons_dir }}/$app.svg"
-    done
+    sudo install -m755 "{{ app_src }}" "{{ app_dst }}"
+    sudo install -Dm0644 "{{ app_desktop_file_src }}" "{{ app_desktop_file_dst }}"
+    sudo install -Dm0644 "{{ app_icon_src }}" "{{ app_icon_dst }}"
     for app in {{ old_apps }}; do
         sudo rm -f "{{ bin_dir }}/$app" "{{ desktop_dir }}/$app.desktop" "{{ icons_dir }}/$app.svg"
     done
@@ -917,7 +907,7 @@ install-app:
     pkill -f '^cosmic-launcher$' 2>/dev/null || true
     pkill -f '^pop-launcher( |$)' 2>/dev/null || true
 
-    echo "✓ Apps installed: {{ app_dst }}, {{ bin_dir }}/super-tts-app"
+    echo "✓ App installed: {{ app_dst }}"
 
 # Build the shared COSMIC applet from its checkout and install it under
 # /usr/local, with that repo's own `just install`, then remove the applets of
@@ -1430,7 +1420,7 @@ uninstall-app:
         exec just uninstall-macos
     fi
     echo "Uninstalling the apps..."
-    for app in {{ app_name }} super-tts-app {{ old_apps }}; do
+    for app in {{ app_name }} {{ old_apps }}; do
         sudo rm -f "{{ bin_dir }}/$app" "{{ desktop_dir }}/$app.desktop" "{{ icons_dir }}/$app.svg"
     done
 

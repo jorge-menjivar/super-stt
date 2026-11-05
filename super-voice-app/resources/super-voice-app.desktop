@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Super Voice
-Comment=High-performance speech-to-text application
+Comment=Speech to text and text to speech
 Type=Application
 Icon=super-voice-app
 Exec=super-voice-app
@@ -10,5 +10,5 @@ StartupNotify=true
 # Wayland app_id, and it differs from this file's name.
 StartupWMClass=ai.menjivar.SuperVoice
 Categories=AudioVideo;Audio;
-Keywords=speech;transcription;stt;voice;audio;speech-to-text;
+Keywords=speech;transcription;dictation;stt;synthesis;tts;voice;audio;speech-to-text;text-to-speech;
 MimeType=

@@ -78,22 +78,13 @@ fn product_tarball(dir: &std::path::Path, name: &str) -> Vec<u8> {
             ("super-voice-cli", b"#!/bin/sh\necho fake\n"),
             ("super-voice-consent", b"#!/bin/sh\necho fake\n"),
             ("super-voice-app", b"#!/bin/sh\necho fake\n"),
-            ("super-tts-app", b"#!/bin/sh\necho fake\n"),
             ("systemd/super-voice.service", b"[Unit]\nDescription=fake\n"),
             (
                 "resources/super-voice-app.desktop",
-                b"[Desktop Entry]\nName=Super STT\n",
-            ),
-            (
-                "resources/super-tts-app.desktop",
-                b"[Desktop Entry]\nName=Super TTS\n",
+                b"[Desktop Entry]\nName=Super Voice\n",
             ),
             (
                 "resources/icons/hicolor/scalable/apps/super-voice-app.svg",
-                b"<svg/>",
-            ),
-            (
-                "resources/icons/hicolor/scalable/apps/super-tts-app.svg",
                 b"<svg/>",
             ),
         ],

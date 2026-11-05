@@ -399,7 +399,7 @@ fn library_section(state: &VoicesState) -> Element<'_, Message> {
             .add(note(
                 "No voices yet".to_string(),
                 "Record or import a sample above, and it appears here with the id you pass \
-                 to any app that speaks through Super TTS."
+                 to any app that speaks through Super Voice."
                     .to_string(),
             ))
             .into();

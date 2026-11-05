@@ -4,17 +4,18 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
   <name>Super Voice</name>
-  <summary>High-performance speech-to-text application</summary>
+  <summary>Speech to text and text to speech</summary>
   <description>
     <p>
-      Super Voice types what you say into whatever app is focused. Bind a
-      shortcut, speak, and the text appears where you are working.
+      Super Voice types what you say into whatever app is focused, and reads
+      text aloud. Bind a shortcut, speak, and the text appears where you are
+      working.
     </p>
     <p>
       A background daemon installs speech models from a library of local
-      and cloud backends and keeps one loaded, so transcription starts
-      right away. This app is where you pick a backend, load a model, and
-      configure the daemon.
+      and cloud backends and keeps them loaded, so transcription and speech
+      start right away. This app is where you pick backends, load models,
+      record voices to clone, and configure the daemon.
     </p>
   </description>
   <developer id="ai.menjivar">

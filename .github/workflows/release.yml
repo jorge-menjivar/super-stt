@@ -86,7 +86,7 @@ jobs:
           #
           # What is missing is the release half, and it is not just a matrix
           # row:
-          #   * The steps below build six binaries and tar up systemd units
+          #   * The steps below build five binaries and tar up systemd units
           #     and COSMIC resources. A darwin entry ships the app bundle
           #     instead, so the build and packaging steps need to branch on
           #     the target.
@@ -140,7 +140,7 @@ jobs:
             libdbus-1-dev \
             pkg-config
 
-      # Build all six binaries in one cargo invocation so the shared
+      # Build all five binaries in one cargo invocation so the shared
       # dependency graph compiles once, then assemble the tarball.
       - name: Build binaries
         run: |
@@ -149,7 +149,6 @@ jobs:
             --bin super-voice-cli \
             --bin super-voice-consent \
             --bin super-voice-app \
-            --bin super-tts-app \
             --bin super-voice-install
 
       - name: Create tarball
@@ -162,7 +161,6 @@ jobs:
           cp target/${{ matrix.target }}/release/super-voice-cli dist/
           cp target/${{ matrix.target }}/release/super-voice-consent dist/
           cp target/${{ matrix.target }}/release/super-voice-app dist/
-          cp target/${{ matrix.target }}/release/super-tts-app dist/
 
           # Include systemd service files
           mkdir -p dist/systemd
@@ -170,10 +168,8 @@ jobs:
 
           mkdir -p dist/resources
 
-          # Include both apps' desktop resources: launcher entries,
-          # metainfo, icons. Their icon trees merge.
+          # The app's desktop resources: launcher entry, metainfo, icons.
           cp -r super-voice-app/resources/* dist/resources
-          cp -r super-tts-app/resources/* dist/resources
 
           # Remove any extra assets
           rm -rf dist/resources/assets

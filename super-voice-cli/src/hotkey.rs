@@ -48,7 +48,7 @@ pub fn command() -> Command {
             "Listen for a global shortcut that starts and stops recording.\n\n\
              Runs until stopped. Each press does what `voice record --write` does: \
              starts a recording, or stops the one in progress and types the result \
-             into the focused window. The Super STT app runs this as a \
+             into the focused window. The Super Voice app runs this as a \
              LaunchAgent so it is available from login.",
         )
         .arg(

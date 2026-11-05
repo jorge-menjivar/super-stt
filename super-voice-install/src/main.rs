@@ -14,15 +14,14 @@ static INSTALLER: Installer = Installer {
     user_agent: Voice::USER_AGENT,
     wrapper_usage: "Used by keyboard shortcuts (e.g. Super+Space → \"voice record --write\").",
     after_install: Some(shortcut::after_install),
-    // Each feature's settings app, until the two merge.
-    apps: &["super-voice-app", "super-tts-app"],
+    apps: &["super-voice-app"],
     retired: RETIRED,
 };
 
 /// What Super STT and Super TTS installed that Super Voice replaces: their
 /// daemons, CLIs, consent helpers, wrappers, installers and units, Super
-/// STT's oldest layout (one `super-stt` binary), their applets, and Super
-/// STT's settings app, which Super Voice's replaced.
+/// STT's oldest layout (one `super-stt` binary), their applets, and the two
+/// settings apps, which Super Voice's replaced.
 const RETIRED: Retired = Retired {
     binaries: &[
         "super-stt",
@@ -32,6 +31,7 @@ const RETIRED: Retired = Retired {
         "super-stt-install",
         "super-stt-app",
         "stt",
+        "super-tts-app",
         "super-tts-daemon",
         "super-tts-cli",
         "super-tts-consent",
@@ -39,7 +39,7 @@ const RETIRED: Retired = Retired {
         "tts",
     ],
     units: &["super-stt.service", "super-tts.service"],
-    apps: &["super-stt-app"],
+    apps: &["super-stt-app", "super-tts-app"],
     applets: &["super-stt-cosmic-applet", "super-tts-cosmic-applet"],
 };
 
