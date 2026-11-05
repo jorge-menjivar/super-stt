@@ -654,24 +654,32 @@ async fn a_models_device_is_its_own() {
         "every host offers the CPU: {body}"
     );
 
-    // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
+    // `gpu` is not a framework: a GPU is reached through one.
     let (status, body) = post_req(
         &sock,
         "/stt/pipeline/1/model/whisper-local/device",
         &token,
-        serde_json::json!({ "device": "cuda" }),
+        serde_json::json!({ "device": "gpu" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_device");
+
+    // The last framework offered, which is always the CPU: the one every
+    // machine has, so the choice is recorded on any runner.
+    let last = offered.last().cloned().expect("at least the CPU");
+    let (status, body) = post_req(
+        &sock,
+        "/stt/pipeline/1/model/whisper-local/device",
+        &token,
+        serde_json::json!({ "device": last }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
-    assert_eq!(body["device"], "gpu");
-    assert_eq!(
-        body["resolved_accel"],
-        serde_json::Value::Null,
-        "a gpu choice has resolved to nothing before a load confirms it"
-    );
+    assert_eq!(body["device"], last);
 
     let (_, body) = get(&sock, "/stt/pipeline/1/model/whisper-local/device", &token).await;
-    assert_eq!(body["device"], "gpu", "the choice is recorded");
+    assert_eq!(body["device"], last, "the choice is recorded");
     let (_, body) = get(&sock, "/stt/pipeline/1/model", &token).await;
     assert_eq!(body["model"]["loaded"], false, "nothing was loaded");
 
@@ -996,7 +1004,11 @@ async fn device_lists_for_a_model_and_for_a_stage() {
     .await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     let offered = body["available_devices"].as_array().expect("a list");
-    assert_eq!(offered.first(), Some(&serde_json::json!("cpu")));
+    assert_eq!(
+        offered.last(),
+        Some(&serde_json::json!("cpu")),
+        "best first, the CPU last"
+    );
     let (status, body) = get(&sock, "/stt/pipeline/1/model/whisper-1/device/list", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["available_devices"], serde_json::json!([]));
@@ -1005,11 +1017,11 @@ async fn device_lists_for_a_model_and_for_a_stage() {
     assert_eq!(body["error_code"], "invalid_model");
 
     // The stage-1 list is the union: the online model adds nothing, the local
-    // one brings the CPU and, where the host has one, the GPU.
+    // one brings the CPU and the GPU frameworks this host has.
     let (status, body) = get(&sock, "/stt/pipeline/1/device/list", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     let stage_devices = body["available_devices"].as_array().expect("a list");
-    assert_eq!(stage_devices.first(), Some(&serde_json::json!("cpu")));
+    assert_eq!(stage_devices.last(), Some(&serde_json::json!("cpu")));
     assert_eq!(
         stage_devices, offered,
         "with one local model, the stage's list is that model's"

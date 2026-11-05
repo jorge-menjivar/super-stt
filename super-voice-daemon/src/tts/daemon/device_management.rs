@@ -22,11 +22,12 @@ use crate::tts::tts_models::backends;
 use crate::tts::tts_models::synthesize::Synthesize;
 use log::{error, info, warn};
 pub(crate) use super_engine_daemon::devices::{
-    backend_available_devices, host_available_devices, model_available_devices,
+    backend_available_devices, backend_frameworks, host_available_devices, model_available_devices,
     parse_device_preference,
 };
 use super_engine_daemon::devices::{
-    device_rejection, device_switch_message, preference_axis, switch_is_satisfied,
+    build_installed, default_framework, device_rejection, device_switch_message,
+    switch_is_satisfied,
 };
 use super_voice_registry_types::manifest::Device;
 use super_voice_shared::tts::models::protocol::{
@@ -59,21 +60,34 @@ struct DeviceTarget {
     backend_dir: std::path::PathBuf,
 }
 
-/// The two facts that narrow a model's declared devices to what it can run
-/// on here. See [`model_available_devices`].
+/// What narrows a model's declared devices to the frameworks it can run on
+/// here, and says which of them the build on disk runs. See
+/// [`model_available_devices`].
 struct InstallContext {
-    host_devices: Vec<String>,
+    /// Every framework the backend's builds run on here, installed or not.
+    frameworks: Vec<String>,
     installed_accel: Vec<String>,
 }
 
 impl InstallContext {
-    /// The devices this install can offer `model` on this host.
+    /// The frameworks `model` can be offered on this host.
     fn offer(&self, model: &ModelDefinition) -> Vec<String> {
-        model_available_devices(
-            &self.host_devices,
-            &model.supported_devices,
-            &self.installed_accel,
-        )
+        model_available_devices(&model.supported_devices, &self.frameworks)
+    }
+
+    /// Whether the build on disk runs `framework`.
+    fn installed(&self, framework: &str) -> bool {
+        build_installed(framework, &self.installed_accel)
+    }
+
+    /// The framework `model` loads on when `configured` is not one it can run
+    /// on here: the best one the build on disk runs.
+    fn effective(&self, model: &ModelDefinition, configured: String) -> String {
+        let offered = self.offer(model);
+        if offered.contains(&configured) {
+            return configured;
+        }
+        default_framework(&offered, &self.installed_accel).unwrap_or(configured)
     }
 }
 
@@ -237,7 +251,9 @@ impl SuperTTSDaemon {
             warn!("Invalid device specified: {device}");
             return Err(DaemonResponse::error_with_code(
                 ErrorCode::InvalidDevice,
-                &format!("Invalid device '{device}'. Must be 'cpu' or 'gpu'"),
+                &format!(
+                    "Invalid device '{device}'. Must be a framework: cpu, cuda, rocm, metal or vulkan"
+                ),
             ));
         };
 
@@ -549,16 +565,7 @@ impl SuperTTSDaemon {
     /// because a driver can be installed under a running daemon, and a stale
     /// "no GPU here" would outlive the machine it was true of.
     async fn probe_available_devices(&self) -> Vec<String> {
-        let host = tokio::task::spawn_blocking(crate::registry::host_detect::detect)
-            .await
-            .unwrap_or_else(|_| crate::registry::host_detect::Host {
-                target_triple: String::new(),
-                cuda: None,
-                rocm: None,
-                vulkan: None,
-                metal: None,
-            });
-        host_available_devices(&host)
+        host_available_devices(&probe_host().await)
     }
 
     /// The documented `resolved_accel` rule: `"cpu"` needs no resolution — it
@@ -721,7 +728,9 @@ impl SuperTTSDaemon {
             warn!("Invalid device specified: {device}");
             return DaemonResponse::error_with_code(
                 ErrorCode::InvalidDevice,
-                &format!("Invalid device '{device}'. Must be 'cpu' or 'gpu'"),
+                &format!(
+                    "Invalid device '{device}'. Must be a framework: cpu, cuda, rocm, metal or vulkan"
+                ),
             );
         };
 
@@ -731,6 +740,32 @@ impl SuperTTSDaemon {
         };
         if let Some(rejection) = model_rejects_device(&target.definition, &device) {
             return rejection;
+        }
+        // A framework the backend has a build for, but not the one on disk:
+        // that build is installed first, through the registry. Refused here
+        // rather than stored, so a model is never left pointed at a build it
+        // does not have.
+        let install = self.install_context(&target.backend_dir).await;
+        let offered = install.offer(&target.definition);
+        if !offered.contains(&device) {
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidDevice,
+                &format!(
+                    "{} cannot run on {device} here; it can run on {}.",
+                    target.definition.name,
+                    offered.join(", ")
+                ),
+            );
+        }
+        if !install.installed(&device) {
+            return DaemonResponse::error_with_code(
+                ErrorCode::BuildNotInstalled,
+                &format!(
+                    "The {device} build of {} is not installed. Install it with \
+                     POST /v1/registry/backend/install, then set the device again.",
+                    target.definition.source
+                ),
+            );
         }
 
         // Where the model is running now, if it is the loaded one. Only then
@@ -824,12 +859,19 @@ impl SuperTTSDaemon {
         })
     }
 
-    /// The device the target loads on: its own, else the global default.
+    /// The framework the target loads on: its own, else the global default,
+    /// when that is one it can run on here; else the best one the build on
+    /// disk runs, so a client staging a load from this answer never asks for
+    /// a build that is not installed.
     async fn effective_device(&self, target: &DeviceTarget) -> String {
-        self.config
+        let configured = self
+            .config
             .read()
             .await
-            .effective_device(&target.definition.source, &target.definition.name)
+            .effective_device(&target.definition.source, &target.definition.name);
+        self.install_context(&target.backend_dir)
+            .await
+            .effective(&target.definition, configured)
     }
 
     /// Record the target's device and persist it, for the paths that store
@@ -890,10 +932,12 @@ impl SuperTTSDaemon {
         model: &str,
         running: Option<String>,
     ) -> StageModelDevice {
-        let online = {
+        let found = {
             let backends = self.backends.read().await;
-            backends::find_model(&backends, model, source).is_some_and(|(_, def)| def.is_online())
+            backends::find_model(&backends, model, source)
+                .map(|(backend, def)| (backend.dir.clone(), def.clone()))
         };
+        let online = found.as_ref().is_some_and(|(_, def)| def.is_online());
         if online {
             // The manifest's own sentinel: remote compute has no local device,
             // and nothing resolves locally whether it is loaded or not.
@@ -902,7 +946,14 @@ impl SuperTTSDaemon {
                 resolved_accel: None,
             };
         }
-        let preference = self.config.read().await.effective_device(source, model);
+        let configured = self.config.read().await.effective_device(source, model);
+        let preference = match found {
+            Some((dir, definition)) => self
+                .install_context(&dir)
+                .await
+                .effective(&definition, configured),
+            None => configured,
+        };
         let resolved_accel = match running {
             Some(actual) => Some(actual),
             // Not loaded: `cpu` needs no resolution, `gpu` has none yet — a
@@ -943,11 +994,19 @@ impl SuperTTSDaemon {
     /// host is never offered a GPU it cannot use, and the install record says
     /// which accelerators the build actually has.
     async fn install_context(&self, backend_dir: &std::path::Path) -> InstallContext {
+        let host = probe_host().await;
+        let installed_accel = crate::registry::installed::read(backend_dir)
+            .map(|r| r.selected.accel)
+            .unwrap_or_default();
+        // The installed manifest names every build the release publishes, so
+        // the frameworks need no network. One that does not parse offers what
+        // is on disk.
+        let builds = super_voice_registry_types::manifest::Manifest::load_installed(backend_dir)
+            .map(|m| m.assets.subprocess)
+            .unwrap_or_default();
         InstallContext {
-            host_devices: self.probe_available_devices().await,
-            installed_accel: crate::registry::installed::read(backend_dir)
-                .map(|r| r.selected.accel)
-                .unwrap_or_default(),
+            frameworks: backend_frameworks(&host, &builds, &installed_accel),
+            installed_accel,
         }
     }
 
@@ -964,6 +1023,20 @@ impl SuperTTSDaemon {
     }
 }
 
+/// The host, probed off the async runtime. A probe that fails reads as a
+/// machine with nothing but the CPU, rather than failing the request.
+async fn probe_host() -> crate::registry::host_detect::Host {
+    tokio::task::spawn_blocking(crate::registry::host_detect::detect)
+        .await
+        .unwrap_or_else(|_| crate::registry::host_detect::Host {
+            target_triple: String::new(),
+            cuda: None,
+            rocm: None,
+            vulkan: None,
+            metal: None,
+        })
+}
+
 /// Refuse a device the model cannot run on at all, as an `invalid_device`
 /// error. See `super_engine_daemon::devices::device_rejection`.
 fn model_rejects_device(definition: &ModelDefinition, device: &str) -> Option<DaemonResponse> {
@@ -974,9 +1047,9 @@ fn model_rejects_device(definition: &ModelDefinition, device: &str) -> Option<Da
 /// The message `GET /active_device` reports, drawing the same distinction as
 /// [`device_switch_message`].
 fn device_status_message(preferred_device: &str, actual_device: &str) -> String {
-    if preferred_device == "gpu" && preference_axis(actual_device) == "cpu" {
+    if preferred_device != "cpu" && actual_device == "cpu" {
         format!(
-            "Preferred device: GPU, Actual device: {actual_device} (no usable accelerator or load failed)"
+            "Preferred device: {preferred_device}, Actual device: {actual_device} (the load fell back to the CPU)"
         )
     } else {
         format!("Device: {actual_device} (preference: {preferred_device})")
@@ -987,26 +1060,27 @@ fn device_status_message(preferred_device: &str, actual_device: &str) -> String 
 mod tests {
     use super::*;
 
-    /// `GET /active_device` reports the same distinction: a working GPU host
-    /// is not a failed one, and a remote model is on no local accelerator at
-    /// all — neither is "no usable accelerator".
+    /// `GET /active_device` reports the same distinction: a model running on
+    /// the framework asked for is not a failed one, and a remote model is on
+    /// no local framework at all. Only a GPU framework that landed on the CPU
+    /// is a fallback.
     #[test]
     fn the_device_status_message_only_reports_a_real_fallback() {
         assert_eq!(
-            device_status_message("gpu", "cuda"),
-            "Device: cuda (preference: gpu)"
+            device_status_message("cuda", "cuda"),
+            "Device: cuda (preference: cuda)"
         );
         assert_eq!(
             device_status_message("cpu", "cpu"),
             "Device: cpu (preference: cpu)"
         );
         assert_eq!(
-            device_status_message("gpu", "remote"),
-            "Device: remote (preference: gpu)"
+            device_status_message("vulkan", "remote"),
+            "Device: remote (preference: vulkan)"
         );
         assert_eq!(
-            device_status_message("gpu", "cpu"),
-            "Preferred device: GPU, Actual device: cpu (no usable accelerator or load failed)"
+            device_status_message("cuda", "cpu"),
+            "Preferred device: cuda, Actual device: cpu (the load fell back to the CPU)"
         );
     }
 

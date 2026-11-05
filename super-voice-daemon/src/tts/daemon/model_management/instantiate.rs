@@ -56,13 +56,18 @@ impl SuperTTSDaemon {
         let instance: Box<dyn Synthesize> = match backend.kind.as_str() {
             "wasm" => self.instantiate_wasm(&backend, &def).await?,
             "subprocess" => {
-                // One probe for the two questions this load asks of the
-                // machine: which accelerator the installed asset resolves to,
-                // and which per-architecture model files to download.
+                let resolved = resolve_device_for_backend(device_pref, &backend.dir);
+                // The per-architecture model files are the framework's the
+                // model will run on: the Vulkan files for a Vulkan load on an
+                // NVIDIA machine, not the CUDA ones the machine would rank
+                // first. A load naming none takes what the host ranks first.
                 let host = tokio::task::spawn_blocking(crate::registry::host_detect::detect)
                     .await
-                    .ok();
-                let resolved = resolve_device_for_backend(device_pref, &backend.dir, host.as_ref());
+                    .ok()
+                    .map(|host| match resolved.parse() {
+                        Ok(framework) => host.restricted_to(framework),
+                        Err(_) => host,
+                    });
                 self.instantiate_subprocess(&backend, name, &resolved, host)
                     .await?
             }
@@ -380,24 +385,15 @@ impl SuperTTSDaemon {
     }
 }
 
-/// Resolve `device_pref` (`cpu`/`gpu`) into the concrete accelerator handed to
-/// a subprocess backend's `POST /v1/load`, per
-/// `docs/protocol/backend/contract.md`. Reads the backend directory's install
-/// record for the asset's declared accel list, and the host's detected
-/// capability — a dual-runtime asset resolves by which the *host* can run,
-/// not by which entry the asset lists first.
-///
-/// `host` is `None` when detection itself failed, which degrades `resolve_accel`
-/// to its list-order fallback rather than blocking the load.
-fn resolve_device_for_backend(
-    device_pref: &str,
-    backend_dir: &std::path::Path,
-    host: Option<&Host>,
-) -> String {
+/// The framework handed to a subprocess backend's `POST /v1/load` for
+/// `device_pref`, per `docs/protocol/backend/contract.md`: the preference
+/// when the build on disk runs it, else nothing, so the backend loads on the
+/// build it has. Reads the backend directory's install record.
+fn resolve_device_for_backend(device_pref: &str, backend_dir: &std::path::Path) -> String {
     let installed_accel = installed::read(backend_dir)
         .map(|r| r.selected.accel)
         .unwrap_or_default();
-    resolve_accel(device_pref, &installed_accel, host)
+    resolve_accel(device_pref, &installed_accel)
 }
 
 /// The effective value of a backend option — the user's override if set, else

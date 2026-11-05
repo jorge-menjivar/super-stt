@@ -149,7 +149,7 @@ fn daemon_bad_theme_falls_back_preserving_rest() {
     // A single unrecognized enum value must NOT wipe the whole config.
     let cfg = from_ron(
         r#"(
-    device: (preferred_device: "gpu"),
+    device: (preferred_device: "vulkan"),
     audio: (theme: "Nonexistent", volume: 80),
     transcription: (
         preferred_model: "WhisperTiny",
@@ -161,7 +161,7 @@ fn daemon_bad_theme_falls_back_preserving_rest() {
     );
     assert_eq!(cfg.audio.theme, AudioTheme::default()); // bad field reset
     assert_eq!(cfg.audio.volume, 80); // everything else preserved
-    assert_eq!(cfg.device.preferred_device, "gpu");
+    assert_eq!(cfg.device.preferred_device, "vulkan");
     assert!(cfg.transcription.write_mode);
     assert_eq!(
         cfg.transcription.recording_stop_mode,
@@ -204,9 +204,8 @@ fn corrupt_daemon_config_resets_to_default() {
 /// A wire setter rejects an unparseable device outright; a persisted config
 /// value has no such option — a daemon that refused to start over a stale
 /// `preferred_device` would be worse than one that falls back to the default.
-/// The deprecated `cuda`/`metal` spellings normalize to `gpu` rather than
-/// falling back, so a config written before this vocabulary still loads onto
-/// the accelerator it always meant.
+/// A framework is kept as it is; `gpu`, which no longer is one, falls back
+/// like any other value that is not.
 #[test]
 fn a_persisted_device_preference_normalizes_and_a_bogus_one_falls_back_to_cpu() {
     let ron_str = |device: &str| {
@@ -219,11 +218,14 @@ fn a_persisted_device_preference_normalizes_and_a_bogus_one_falls_back_to_cpu() 
 
     let (cfg, was_reset) = DaemonConfig::parse_or_reset(&ron_str("cuda"));
     assert!(!was_reset);
-    assert_eq!(cfg.device.preferred_device, "gpu");
+    assert_eq!(cfg.device.preferred_device, "cuda");
 
     let (cfg, was_reset) = DaemonConfig::parse_or_reset(&ron_str("gpu"));
     assert!(!was_reset);
-    assert_eq!(cfg.device.preferred_device, "gpu");
+    assert_eq!(
+        cfg.device.preferred_device, "cpu",
+        "a GPU is reached through a framework"
+    );
 
     // A garbage value (or `none`, a model sentinel rather than a preference)
     // degrades to the default instead of failing the whole config load.

@@ -27,6 +27,10 @@ pub enum ErrorCode {
     /// No model is loaded, so nothing can be transcribed. The request is
     /// well-formed and succeeds once a model is loaded via `POST /active_model`.
     ModelNotLoaded,
+    /// The framework asked for is one the model's backend has a build for, but
+    /// not the build installed. The request succeeds once that build is
+    /// installed (`POST /v1/registry/backend/install` with its `accel`).
+    BuildNotInstalled,
 
     // --- 400 Bad Request: the client gave the daemon something it couldn't
     // use. ---
@@ -38,7 +42,8 @@ pub enum ErrorCode {
     /// currently falls back to CPU silently rather than emitting this (see
     /// `active_device.md`).
     CudaUnavailable,
-    /// The requested `device` wasn't one the daemon accepts (`cpu`/`cuda`).
+    /// The requested `device` wasn't a framework the daemon accepts (`cpu`,
+    /// `cuda`, `rocm`, `metal`, `vulkan`), or one the model cannot run on.
     InvalidDevice,
     /// An unrecognized audio-theme name.
     InvalidAudioTheme,
@@ -68,7 +73,8 @@ impl ErrorCode {
             Self::RecordingInProgress
             | Self::DownloadInProgress
             | Self::NoSwitchInProgress
-            | Self::ModelNotLoaded => 409,
+            | Self::ModelNotLoaded
+            | Self::BuildNotInstalled => 409,
             Self::InvalidModel
             | Self::InvalidBackend
             | Self::CudaUnavailable

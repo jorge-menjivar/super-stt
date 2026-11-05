@@ -136,7 +136,7 @@ pub struct ModelSettings {
 /// preference was global keeps loading models where it always did.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceConfig {
-    pub preferred_device: String, // "cpu" or "gpu"
+    pub preferred_device: String, // a framework: "cpu", "cuda", "rocm", "metal" or "vulkan"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -920,10 +920,10 @@ mod device_config_tests {
         let mut cfg = DaemonConfig::default();
         assert_eq!(cfg.effective_device("s", "m"), "cpu");
 
-        cfg.device.preferred_device = "gpu".to_string();
+        cfg.device.preferred_device = "cuda".to_string();
         assert_eq!(
             cfg.effective_device("s", "m"),
-            "gpu",
+            "cuda",
             "inherits the default"
         );
 
@@ -932,13 +932,13 @@ mod device_config_tests {
         assert_eq!(cfg.effective_device("s", "m"), "cpu");
         assert_eq!(
             cfg.effective_device("s", "other"),
-            "gpu",
+            "cuda",
             "a sibling model is untouched"
         );
 
         cfg.update_model_device("s", "m", None);
         assert_eq!(cfg.model_device("s", "m"), None);
-        assert_eq!(cfg.effective_device("s", "m"), "gpu");
+        assert_eq!(cfg.effective_device("s", "m"), "cuda");
     }
 
     /// Setting a device on a model that already has a language keeps the
@@ -947,20 +947,20 @@ mod device_config_tests {
     fn device_and_language_share_the_model_row() {
         let mut cfg = DaemonConfig::default();
         cfg.update_model_language("s".into(), "m".into(), Some("fr".into()));
-        cfg.update_model_device("s", "m", Some("gpu".into()));
+        cfg.update_model_device("s", "m", Some("vulkan".into()));
         assert_eq!(cfg.model_language("s", "m"), Some("fr"));
-        assert_eq!(cfg.model_device("s", "m"), Some("gpu"));
+        assert_eq!(cfg.model_device("s", "m"), Some("vulkan"));
 
         let written = super_engine_daemon::config::to_string(&cfg).expect("serialize");
         let (back, reset) = DaemonConfig::parse_or_reset(&written);
         assert!(!reset);
         assert_eq!(back.model_language("s", "m"), Some("fr"));
-        assert_eq!(back.model_device("s", "m"), Some("gpu"));
+        assert_eq!(back.model_device("s", "m"), Some("vulkan"));
     }
 
     /// A persisted per-model device is normalized on load the same way the
-    /// global default is: the deprecated `cuda` spelling still means `gpu`,
-    /// and junk degrades to "no device of its own" rather than resetting the
+    /// global default is: a framework is kept, and anything else, `gpu`
+    /// included, degrades to "no device of its own" rather than resetting the
     /// whole config.
     #[test]
     fn persisted_model_devices_are_normalized_on_load() {
@@ -976,6 +976,7 @@ mod device_config_tests {
         models: {
             "github.com/x/whisper": {
                 "large": (device: Some("cuda")),
+                "medium": (device: Some("gpu")),
                 "small": (device: Some("xpu"), language: Some("fr")),
             },
         },
@@ -985,8 +986,9 @@ mod device_config_tests {
         assert!(!reset);
         assert_eq!(
             cfg.model_device("github.com/x/whisper", "large"),
-            Some("gpu")
+            Some("cuda")
         );
+        assert_eq!(cfg.model_device("github.com/x/whisper", "medium"), None);
         assert_eq!(cfg.model_device("github.com/x/whisper", "small"), None);
         assert_eq!(
             cfg.model_language("github.com/x/whisper", "small"),

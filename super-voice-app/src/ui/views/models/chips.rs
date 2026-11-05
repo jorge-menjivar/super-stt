@@ -1034,6 +1034,7 @@ mod update_offer_tests {
                 reason: None,
                 needs_client_update: false,
             },
+            builds: Vec::new(),
             installed_version: installed.map(String::from),
             update_available,
             index_stale: None,

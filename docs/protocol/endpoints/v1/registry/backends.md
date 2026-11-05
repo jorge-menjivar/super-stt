@@ -69,6 +69,11 @@ GET /registry/backend/list?include_incompatible=false&kind=wasm&online=true&q=op
           "cudnn": false
         }
       },
+      "builds": [
+        { "accel": "cuda",   "size": 734003200 },
+        { "accel": "vulkan", "size": 152043520 },
+        { "accel": "cpu",    "size": 98566144 }
+      ],
       "installed_version": "0.1.0",
       "update_available": true
     }
@@ -104,6 +109,13 @@ Per-entry fields beyond what `index.json` carries:
   internal. `accel` is a string for a build carrying one runtime, and an array
   for one carrying several — the same two spellings
   [`backend.toml`](../../../backend/config.md#assets) accepts.
+- `builds` — every framework this machine can run a build of the backend on,
+  best first, each with its build's download `size` in bytes (every part
+  counted). The first is `selected_asset`'s: what an install picks when none is
+  asked for. A client switching an installed backend to another framework (see
+  the [device](../pipeline/device.md) endpoints) reads the download that costs
+  from here, and installs it with `POST .../install` and that `accel`. Absent
+  for a WASM backend, which has one build.
 - `compatibility.reason` — present only when `compatible = false`. Human-readable.
   A backend whose [`contract`](../../../backend/config.md#contract-generations)
   generation this daemon does not know is reported here too — before any

@@ -285,6 +285,15 @@ async fn a_card_can_select_load_move_unload_and_load_again_at_every_stage() {
             offered.contains(&"cpu"),
             "stage {position}: every host offers the CPU: {offered:?}"
         );
+        // Where step 4 moves the model: a GPU framework this machine offers,
+        // or the CPU on a runner with none, which still has the daemon apply
+        // the choice to the running model.
+        let moved_to = offered
+            .iter()
+            .find(|d| **d != "cpu")
+            .copied()
+            .unwrap_or("cpu")
+            .to_string();
 
         let (status, body) = post(
             &sock,
@@ -356,7 +365,7 @@ async fn a_card_can_select_load_move_unload_and_load_again_at_every_stage() {
             &sock,
             &device_path,
             &token,
-            serde_json::json!({ "device": "gpu" }),
+            serde_json::json!({ "device": moved_to }),
         )
         .await;
         assert_eq!(
@@ -364,7 +373,7 @@ async fn a_card_can_select_load_move_unload_and_load_again_at_every_stage() {
             StatusCode::OK,
             "stage {position} device change: {body}"
         );
-        assert_eq!(body["device"], "gpu", "the new preference is recorded");
+        assert_eq!(body["device"], moved_to, "the new preference is recorded");
 
         let moved = slot(&sock, position, &token).await;
         assert_eq!(
@@ -373,7 +382,7 @@ async fn a_card_can_select_load_move_unload_and_load_again_at_every_stage() {
         );
         assert_eq!(moved["model"], model, "stage {position} still runs {model}");
         assert_eq!(
-            moved["device"]["preference"], "gpu",
+            moved["device"]["preference"], moved_to,
             "stage {position}: the picker's new value"
         );
 
@@ -396,7 +405,7 @@ async fn a_card_can_select_load_move_unload_and_load_again_at_every_stage() {
         );
         assert_eq!(idle["loaded"], false, "stage {position} is not running");
         assert_eq!(
-            idle["device"]["preference"], "gpu",
+            idle["device"]["preference"], moved_to,
             "stage {position}: the device chosen in step 4 outlives the unload too"
         );
         let (status, body) = get(&sock, &stage_path, &token).await;
@@ -421,7 +430,7 @@ async fn a_card_can_select_load_move_unload_and_load_again_at_every_stage() {
         let back = await_loaded(&sock, position, &token).await;
         assert_eq!(back["model"], model);
         assert_eq!(
-            back["device"]["preference"], "gpu",
+            back["device"]["preference"], moved_to,
             "stage {position}: it comes back on the device it was left on"
         );
         assert!(stage_enabled(&sock, position, &token).await);

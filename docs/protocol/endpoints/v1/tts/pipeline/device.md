@@ -1,6 +1,15 @@
 # `/tts/pipeline/{stage}/model/{model}/device`
 
-Which accelerator a model runs on, and what this install can offer it.
+Which framework a model runs on, and which this machine can offer it.
+
+A device is a **framework**: `cpu`, `cuda`, `rocm`, `metal` or `vulkan`. A GPU
+is reached through one of them, and which one is the choice, so there is no
+`gpu`. A model's manifest still declares what it supports on the `cpu`/`gpu`
+axis (`supported_devices`); `cuda`, `rocm`, `metal` and `vulkan` are its `gpu`.
+The frameworks offered are every one a published build of the backend would
+run on this machine, installed or not; switching to one whose build is not
+installed takes an install first, with
+[`POST /registry/backend/install`](../../registry/install.md) and that `accel`.
 
 The preference belongs to the **model**, not to the stage and not to the
 daemon: a 82M-parameter preset-voice model runs fine on the CPU while the
@@ -11,9 +20,9 @@ remembered per `(source, model)`, and addressed through the
 name to a backend.
 
 > **Replaces `/active_device`,** which set one device for the whole daemon.
-> A daemon upgraded from it keeps loading models where it always did: a model
-> with no device of its own falls back to the old global value in
-> `daemon.ron`, and takes its own the first time one is set here.
+> A model with no framework of its own falls back to the global value in
+> `daemon.ron` when that is one it can run on here, and otherwise to the best
+> framework whose build is installed.
 
 Two list endpoints sit beside it: the per-model list, which is the narrow and
 accurate answer once a model is chosen, and
@@ -28,7 +37,7 @@ backend-wide union for a client filling a picker before one is. The
 
 ## `GET /tts/pipeline/{stage}/model/{model}/device`
 
-The device `model` runs on. `model` is resolved against the backend selected
+The framework `model` runs on. `model` is resolved against the backend selected
 for this stage — the same resolution an omitted `source` gets on
 [`POST /tts/pipeline/{stage}/model`](./model.md#post-ttspipelinestagemodel) — so the
 stage must have a backend selected, or this answers `400 invalid_backend`.
@@ -49,17 +58,17 @@ Content-Type: application/json
 
 {
   "status":            "success",
-  "device":            "gpu",
-  "resolved_accel":    "cuda",
-  "available_devices": ["cpu", "gpu"]
+  "device":            "vulkan",
+  "resolved_accel":    "vulkan",
+  "available_devices": ["cuda", "vulkan", "cpu"]
 }
 ```
 
 | Field               | Type     | Notes                                                                                   |
 |---------------------|----------|-----------------------------------------------------------------------------------------|
-| `device`            | string   | The device the model loads on, `"cpu"` or `"gpu"` — its own, or the daemon's default when it has none of its own. `"none"` for an online model, which synthesizes remotely and has no local device. |
-| `resolved_accel`    | string?  | What that preference resolved to: `"cuda"`, `"rocm"`, `"metal"`, `"vulkan"` or `"cpu"` while the model is loaded in this stage — always what actually loaded, so a `"gpu"` choice that fell back reads `"cpu"` here. When the model is not loaded: `"cpu"` for a `"cpu"` preference (nothing to resolve), `null` for `"gpu"` (nothing has resolved yet). `null` for an online model. |
-| `available_devices` | string[] | The devices this install can offer the model on this host: the model's `supported_devices`, narrowed to the accelerators its installed asset actually provides (`installed_accel` on [`GET /backend/list`](../../backends.md)) and to what the host has. A CUDA-only backend on a host without an NVIDIA GPU installed its CPU asset, and is not offered a GPU here. Empty for an online model. |
+| `device`            | string   | The framework the model loads on: its own, when it is one offered here; otherwise the best offered framework whose build is installed. A client staging a load from this value never asks for a build that is not there. `"none"` for an online model, which synthesizes remotely and has no local device. |
+| `resolved_accel`    | string?  | The framework the model is actually running on while it is loaded in this stage, so a choice that fell back reads `"cpu"` here. When the model is not loaded: `"cpu"` for a `"cpu"` preference (nothing to resolve), `null` for a GPU framework (nothing has loaded yet). `null` for an online model. |
+| `available_devices` | string[] | The frameworks this machine can offer the model, best first: every framework a build of its backend would run on here (the release's `[[assets.subprocess]]`, in the installed `backend.toml`), on the axis the model declares. A backend whose manifest names no builds offers what is installed. Empty for an online model. |
 
 **Errors:**
 
@@ -74,10 +83,10 @@ Content-Type: application/json
 ## `POST /tts/pipeline/{stage}/model/{model}/device`
 
 Run `model` on `device`. For the model loaded in this stage this is a reload
-onto the new device; for any other it only records the choice, which the
+onto the new framework; for any other it only records the choice, which the
 model's next load picks up. Either way the choice is the model's own from then
 on: it is remembered per `(source, model)`, so two models on one backend can
-live on different devices.
+run on different frameworks.
 
 **Request:**
 
@@ -87,12 +96,12 @@ Host: voice.local
 Authorization: Bearer …64hex…
 Content-Type: application/json
 
-{ "device": "gpu" }
+{ "device": "vulkan" }
 ```
 
 | Field    | Type   | Required | Notes                                                                                                    |
 |----------|--------|----------|----------------------------------------------------------------------------------------------------------|
-| `device` | string | yes      | `"cpu"` or `"gpu"`. `"cuda"` and `"metal"` are accepted input spellings, normalized to `"gpu"`. Any other value is rejected. |
+| `device` | string | yes      | A framework: `"cpu"`, `"cuda"`, `"rocm"`, `"metal"` or `"vulkan"`. It must be one of `available_devices`, and its build must be installed. |
 
 **Response (200):** the same body `GET` answers with, reflecting the new state.
 `message` says which of the three things happened: recorded for the next load,
@@ -111,30 +120,27 @@ is left as it was, and the call fails with the reason — the user's choice is
 not recorded against a load that did not happen. Should putting it back fail
 too, the stage is left with nothing loaded and publishes a `ready` saying so.
 
-Asking for the device a loaded model is already on reloads nothing — a `gpu`
-preference already resolved to `cuda` is the same choice spelled twice — but a
-`gpu` preference that fell back to the CPU **is** retried, which is what
-tracking the preference and the resolved accelerator separately is for: a user
-who plugged in a GPU, or freed the VRAM a first attempt lacked, gets the retry
-they were asking for.
+Asking for the framework a loaded model is already running on reloads nothing,
+but one stored and fallen back to the CPU **is** retried, which is what
+tracking the preference and the running framework separately is for: a user who
+freed the VRAM a first attempt lacked gets the retry they were asking for.
 
 **Errors:** those of `GET` above, plus:
 
 | HTTP | `error_code`         | Meaning                                                                    |
 |------|----------------------|----------------------------------------------------------------------------|
-| 400  | `invalid_device`     | `device` is not `"cpu"`, `"gpu"` or an accepted alias; or the model's manifest does not declare it (a CPU-only model cannot be sent to the GPU); or the model is online and has no local device. Nothing is recorded. |
-| 500  | *(uncoded)*          | The reload failed. The `message` names the failure and the device the model was put back on; the setting is unchanged. |
+| 400  | `invalid_device`      | `device` is not a framework; or the model's manifest does not declare its axis (a CPU-only model cannot be sent to a GPU framework); or it is not one this machine can offer the model; or the model is online and has no local device. Nothing is recorded. |
+| 409  | `build_not_installed` | The backend publishes a build for `device`, but not the one installed. Install it with `POST /registry/backend/install` and its `accel`, then ask again. Nothing is recorded. |
+| 500  | *(uncoded)*           | The reload failed. The `message` names the failure and the framework the model was put back on; the setting is unchanged. |
 
-Requesting `"gpu"` for a model whose install or host cannot provide one is
-**not** an error — only the manifest is consulted — and the load falls back to
-the CPU, surfaced as `resolved_accel: "cpu"` and the `ready` event's
-`actual_device`. Synthesis on the CPU is slower but correct, so failing the
-call would cost the user speech to save them a latency surprise. A client that
-wants to offer only what will work narrows its picker to `available_devices`.
+A load that cannot come up on the framework asked for falls back to the CPU,
+surfaced as `resolved_accel: "cpu"` and the `ready` event's `actual_device`.
+Synthesis on the CPU is slower but correct, so failing the call would cost the
+user speech to save them a latency surprise.
 
 ## `GET /tts/pipeline/{stage}/model/{model}/device/list`
 
-The devices this install can offer `model` on this host — the
+The frameworks this machine can offer `model` — the
 `available_devices` of the model's [device](#get-ttspipelinestagemodelmodeldevice),
 on its own, for a client that only wants to fill a picker. `model` resolves the
 same way, and the same errors apply.
@@ -155,21 +161,22 @@ Content-Type: application/json
 
 {
   "status":            "success",
-  "available_devices": ["cpu", "gpu"]
+  "available_devices": ["cuda", "vulkan", "cpu"]
 }
 ```
 
-Empty for an online model, and for a local model this install cannot run on any
-device (a GPU-only model whose installed asset is CPU-only). A client hides the
-device control on an empty list rather than special-casing a status.
+Empty for an online model, and for a local model no build of its backend runs
+on here. A client hides the device control on an empty list rather than
+special-casing a status.
 
 ## `GET /tts/pipeline/{stage}/device/list`
 
-The devices the backend selected for this stage can be run on here: the union
+The frameworks the backend selected for this stage can be run on here: the union
 of the list above over the models it serves **for this stage's role**. This is
 the answer for a card that has a backend but no model yet — showing a device
 control that will be wrong once a model is picked is worse than showing the
-union and narrowing it. Always in `cpu`, `gpu` order.
+union and narrowing it. Always best first: `cuda`, `rocm`, `metal`, `vulkan`,
+then `cpu`.
 
 **Request:**
 
@@ -187,7 +194,7 @@ Content-Type: application/json
 
 {
   "status":            "success",
-  "available_devices": ["cpu", "gpu"]
+  "available_devices": ["cuda", "vulkan", "cpu"]
 }
 ```
 

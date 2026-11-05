@@ -25,6 +25,20 @@ The daemon looks up the entry whose `source` matches and installs its
 selected asset. If the entry is not in the cached index, the daemon does a
 single inline refresh before failing.
 
+An optional `accel` installs the build for one framework instead of the best
+one: `cuda`, `rocm`, `metal`, `vulkan` or `cpu`, one of the entry's
+[`builds`](./backends.md). This is how a backend is switched to another
+framework: installed again with that `accel`, its downloaded model files
+carried over, and then the model's [device](../pipeline/device.md) set to it.
+
+```json
+{ "source": "github.com/super-libre/super-tts-qwen", "accel": "vulkan" }
+```
+
+An `accel` this machine has no build for answers `422 incompatible`; one that
+is not a framework, `400 bad_request`. An update keeps the framework installed
+when the new release still has a build for it.
+
 The installed `backend.toml` is the backend's own manifest, published as a
 pinned release asset (the `manifest` field on every index entry). The daemon
 downloads it, verifies its SHA-256 against the pin, confirms it parses, passes

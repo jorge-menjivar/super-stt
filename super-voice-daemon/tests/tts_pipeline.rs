@@ -385,25 +385,32 @@ async fn a_models_device_is_its_own() {
         "every host offers the CPU: {body}"
     );
 
-    // `cuda` is the deprecated input spelling, accepted and normalized to `gpu`.
+    // `gpu` is not a framework: a GPU is reached through one.
     let (st, body) = post_req(
         &sock,
         &local,
         &token,
-        serde_json::json!({ "device": "cuda" }),
+        serde_json::json!({ "device": "gpu" }),
     )
     .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error_code"], "invalid_device", "{body}");
+
+    // The last framework offered, which is always the CPU: the one every
+    // machine has, so the choice is recorded on any runner.
+    let (_, body) = get(&sock, &format!("{local}/list"), &token).await;
+    let last = body["available_devices"]
+        .as_array()
+        .and_then(|d| d.last())
+        .cloned()
+        .expect("at least the CPU");
+    let (st, body) = post_req(&sock, &local, &token, serde_json::json!({ "device": last })).await;
     assert_eq!(st, StatusCode::OK, "{body}");
-    assert_eq!(body["device"], "gpu", "{body}");
-    assert_eq!(
-        body["resolved_accel"],
-        serde_json::Value::Null,
-        "a gpu choice has resolved to nothing until a load confirms it: {body}"
-    );
+    assert_eq!(body["device"], last, "{body}");
 
     // Recorded, and nothing was loaded to record it.
     let (_, body) = get(&sock, &local, &token).await;
-    assert_eq!(body["device"], "gpu", "the choice is recorded: {body}");
+    assert_eq!(body["device"], last, "the choice is recorded: {body}");
     let (_, body) = get(&sock, "/tts/pipeline/1/model", &token).await;
     assert_eq!(body["model"]["loaded"], false, "nothing was loaded: {body}");
 
@@ -515,9 +522,9 @@ async fn device_lists_for_a_model_and_for_a_stage() {
         .expect("a list")
         .clone();
     assert_eq!(
-        for_model.first(),
+        for_model.last(),
         Some(&serde_json::json!("cpu")),
-        "cpu first, always: {body}"
+        "best first, the CPU last: {body}"
     );
 
     // A model that runs remotely offers nothing — the shape a client hides its

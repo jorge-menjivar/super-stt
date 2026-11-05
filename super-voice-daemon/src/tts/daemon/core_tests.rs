@@ -950,20 +950,19 @@ async fn set_device_when_idle_only_updates_preference() {
     assert!(daemon.model.read().await.is_none());
     assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
 
-    // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
     let response = daemon.handle_set_device("cuda".to_string()).await;
     assert_eq!(
         response.status, "success",
         "set_device must succeed when no model is loaded; got error: {:?}",
         response.message,
     );
-    // Both runtime locks updated (normalized), and the model lock is still empty.
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "gpu");
-    assert_eq!(daemon.actual_device.read().await.as_str(), "gpu");
+    // Both runtime locks updated, and the model lock is still empty.
+    assert_eq!(daemon.preferred_device.read().await.as_str(), "cuda");
+    assert_eq!(daemon.actual_device.read().await.as_str(), "cuda");
     assert!(daemon.model.read().await.is_none());
     assert_eq!(
         daemon.config.read().await.device.preferred_device,
-        "gpu",
+        "cuda",
         "preference must be persisted to in-memory config so the next load uses it"
     );
 }
@@ -974,6 +973,16 @@ async fn set_device_when_idle_only_updates_preference() {
 async fn set_device_when_idle_rejects_invalid_device() {
     let daemon = test_daemon().await;
 
+    // `gpu` is not a framework: a GPU is reached through one.
+    for device in ["xpu", "gpu"] {
+        let response = daemon.handle_set_device(device.to_string()).await;
+        assert_eq!(response.status, "error", "{device}");
+        assert_eq!(
+            response.error_code,
+            Some(ErrorCode::InvalidDevice),
+            "{device}"
+        );
+    }
     let response = daemon.handle_set_device("xpu".to_string()).await;
     assert_eq!(response.status, "error");
     assert_eq!(
@@ -1008,8 +1017,7 @@ async fn set_device_with_online_model_keeps_model_and_updates_preference() {
     let response = daemon.handle_set_device("cuda".to_string()).await;
 
     assert_eq!(response.status, "success", "got: {:?}", response.message);
-    // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "gpu");
+    assert_eq!(daemon.preferred_device.read().await.as_str(), "cuda");
     assert!(
         daemon.model.read().await.is_some(),
         "online model must not be unloaded by a device switch"
@@ -1143,20 +1151,21 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
         "cpu"
     );
 
-    // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
+    // The CPU, the one framework every machine offers, so the test holds on
+    // a runner with no GPU.
     let response = daemon
-        .handle_set_model_device("kokoro-82m".to_string(), "cuda".to_string())
+        .handle_set_model_device("kokoro-82m".to_string(), "cpu".to_string())
         .await;
     assert_eq!(
         response.status, "success",
         "setting a device for an unloaded model must succeed; got error: {:?}",
         response.message,
     );
-    assert_eq!(response.device.as_deref(), Some("gpu"));
+    assert_eq!(response.device.as_deref(), Some("cpu"));
     assert_eq!(
         response.resolved_accel,
-        Some(None),
-        "a gpu choice has resolved to nothing before a load confirms it"
+        Some(Some("cpu".to_string())),
+        "the CPU needs no load to resolve"
     );
     assert!(
         response
@@ -1173,7 +1182,7 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
             .read()
             .await
             .model_device(source, "kokoro-82m"),
-        Some("gpu"),
+        Some("cpu"),
         "the choice is the model's own now"
     );
     assert_eq!(
@@ -1187,7 +1196,104 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
         .handle_get_model_device("kokoro-82m".to_string())
         .await;
     assert_eq!(response.status, "success");
-    assert_eq!(response.device.as_deref(), Some("gpu"));
+    assert_eq!(response.device.as_deref(), Some("cpu"));
+}
+
+/// A framework the backend publishes a build for, but not the one installed,
+/// is refused with `build_not_installed` and nothing recorded: the build is
+/// installed first, so a model is never pointed at one it does not have.
+#[tokio::test]
+async fn a_framework_whose_build_is_not_installed_is_refused() {
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/kokoro";
+    let folder = folder_with_the_vulkan_build_installed(source, "kokoro-82m", "synthesis");
+    let mut backend = fixture_backend_devices(
+        "kokoro",
+        source,
+        "Kokoro",
+        "kokoro-82m",
+        vec![
+            super_voice_registry_types::manifest::Device::Cpu,
+            super_voice_registry_types::manifest::Device::Gpu,
+        ],
+    );
+    backend.dir = folder.path().to_path_buf();
+    *daemon.backends.write().await = vec![backend];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+
+    let response = daemon
+        .handle_set_model_device("kokoro-82m".to_string(), "cpu".to_string())
+        .await;
+    assert_eq!(response.status, "error");
+    assert_eq!(
+        response.error_code,
+        Some(ErrorCode::BuildNotInstalled),
+        "{:?}",
+        response.message
+    );
+    assert_eq!(
+        daemon
+            .config
+            .read()
+            .await
+            .model_device(source, "kokoro-82m"),
+        None,
+        "nothing is recorded"
+    );
+}
+
+/// A backend folder whose `backend.toml` publishes a CPU and a Vulkan build of
+/// `model`, with the Vulkan one installed: on any machine the CPU is offered
+/// (every machine runs it) and its build is not on disk.
+fn folder_with_the_vulkan_build_installed(
+    source: &str,
+    model: &str,
+    role: &str,
+) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let manifest = format!(
+        r#"[backend]
+source = "{source}"
+name = "Fixture"
+version = "0.0.0"
+kind = "subprocess"
+entrypoint = "fixture"
+contract = "v1"
+product = "super-voice"
+id = "app.test.fixture"
+description = "Test backend."
+
+[[assets.subprocess]]
+file = "fixture-cpu.tar.gz"
+target = "x86_64-unknown-linux-gnu"
+accel = "cpu"
+
+[[assets.subprocess]]
+file = "fixture-cpu-mac.tar.gz"
+target = "aarch64-apple-darwin"
+accel = "cpu"
+
+[[assets.subprocess]]
+file = "fixture-vulkan.tar.gz"
+target = "x86_64-unknown-linux-gnu"
+accel = "vulkan"
+
+[[models]]
+name = "{model}"
+role = "{role}"
+multilingual = false
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu", "gpu"]
+"#
+    );
+    std::fs::write(dir.path().join("backend.toml"), manifest).expect("manifest");
+    std::fs::write(
+        dir.path().join("installed.json"),
+        r#"{"selected":{"target":"x86_64-unknown-linux-gnu","accel":"vulkan"}}"#,
+    )
+    .expect("record");
+    dir
 }
 
 /// An invalid device value is rejected before anything is looked up or
@@ -1397,13 +1503,20 @@ async fn device_lists_answer_per_model_and_per_backend() {
     let response = daemon.handle_list_model_devices("absent".to_string()).await;
     assert_eq!(response.error_code, Some(ErrorCode::InvalidModel));
 
-    // The backend's list is the union: the CPU everywhere, and the GPU only
-    // where this host actually has one.
+    // The backend's list is the union: the CPU everywhere, and the GPU
+    // frameworks this host actually has.
     let response = daemon.handle_list_active_backend_devices().await;
     assert_eq!(response.status, "success", "{:?}", response.message);
+    // Best first, so the CPU, which every machine has, comes last; what is
+    // before it is this machine's GPU frameworks.
     let devices = response.available_devices.expect("a list");
-    assert_eq!(devices.first().map(String::as_str), Some("cpu"));
-    assert!(devices.iter().all(|d| d == "cpu" || d == "gpu"));
+    assert_eq!(devices.last().map(String::as_str), Some("cpu"));
+    assert!(
+        devices
+            .iter()
+            .all(|d| ["cuda", "rocm", "metal", "vulkan", "cpu"].contains(&d.as_str())),
+        "{devices:?}"
+    );
 }
 
 /// The per-model device verbs dispatch through `handle_command`, exercising
@@ -1470,9 +1583,9 @@ async fn the_global_default_does_not_override_a_models_own_device() {
     assert_eq!(response.status, "success", "{:?}", response.message);
 
     // The global setter still works and still writes the global default.
-    let response = daemon.handle_set_device("gpu".to_string()).await;
+    let response = daemon.handle_set_device("vulkan".to_string()).await;
     assert_eq!(response.status, "success", "{:?}", response.message);
-    assert_eq!(daemon.config.read().await.device.preferred_device, "gpu");
+    assert_eq!(daemon.config.read().await.device.preferred_device, "vulkan");
 
     let config = daemon.config.read().await;
     assert_eq!(
@@ -1487,7 +1600,7 @@ async fn the_global_default_does_not_override_a_models_own_device() {
     );
     assert_eq!(
         config.effective_device(source, "some-other-model"),
-        "gpu",
+        "vulkan",
         "a model with no choice of its own follows the new default"
     );
 }

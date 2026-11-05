@@ -16,10 +16,12 @@ use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends;
 use log::{error, info, warn};
 pub(crate) use super_engine_daemon::devices::{
-    backend_available_devices, host_available_devices, model_available_devices,
-    parse_device_preference,
+    backend_available_devices, backend_frameworks, model_available_devices, parse_device_preference,
 };
-use super_engine_daemon::devices::{device_rejection, device_switch_message, switch_is_satisfied};
+use super_engine_daemon::devices::{
+    build_installed, default_framework, device_rejection, device_switch_message,
+    switch_is_satisfied,
+};
 use super_voice_registry_types::manifest::Device;
 use super_voice_shared::models::protocol::{Command, DaemonResponse, DaemonStatusEvent, ErrorCode};
 
@@ -59,21 +61,24 @@ struct DeviceTarget {
     backend_dir: std::path::PathBuf,
 }
 
-/// The two facts that narrow a model's declared devices to what it can run
-/// on here. See [`model_available_devices`].
+/// What narrows a model's declared devices to the frameworks it can run on
+/// here, and says which of them the build on disk runs. See
+/// [`model_available_devices`].
 struct InstallContext {
-    host_devices: Vec<String>,
+    /// Every framework the backend's builds run on here, installed or not.
+    frameworks: Vec<String>,
     installed_accel: Vec<String>,
 }
 
 impl InstallContext {
-    /// The devices this install can offer `model` on this host.
+    /// The frameworks `model` can be offered on this host.
     fn offer(&self, model: &ModelDefinition) -> Vec<String> {
-        model_available_devices(
-            &self.host_devices,
-            &model.supported_devices,
-            &self.installed_accel,
-        )
+        model_available_devices(&model.supported_devices, &self.frameworks)
+    }
+
+    /// Whether the build on disk runs `framework`.
+    fn installed(&self, framework: &str) -> bool {
+        build_installed(framework, &self.installed_accel)
     }
 }
 
@@ -220,15 +225,15 @@ impl SuperSTTDaemon {
             return DaemonResponse::error("Device change rejected due to shutdown in progress");
         }
 
-        // Validate and normalize (`cuda`/`metal` → `gpu`) in one step, so
-        // everything downstream stores and threads `cpu`/`gpu` rather than the
-        // raw input the client sent. Emit the documented `400 invalid_device`
-        // so a bad request is distinguishable from a server failure.
+        // Emit the documented `400 invalid_device` so a bad request is
+        // distinguishable from a server failure.
         let Some(device) = parse_device_preference(&device) else {
             warn!("Invalid device specified: {device}");
             return DaemonResponse::error_with_code(
                 ErrorCode::InvalidDevice,
-                &format!("Invalid device '{device}'. Must be 'cpu' or 'gpu'"),
+                &format!(
+                    "Invalid device '{device}'. Must be a framework: cpu, cuda, rocm, metal or vulkan"
+                ),
             );
         };
 
@@ -238,6 +243,31 @@ impl SuperSTTDaemon {
         };
         if let Some(rejection) = model_rejects_device(&target.definition, &device) {
             return rejection;
+        }
+        // A framework the backend has a build for, but not the one on disk:
+        // that build is installed first, through the registry. Refused here
+        // rather than stored, so a model is never left pointed at a build it
+        // does not have.
+        let install = self.install_context(&target.backend_dir).await;
+        if !install.offer(&target.definition).contains(&device) {
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidDevice,
+                &format!(
+                    "{} cannot run on {device} here; it can run on {}.",
+                    target.definition.name,
+                    install.offer(&target.definition).join(", ")
+                ),
+            );
+        }
+        if !install.installed(&device) {
+            return DaemonResponse::error_with_code(
+                ErrorCode::BuildNotInstalled,
+                &format!(
+                    "The {device} build of {} is not installed. Install it with \
+                     POST /v1/registry/backend/install, then set the device again.",
+                    target.definition.source
+                ),
+            );
         }
 
         // Where the model is running now, if it is the one loaded in its
@@ -362,11 +392,22 @@ impl SuperSTTDaemon {
     }
 
     /// The device the target loads on: its own, else the global default.
+    /// The framework `target` loads on: its own when that is one it can run
+    /// on here, else the best one the build on disk runs, so a client
+    /// staging a load from this answer never asks for a build that is not
+    /// installed.
     async fn effective_device(&self, target: &DeviceTarget) -> String {
-        self.config
+        let configured = self
+            .config
             .read()
             .await
-            .effective_device(&target.definition.source, &target.definition.name)
+            .effective_device(&target.definition.source, &target.definition.name);
+        let install = self.install_context(&target.backend_dir).await;
+        let offered = install.offer(&target.definition);
+        if offered.contains(&configured) {
+            return configured;
+        }
+        default_framework(&offered, &install.installed_accel).unwrap_or(configured)
     }
 
     /// Record the target's device and persist it. A persist failure is logged,
@@ -460,11 +501,18 @@ impl SuperSTTDaemon {
                 vulkan: None,
                 metal: None,
             });
+        let installed_accel = crate::registry::installed::read(backend_dir)
+            .map(|r| r.selected.accel)
+            .unwrap_or_default();
+        // The installed manifest names every build the release publishes, so
+        // the frameworks need no network. One that does not parse offers what
+        // is on disk.
+        let builds = super_voice_registry_types::manifest::Manifest::load_installed(backend_dir)
+            .map(|m| m.assets.subprocess)
+            .unwrap_or_default();
         InstallContext {
-            host_devices: host_available_devices(&host),
-            installed_accel: crate::registry::installed::read(backend_dir)
-                .map(|r| r.selected.accel)
-                .unwrap_or_default(),
+            frameworks: backend_frameworks(&host, &builds, &installed_accel),
+            installed_accel,
         }
     }
 

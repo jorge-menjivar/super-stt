@@ -1469,12 +1469,13 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
         "cpu"
     );
 
-    // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
+    // The CPU, the one framework every machine offers, so the test holds on
+    // a runner with no GPU.
     let response = daemon
         .handle_set_model_device(
             PipelineStage::Transcription,
             "large".to_string(),
-            "cuda".to_string(),
+            "cpu".to_string(),
         )
         .await;
     assert_eq!(
@@ -1482,11 +1483,11 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
         "setting a device for an unloaded model must succeed; got error: {:?}",
         response.message,
     );
-    assert_eq!(response.device.as_deref(), Some("gpu"));
+    assert_eq!(response.device.as_deref(), Some("cpu"));
     assert_eq!(
         response.resolved_accel,
-        Some(None),
-        "a gpu choice has resolved to nothing before a load confirms it"
+        Some(Some("cpu".to_string())),
+        "the CPU needs no load to resolve"
     );
     assert!(
         response
@@ -1499,7 +1500,7 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
     assert!(daemon.model.read().await.is_none(), "nothing was loaded");
     assert_eq!(
         daemon.config.read().await.model_device(source, "large"),
-        Some("gpu"),
+        Some("cpu"),
         "the choice is the model's own now"
     );
     assert_eq!(
@@ -1513,7 +1514,105 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
         .handle_get_model_device(PipelineStage::Transcription, "large".to_string())
         .await;
     assert_eq!(response.status, "success");
-    assert_eq!(response.device.as_deref(), Some("gpu"));
+    assert_eq!(response.device.as_deref(), Some("cpu"));
+}
+
+/// A framework the backend publishes a build for, but not the one installed,
+/// is refused with `build_not_installed` and nothing recorded: the build is
+/// installed first, so a model is never pointed at one it does not have.
+#[tokio::test]
+async fn a_framework_whose_build_is_not_installed_is_refused() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/whisper";
+    let folder = folder_with_the_vulkan_build_installed(source, "large", "transcription");
+    let mut backend = fixture_backend_devices(
+        "whisper",
+        source,
+        "Whisper",
+        "large",
+        vec![
+            super_voice_registry_types::manifest::Device::Cpu,
+            super_voice_registry_types::manifest::Device::Gpu,
+        ],
+    );
+    backend.dir = folder.path().to_path_buf();
+    *daemon.backends.write().await = vec![backend];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+
+    let response = daemon
+        .handle_set_model_device(
+            PipelineStage::Transcription,
+            "large".to_string(),
+            "cpu".to_string(),
+        )
+        .await;
+    assert_eq!(response.status, "error");
+    assert_eq!(
+        response.error_code,
+        Some(ErrorCode::BuildNotInstalled),
+        "{:?}",
+        response.message
+    );
+    assert_eq!(
+        daemon.config.read().await.model_device(source, "large"),
+        None,
+        "nothing is recorded"
+    );
+}
+
+/// A backend folder whose `backend.toml` publishes a CPU and a Vulkan build of
+/// `model`, with the Vulkan one installed: on any machine the CPU is offered
+/// (every machine runs it) and its build is not on disk.
+fn folder_with_the_vulkan_build_installed(
+    source: &str,
+    model: &str,
+    role: &str,
+) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let manifest = format!(
+        r#"[backend]
+source = "{source}"
+name = "Fixture"
+version = "0.0.0"
+kind = "subprocess"
+entrypoint = "fixture"
+contract = "v1"
+product = "super-voice"
+id = "app.test.fixture"
+description = "Test backend."
+
+[[assets.subprocess]]
+file = "fixture-cpu.tar.gz"
+target = "x86_64-unknown-linux-gnu"
+accel = "cpu"
+
+[[assets.subprocess]]
+file = "fixture-cpu-mac.tar.gz"
+target = "aarch64-apple-darwin"
+accel = "cpu"
+
+[[assets.subprocess]]
+file = "fixture-vulkan.tar.gz"
+target = "x86_64-unknown-linux-gnu"
+accel = "vulkan"
+
+[[models]]
+name = "{model}"
+role = "{role}"
+multilingual = false
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu", "gpu"]
+"#
+    );
+    std::fs::write(dir.path().join("backend.toml"), manifest).expect("manifest");
+    std::fs::write(
+        dir.path().join("installed.json"),
+        r#"{"selected":{"target":"x86_64-unknown-linux-gnu","accel":"vulkan"}}"#,
+    )
+    .expect("record");
+    dir
 }
 
 /// An invalid device value is rejected before anything is looked up or
@@ -1523,7 +1622,8 @@ async fn set_model_device_rejects_invalid_device() {
     use crate::daemon::device_management::PipelineStage;
     let daemon = test_daemon().await;
 
-    for device in ["xpu", "none"] {
+    // `gpu` is not a framework: a GPU is reached through one.
+    for device in ["xpu", "none", "gpu"] {
         let response = daemon
             .handle_set_model_device(
                 PipelineStage::Transcription,
@@ -1762,15 +1862,22 @@ async fn device_lists_answer_per_model_and_per_stage() {
     assert_eq!(response.status, "success", "{:?}", response.message);
     assert_eq!(response.available_devices, Some(vec!["cpu".to_string()]));
 
-    // Stage 2 sees the post-processor, which declares the GPU too — offered
-    // only where the host has one, and the CPU everywhere.
+    // Stage 2 sees the post-processor, which declares the GPU too: offered
+    // the frameworks this host has, and the CPU everywhere.
     let response = daemon
         .handle_list_stage_devices(PipelineStage::PostProcessor)
         .await;
     assert_eq!(response.status, "success", "{:?}", response.message);
+    // Best first, so the CPU, which every machine has, comes last; what is
+    // before it is this machine's GPU frameworks.
     let devices = response.available_devices.expect("a list");
-    assert_eq!(devices.first().map(String::as_str), Some("cpu"));
-    assert!(devices.iter().all(|d| d == "cpu" || d == "gpu"));
+    assert_eq!(devices.last().map(String::as_str), Some("cpu"));
+    assert!(
+        devices
+            .iter()
+            .all(|d| ["cuda", "rocm", "metal", "vulkan", "cpu"].contains(&d.as_str())),
+        "{devices:?}"
+    );
 }
 
 /// Stage 2 stores the same way: a post-processor that is not loaded gets
@@ -1799,18 +1906,18 @@ async fn set_post_processor_device_when_not_loaded_only_records_the_preference()
         .handle_set_model_device(
             PipelineStage::PostProcessor,
             "cleanup".to_string(),
-            "gpu".to_string(),
+            "cpu".to_string(),
         )
         .await;
     assert_eq!(response.status, "success", "{:?}", response.message);
-    assert_eq!(response.device.as_deref(), Some("gpu"));
+    assert_eq!(response.device.as_deref(), Some("cpu"));
     assert!(
         daemon.post_processor.read().await.is_none(),
         "nothing was loaded"
     );
     assert_eq!(
         daemon.config.read().await.model_device(source, "cleanup"),
-        Some("gpu")
+        Some("cpu")
     );
 }
 
@@ -2446,7 +2553,9 @@ async fn a_failed_stage_two_device_switch_fails_and_restores_the_setting() {
         .write()
         .await
         .enable_post_processor("cleanup".to_string(), source.to_string());
-    seed_post_processor_named(&daemon, "cleanup", source).await;
+    // Running on Vulkan and switched to the CPU, the one framework every
+    // machine offers, so the switch is attempted on a runner with no GPU.
+    seed_post_processor_on(&daemon, "cleanup", source, "vulkan").await;
     assert_eq!(
         daemon.config.read().await.model_device(source, "cleanup"),
         None,
@@ -2457,7 +2566,7 @@ async fn a_failed_stage_two_device_switch_fails_and_restores_the_setting() {
         .handle_set_model_device(
             PipelineStage::PostProcessor,
             "cleanup".to_string(),
-            "gpu".to_string(),
+            "cpu".to_string(),
         )
         .await;
 
@@ -2482,6 +2591,8 @@ struct ScriptedTranscribe {
     result: Result<String, ()>,
     /// Every context this instance has been handed, in order.
     reconfigured: SeenContexts,
+    /// The framework it reports running on.
+    device: &'static str,
 }
 impl crate::stt_models::transcribe::ModelInfo for ScriptedTranscribe {
     fn info(&self) -> &crate::stt_models::transcribe::ModelInfoData {
@@ -2490,7 +2601,7 @@ impl crate::stt_models::transcribe::ModelInfo for ScriptedTranscribe {
 }
 impl crate::stt_models::transcribe::ModelState for ScriptedTranscribe {
     fn device(&self) -> String {
-        "cpu".to_string()
+        self.device.to_string()
     }
 }
 #[async_trait::async_trait]
@@ -2552,6 +2663,7 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
             info,
             result,
             reconfigured: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            device: "cpu",
         }),
     });
 }
@@ -2571,6 +2683,16 @@ async fn seed_post_processor_named(
     daemon: &SuperSTTDaemon,
     name: &str,
     source: &str,
+) -> SeenContexts {
+    seed_post_processor_on(daemon, name, source, "cpu").await
+}
+
+/// [`seed_post_processor_named`], running on `device`.
+async fn seed_post_processor_on(
+    daemon: &SuperSTTDaemon,
+    name: &str,
+    source: &str,
+    device: &'static str,
 ) -> SeenContexts {
     use crate::daemon::types::LoadedModel;
     use crate::stt_models::ModelDefinition;
@@ -2603,6 +2725,7 @@ async fn seed_post_processor_named(
             info,
             result: Ok(String::new()),
             reconfigured: std::sync::Arc::clone(&reconfigured),
+            device,
         }),
     });
     reconfigured

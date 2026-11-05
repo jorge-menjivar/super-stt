@@ -56,7 +56,7 @@ impl SuperSTTDaemon {
         let instance: Box<dyn Transcribe> = match backend.kind.as_str() {
             "wasm" => self.instantiate_wasm(&backend, &def).await?,
             "subprocess" => {
-                let resolved = resolve_device_for_backend(device_pref, &backend.dir).await;
+                let resolved = resolve_device_for_backend(device_pref, &backend.dir);
                 self.instantiate_subprocess(&backend, name, &resolved, stage)
                     .await?
             }
@@ -393,22 +393,15 @@ impl SuperSTTDaemon {
     }
 }
 
-/// Resolve `device_pref` (`cpu`/`gpu`) into the concrete accelerator handed to
-/// a subprocess backend's `POST /v1/load`, per
-/// `docs/protocol/backend/contract.md`. Reads the backend directory's install
-/// record for the asset's declared accel list, and the host's detected
-/// capability — a dual-runtime asset resolves by which the *host* can run,
-/// not by which entry the asset lists first.
-async fn resolve_device_for_backend(device_pref: &str, backend_dir: &std::path::Path) -> String {
+/// The framework handed to a subprocess backend's `POST /v1/load` for
+/// `device_pref`, per `docs/protocol/backend/contract.md`: the preference
+/// when the build on disk runs it, else nothing, so the backend loads on the
+/// build it has. Reads the backend directory's install record.
+fn resolve_device_for_backend(device_pref: &str, backend_dir: &std::path::Path) -> String {
     let installed_accel = installed::read(backend_dir)
         .map(|r| r.selected.accel)
         .unwrap_or_default();
-    // Best-effort: detection failure degrades `resolve_accel` to its
-    // list-order fallback rather than blocking the load.
-    let host = tokio::task::spawn_blocking(crate::registry::host_detect::detect)
-        .await
-        .ok();
-    resolve_accel(device_pref, &installed_accel, host.as_ref())
+    resolve_accel(device_pref, &installed_accel)
 }
 
 /// The effective value of a backend option — the user's override if set, else
