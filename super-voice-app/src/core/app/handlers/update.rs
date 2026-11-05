@@ -202,8 +202,8 @@ impl AppModel {
     fn open_updates_page(&mut self) -> Task<cosmic::Action<Message>> {
         let entity = self.nav.iter().find(|&id| {
             matches!(
-                self.nav.data::<crate::state::Page>(id),
-                Some(crate::state::Page::Updates)
+                self.nav.data::<crate::state::Section>(id),
+                Some(crate::state::Section::Updates)
             )
         });
         entity.map_or_else(Task::none, |id| self.on_nav_select(id))

@@ -21,13 +21,17 @@ const SETTINGS_APP_NAME: &str = "Super Voice Settings App";
 /// Topics the settings app subscribes to over `GET /events`.
 ///
 /// `recording_state` drives the recording badge (`recording_events`),
-/// `frequency_bands` drives the audio meter (`audio_visualization`), and
+/// `frequency_bands` the microphone meter (`audio_visualization`),
+/// `speaking_state` the speaking badge (`playback_events`),
+/// `playback_frequency_bands` the playback meter (`audio_visualization`), and
 /// `daemon_status_changed` / `download_progress` / `registry_install`
 /// drive the model-switch progress bar and Download-tab install cards
 /// (`daemon_status`).
 const SETTINGS_TOPICS: &[&str] = &[
     "recording_state",
     "frequency_bands",
+    "speaking_state",
+    "playback_frequency_bands",
     "daemon_status_changed",
     "download_progress",
     "registry_install",

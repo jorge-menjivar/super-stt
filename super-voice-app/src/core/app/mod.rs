@@ -131,6 +131,13 @@ pub struct AppModel {
     pub synthesis: crate::daemon::client::StageState,
     /// The synthesis model's voice control.
     pub voice: crate::state::VoiceState,
+    /// The tab each feature's section shows, kept while the user is elsewhere.
+    pub speech_to_text_tab: crate::state::Page,
+    pub text_to_speech_tab: crate::state::Page,
+    /// The Speech tab.
+    pub speech: crate::state::SpeechState,
+    /// The Voices tab: the cloned-voice library and a recording in progress.
+    pub voices: crate::state::voices::VoicesState,
     /// What each stage's card has picked but not yet loaded. One store for
     /// every stage: a pick is local until Load commits it, which is true of
     /// every stage's card, so there is no per-stage copy of the rule.
@@ -364,6 +371,8 @@ impl cosmic::Application for AppModel {
         // the card, so poll it a bit faster than the ping to keep the header
         // readout (and the staged-load fit warning) live.
         const GPU_POLL_INTERVAL_SECS: u64 = 3;
+        // The Voices tab's level meter and elapsed readout while it records.
+        const RECORDING_TICK_MS: u64 = 100;
 
         let mut subs = vec![
             // HTTP /events SSE subscription. Covers the recording /
@@ -382,6 +391,12 @@ impl cosmic::Application for AppModel {
             cosmic::iced::time::every(std::time::Duration::from_secs(GPU_POLL_INTERVAL_SECS))
                 .map(|_| Message::ModelsPage(ModelsPageMessage::RefreshGpuInfo)),
         ];
+        if self.voices.is_recording() {
+            subs.push(
+                cosmic::iced::time::every(std::time::Duration::from_millis(RECORDING_TICK_MS))
+                    .map(|_| Message::Voices(crate::ui::messages::VoicesMessage::RecordingTick)),
+            );
+        }
 
         // The Add-a-backend drawer's spinner is a still SVG per angle, so it
         // needs a tick to step through them. Only while a check is actually in
@@ -427,9 +442,39 @@ impl cosmic::Application for AppModel {
 
     /// Called when a nav item is selected.
     fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<cosmic::Action<Self::Message>> {
-        // Activate the page in the model.
+        // Activate the section in the model.
         self.nav.activate(id);
-        // Leaving the current section dismisses any open context sheet
+        self.page_shown(self.active_page())
+    }
+}
+
+impl AppModel {
+    /// The section the rail has selected.
+    #[must_use]
+    pub fn section(&self) -> crate::state::Section {
+        self.nav
+            .data::<crate::state::Section>(self.nav.active())
+            .copied()
+            .unwrap_or(crate::state::Section::Customization)
+    }
+
+    /// The page on screen: the selected section's, or the tab it shows.
+    #[must_use]
+    pub fn active_page(&self) -> crate::state::Page {
+        use crate::state::Section;
+        match self.section() {
+            Section::SpeechToText => self.speech_to_text_tab,
+            Section::TextToSpeech => self.text_to_speech_tab,
+            section => section.pages()[0],
+        }
+    }
+
+    /// A page came on screen, from the rail or a tab.
+    pub(in crate::core::app) fn page_shown(
+        &mut self,
+        page: crate::state::Page,
+    ) -> Task<cosmic::Action<Message>> {
+        // Leaving the current page dismisses any open context sheet
         // (e.g. the Models page's "Add backend" / configuration drawer) and
         // any open per-card overflow menu.
         self.core.window.show_context = false;
@@ -441,15 +486,15 @@ impl cosmic::Application for AppModel {
         // never the stale one — the app was, holding a catalog fetched once at
         // startup. Anything that changed a backend outside this app (an install
         // from the CLI, an edited `backend.toml`) went unseen until a restart.
-        match self.nav.data::<crate::state::Page>(id) {
-            Some(crate::state::Page::Models | crate::state::Page::Library) => Task::batch([
+        match page {
+            crate::state::Page::Models | crate::state::Page::Library => Task::batch([
                 handlers::tasks::reload_backend_catalogs(),
                 self.update_title(),
             ]),
             // Re-fetch rather than trust whatever was loaded at connect-time —
             // a periodic background check may have completed since, or another
             // client may have changed the beta-opt-in setting.
-            Some(crate::state::Page::Updates) => Task::batch([
+            crate::state::Page::Updates => Task::batch([
                 handlers::tasks::refresh_update_status(),
                 self.update_title(),
             ]),
@@ -457,9 +502,17 @@ impl cosmic::Application for AppModel {
             // have edited the list since it was last read. The arm matters:
             // this `match` has a `_`, so leaving it out compiles silently and
             // shows stale rows.
-            Some(crate::state::Page::Contexts) => Task::batch([
+            crate::state::Page::Contexts => Task::batch([
                 Task::done(cosmic::Action::App(Message::Contexts(
                     crate::ui::messages::ContextsMessage::Reload,
+                ))),
+                self.update_title(),
+            ]),
+            // The library can change from another client, and the loaded
+            // model decides what the tab offers.
+            crate::state::Page::Voices => Task::batch([
+                Task::done(cosmic::Action::App(Message::Voices(
+                    crate::ui::messages::VoicesMessage::Refresh,
                 ))),
                 self.update_title(),
             ]),

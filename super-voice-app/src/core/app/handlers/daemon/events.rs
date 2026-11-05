@@ -366,10 +366,32 @@ impl AppModel {
             // The `ready` that closes each of these re-reads the stage.
             SynthesisEvent::ModelSwitched { .. }
             | SynthesisEvent::SwitchingDevice { .. }
-            | SynthesisEvent::LoadingModelForDevice { .. }
-            // The Voices page's business, not the stage's.
-            | SynthesisEvent::PreparingVoice { .. }
-            | SynthesisEvent::VoicePrepared { .. } => None,
+            | SynthesisEvent::LoadingModelForDevice { .. } => None,
+            // The wait is the same whoever started it, so the Voices tab shows
+            // it for a preparation another client asked for too.
+            SynthesisEvent::PreparingVoice { voice, model } => {
+                info!("daemon is preparing voice {voice} for {model}");
+                self.voices.preparing = Some(voice);
+                None
+            }
+            SynthesisEvent::VoicePrepared {
+                voice,
+                model,
+                error,
+            } => {
+                // Not surfaced as a banner: nothing the user did has failed
+                // yet. The next attempt to speak in the voice tries again and
+                // reports properly if it still cannot.
+                if let Some(e) = &error {
+                    warn!("daemon could not prepare voice {voice} for {model}: {e}");
+                } else {
+                    info!("daemon prepared voice {voice} for {model}");
+                }
+                if self.voices.preparing.as_deref() == Some(voice.as_str()) {
+                    self.voices.preparing = None;
+                }
+                None
+            }
         }
     }
 

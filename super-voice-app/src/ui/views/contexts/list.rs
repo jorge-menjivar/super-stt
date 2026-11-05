@@ -52,7 +52,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
         .width(Length::Fill),
     );
 
-    common::page_layout("Dictation contexts", body)
+    body.into()
 }
 
 /// What a context is for, in the fewest words that actually explain it.

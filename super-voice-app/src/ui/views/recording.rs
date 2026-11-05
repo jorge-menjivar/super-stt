@@ -7,7 +7,7 @@ use super_stt_shared::models::notification_method::NotificationMethod;
 use super_stt_shared::models::protocol::PreviewSource;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 
-use super::common::{error_banner, page_layout};
+use super::common::error_banner;
 use crate::state::RecordingStatus;
 use crate::ui::messages::{
     Message, NotificationMethodMessage, PreviewTypingMessage, RecordingMessage,
@@ -232,5 +232,5 @@ pub fn page<'a>(
         is_speech_detected,
     ));
 
-    page_layout("Recording", settings::view_column(blocks))
+    settings::view_column(blocks).into()
 }

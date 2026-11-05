@@ -5,7 +5,7 @@ use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, Id, button, settings, text};
 use super_stt_shared::models::write_method::WriteMethod;
 
-use super::common::{error_banner, page_layout};
+use super::common::error_banner;
 use crate::ui::messages::{Message, WriteMethodMessage};
 
 /// Id of the test field, so the Test button can focus it before the daemon
@@ -62,7 +62,7 @@ pub fn page<'a>(
 
     blocks.push(test_section(test_text, countdown));
 
-    page_layout("Input Simulation", settings::view_column(blocks))
+    settings::view_column(blocks).into()
 }
 
 /// Test section: the in-app typing test, plus the delayed one that targets

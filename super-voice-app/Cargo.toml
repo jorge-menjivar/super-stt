@@ -9,8 +9,13 @@
 
 [dependencies]
     anyhow.workspace = true
+    # Microphone capture for cloned-voice reference clips. The app records; the
+    # daemon still owns every output device. 0.18, as the daemon's playback is,
+    # rather than the workspace's 0.17.
+    cpal = "0.18.2"
     dirs.workspace = true
     futures-util.workspace = true
+    hound.workspace = true
     i18n-embed.workspace = true
     i18n-embed-fl.workspace = true
     libc.workspace = true

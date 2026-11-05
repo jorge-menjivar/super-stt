@@ -21,6 +21,8 @@ impl AppModel {
             Message::ModelsPage(m) => self.handle_models_page_messages(m),
             Message::Stage(m) => self.handle_stage_messages(m),
             Message::Voice(m) => self.handle_voice_messages(m),
+            Message::Speech(m) => self.handle_speech_messages(m),
+            Message::Voices(m) => self.handle_voices_messages(m),
             Message::Device(m) => self.handle_device_messages(m),
             Message::Download(m) => self.handle_download_messages(m),
             Message::PreviewTyping(m) => self.handle_preview_typing_messages(m),

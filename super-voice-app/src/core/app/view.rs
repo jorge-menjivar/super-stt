@@ -71,10 +71,7 @@ impl AppModel {
             // connection both dismiss it here, no extra bookkeeping required.
             ContextPage::AddBackend => {
                 let on_library_page = self.daemon_status == DaemonStatus::Connected
-                    && matches!(
-                        self.nav.data::<Page>(self.nav.active()),
-                        Some(Page::Library)
-                    );
+                    && self.active_page() == Page::Library;
                 on_library_page.then(|| {
                     context_drawer::context_drawer(
                         views::models::add_backend_sheet(self),
@@ -91,7 +88,7 @@ impl AppModel {
             // stage and selects the chosen one.
             ContextPage::SelectBlockBackend(stage) => {
                 let on_models_page = self.daemon_status == DaemonStatus::Connected
-                    && matches!(self.nav.data::<Page>(self.nav.active()), Some(Page::Models));
+                    && self.active_page() == Page::Models;
                 on_models_page.then(|| {
                     context_drawer::context_drawer(
                         views::models::stage_sheet(self, stage),
@@ -106,7 +103,7 @@ impl AppModel {
             // lists installed backends and activates the chosen one.
             ContextPage::SelectBackend => {
                 let on_models_page = self.daemon_status == DaemonStatus::Connected
-                    && matches!(self.nav.data::<Page>(self.nav.active()), Some(Page::Models));
+                    && self.active_page() == Page::Models;
                 on_models_page.then(|| {
                     context_drawer::context_drawer(
                         views::models::select_backend_sheet(self),
@@ -139,10 +136,7 @@ impl AppModel {
             // either page, and only when a backend is selected for configuration.
             ContextPage::ConfigureBackend => {
                 let on_backend_page = self.daemon_status == DaemonStatus::Connected
-                    && matches!(
-                        self.nav.data::<Page>(self.nav.active()),
-                        Some(Page::Models | Page::Library)
-                    );
+                    && matches!(self.active_page(), Page::Models | Page::Library);
                 let backend = self
                     .models_page
                     .configure_backend
@@ -167,11 +161,8 @@ impl AppModel {
     /// extra bookkeeping. The draft, because the draft *is* what the sheet
     /// edits: without one there is nothing to draw.
     fn context_editor_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Message>> {
-        let on_contexts_page = self.daemon_status == DaemonStatus::Connected
-            && matches!(
-                self.nav.data::<Page>(self.nav.active()),
-                Some(Page::Contexts)
-            );
+        let on_contexts_page =
+            self.daemon_status == DaemonStatus::Connected && self.active_page() == Page::Contexts;
         if !on_contexts_page {
             return None;
         }
@@ -213,12 +204,27 @@ impl AppModel {
         }
 
         // When connected, show normal navigation
-        let active_page = self
-            .nav
-            .data::<Page>(self.nav.active())
-            .unwrap_or(&Page::Customization);
+        let page = self.active_page();
+        let body = self.page_body(page);
+        let section = self.section();
+        let tabs = section.pages();
+        if tabs.len() < 2 {
+            return body;
+        }
+        let tab_row = views::tabs::tab_row(tabs.iter().map(|&tab| {
+            (
+                tab.title().to_string(),
+                tab == page,
+                Message::Shell(ShellMessage::SelectTab(tab)),
+            )
+        }));
+        views::common::tabbed_layout(section.title(), tab_row, body)
+    }
 
-        match active_page {
+    /// One page's content: the whole page for a section of its own, or the
+    /// body under a feature section's tabs.
+    fn page_body(&self, page: Page) -> Element<'_, Message> {
+        match page {
             Page::Customization => views::customization::page(
                 &self.audio_themes,
                 &self.selected_audio_theme,
@@ -250,6 +256,11 @@ impl AppModel {
             Page::Contexts => views::contexts::page(self),
             Page::Updates => views::updates::page(&self.update),
             Page::Connection => views::connection::page(self),
+            Page::Speech => views::speech::page(
+                &self.speech,
+                self.action_error_for(crate::state::ErrorScope::Speech),
+            ),
+            Page::Voices => views::voices::page(self),
         }
     }
 }

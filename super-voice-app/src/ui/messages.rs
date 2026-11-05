@@ -31,6 +31,8 @@ pub enum Message {
     /// Filling a pipeline stage, for every stage.
     Stage(StageMessage),
     Voice(VoiceMessage),
+    Speech(SpeechMessage),
+    Voices(VoicesMessage),
     Device(DeviceMessage),
     Download(DownloadMessage),
     PreviewTyping(PreviewTypingMessage),
@@ -59,6 +61,8 @@ pub enum Message {
 pub enum ShellMessage {
     OpenRepositoryUrl,
     ToggleContextPage(ContextPage),
+    /// Show one of a feature section's tabs.
+    SelectTab(crate::state::Page),
     LaunchUrl(String),
     /// Put a command on the clipboard. The app does not run these itself —
     /// they act on the user's session, not on the app — so handing over the
@@ -423,6 +427,106 @@ pub enum StageMessage {
     },
     /// Re-reading `stage`'s block failed; the message is shown on its card.
     BlockFailed { stage: BlockStage, message: String },
+}
+
+/// Text to speech's Speech tab: a test utterance, and what the daemon says it
+/// is speaking.
+#[derive(Debug, Clone)]
+pub enum SpeechMessage {
+    /// The text in the Speech tab's test field changed.
+    TestTextChanged(String),
+    /// Speak whatever is in the test field.
+    Speak,
+    /// The daemon accepted the utterance and returned its id.
+    SpeakStarted(String),
+    /// The daemon refused it; carries the message for the tab's banner.
+    SpeakFailed(String),
+    /// Stop the utterance now playing.
+    StopSpeaking,
+    /// `playback_frequency_bands` event from the daemon's `/events` stream —
+    /// already converted to (`display_level_percent`, `is_speech`) so the tab
+    /// can drive its meter.
+    WidgetAudioLevel { level: f32, is_speech: bool },
+    /// `speaking_state` event from `/events` — the coarse flag the tab projects
+    /// into a `SpeakingStatus`, plus the utterance it describes.
+    ///
+    /// The id travels with it because the daemon speaks for whoever asked: an
+    /// utterance this tab did not start still turns the badge on, and the id
+    /// is the only way the tab can tell the two apart.
+    WidgetSpeakingState {
+        is_speaking: bool,
+        utterance_id: Option<String>,
+    },
+}
+
+/// The Voices tab: the cloned-voice library, and the recording or import that
+/// adds to it.
+#[derive(Debug, Clone)]
+pub enum VoicesMessage {
+    /// Fetch the library and the loaded model's cloning capability.
+    Refresh,
+    VoicesLoaded {
+        voices: Vec<super_tts_shared::models::voices::VoiceInfo>,
+        model: Option<super_tts_shared::models::voices::VoiceModelSupport>,
+    },
+    LoadFailed(String),
+
+    /// The user picked a reading script, or chose to read their own words
+    /// (`None`). Carries the script's id rather than the picker's row number:
+    /// the picker is ordered by speech language, so a row number means nothing
+    /// once the language changes underneath it.
+    ScriptSelected(Option<&'static str>),
+
+    /// Open the microphone and start capturing.
+    StartRecording,
+    /// One tick of the level meter and elapsed readout while recording.
+    RecordingTick,
+    /// Stop capturing and keep what was recorded as the pending sample. Also
+    /// how a capture that ended by itself — the cap, or a device failure —
+    /// is collected, so there is one path out of recording.
+    StopRecording,
+
+    /// Open the file picker.
+    ImportFile,
+    /// A file was chosen and read. `None` when the user cancelled.
+    FileImported(Option<(String, Vec<u8>)>),
+    /// The chosen file could not be read.
+    ImportFailed(String),
+
+    LabelChanged(String),
+    TranscriptChanged(String),
+    /// Throw the pending sample away without saving it.
+    DiscardPending,
+    /// Upload the pending sample as a new voice.
+    Save,
+    Saved(super_tts_shared::models::voices::VoiceInfo),
+    SaveFailed(String),
+
+    /// Start editing one voice's label. Carries the id and the label to seed
+    /// the field with.
+    BeginRename {
+        id: String,
+        label: String,
+    },
+    RenameChanged(String),
+    CommitRename,
+    CancelRename,
+    Renamed(super_tts_shared::models::voices::VoiceInfo),
+    RenameFailed(String),
+
+    Delete(String),
+    Deleted(String),
+    DeleteFailed {
+        id: String,
+        message: String,
+    },
+
+    /// Speak a fixed sentence in this voice, so the user can hear it.
+    Preview(String),
+    /// The daemon accepted the preview — registration is done and the audio is
+    /// on its way, so the row stops saying it is preparing one.
+    Previewed,
+    PreviewFailed(String),
 }
 
 /// The synthesis model's voice.
@@ -804,6 +908,8 @@ macro_rules! message_from {
 message_from! {
     Shell => ShellMessage,
     Voice => VoiceMessage,
+    Speech => SpeechMessage,
+    Voices => VoicesMessage,
     Daemon => DaemonMessage,
     Model => ModelMessage,
     ModelsPage => ModelsPageMessage,

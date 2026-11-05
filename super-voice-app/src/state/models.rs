@@ -30,8 +30,8 @@ pub enum RecordingStatus {
     Recording,
 }
 
-/// The page to display in the application
-#[derive(Debug, Clone)]
+/// One page of the application: a nav entry's own, or a tab of a feature's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Connection,
     Customization,
@@ -50,6 +50,87 @@ pub enum Page {
     /// Named dictation contexts: what the user is dictating, as a prompt and a
     /// vocabulary, and which one is in force.
     Contexts,
+    /// A test utterance, and what the daemon is saying.
+    Speech,
+    /// The cloned-voice library: record or import a reference clip, and manage
+    /// the voices built from them.
+    Voices,
+}
+
+/// An entry in the nav rail: a page of its own, or a feature whose pages are
+/// tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    Models,
+    Library,
+    SpeechToText,
+    TextToSpeech,
+    Customization,
+    Connection,
+    Updates,
+}
+
+impl Section {
+    /// The heading a feature's section shows above its tabs.
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::SpeechToText => "Speech to text",
+            Self::TextToSpeech => "Text to speech",
+            Self::Models => "Models",
+            Self::Library => "Library",
+            Self::Customization => "Customization",
+            Self::Connection => "Connection",
+            Self::Updates => "Updates",
+        }
+    }
+
+    /// The section's tabs, in order, or its one page.
+    #[must_use]
+    pub const fn pages(self) -> &'static [Page] {
+        match self {
+            Self::Models => &[Page::Models],
+            Self::Library => &[Page::Library],
+            Self::SpeechToText => &[Page::Recording, Page::InputSimulation, Page::Contexts],
+            Self::TextToSpeech => &[Page::Speech, Page::Voices],
+            Self::Customization => &[Page::Customization],
+            Self::Connection => &[Page::Connection],
+            Self::Updates => &[Page::Updates],
+        }
+    }
+
+    /// The section a page is in.
+    #[must_use]
+    pub const fn of(page: Page) -> Self {
+        match page {
+            Page::Models => Self::Models,
+            Page::Library => Self::Library,
+            Page::Recording | Page::InputSimulation | Page::Contexts => Self::SpeechToText,
+            Page::Speech | Page::Voices => Self::TextToSpeech,
+            Page::Customization => Self::Customization,
+            Page::Connection => Self::Connection,
+            Page::Updates => Self::Updates,
+        }
+    }
+}
+
+impl Page {
+    /// The page's name: its tab's label, or its nav entry's.
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Models => "Models",
+            Self::Library => "Library",
+            Self::Recording => "Recording",
+            Self::InputSimulation => "Input Simulation",
+            Self::Contexts => "Contexts",
+            Self::Speech => "Speech",
+            Self::Voices => "Voices",
+            Self::Customization => "Customization",
+            Self::Connection => "Connection",
+            Self::Updates => "Updates",
+        }
+    }
 }
 
 /// The context page to display in the context drawer
@@ -106,6 +187,10 @@ pub enum ErrorScope {
     PostProcessing,
     /// The Models page's Synthesis section: its model and voice saves.
     Synthesis,
+    /// The Speech tab: the test utterance.
+    Speech,
+    /// The Voices tab: recording, upload, rename, and delete failures.
+    Voices,
     /// The Contexts page: a failed list fetch, activate, or delete. A failed
     /// *save* is not here — it belongs in the editor that caused it, beside the
     /// field the user has to fix.
@@ -153,4 +238,32 @@ pub enum ModelsTab {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MenuAction {
     About,
+}
+
+#[cfg(test)]
+mod section_tests {
+    use super::{Page, Section};
+
+    /// Every page is in exactly one section, the one `Section::of` names.
+    #[test]
+    fn each_page_is_in_the_section_it_names() {
+        let sections = [
+            Section::Models,
+            Section::Library,
+            Section::SpeechToText,
+            Section::TextToSpeech,
+            Section::Customization,
+            Section::Connection,
+            Section::Updates,
+        ];
+        let mut seen = Vec::new();
+        for section in sections {
+            for &page in section.pages() {
+                assert_eq!(Section::of(page), section, "{page:?}");
+                assert!(!seen.contains(&page), "{page:?} is in two sections");
+                seen.push(page);
+            }
+        }
+        assert_eq!(seen.len(), 10, "every page is in a section");
+    }
 }

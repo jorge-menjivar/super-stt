@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::DaemonStatus;
-use crate::ui::messages::{DaemonMessage, Message, ModelsPageMessage, RecordingMessage};
+use crate::ui::messages::{
+    DaemonMessage, Message, ModelsPageMessage, RecordingMessage, SpeechMessage,
+};
 use log::warn;
 
 /// Classify a daemon [`HttpError`] into the right next `DaemonStatus`.
@@ -50,6 +52,26 @@ pub(super) fn settings_widget_event_to_message(
             Some(Message::Recording(RecordingMessage::WidgetAudioLevel {
                 level,
                 is_speech,
+            }))
+        }
+        // Text to speech's: what the daemon is saying, and how loud.
+        "speaking_state" => Some(Message::Speech(SpeechMessage::WidgetSpeakingState {
+            is_speaking: p
+                .get("is_speaking")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            utterance_id: p
+                .get("utterance_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        })),
+        "playback_frequency_bands" => {
+            // reason: audio energy values are small positive floats well within f32 range; precision loss is acceptable for level display.
+            #[allow(clippy::cast_possible_truncation)]
+            let total_energy = p.get("total_energy").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+            Some(Message::Speech(SpeechMessage::WidgetAudioLevel {
+                level: raw_level_to_db_display_percent(total_energy),
+                is_speech: total_energy > 0.0001,
             }))
         }
         // `daemon_status_changed` and `download_progress` arrive as

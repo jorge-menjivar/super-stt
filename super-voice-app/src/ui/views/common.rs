@@ -64,3 +64,18 @@ pub fn page_layout<'a>(
         .height(Length::Fill)
         .into()
 }
+
+/// A feature section's layout: its title, its tabs, then the open tab's
+/// scrollable content. The tabs stay put while the content scrolls.
+pub fn tabbed_layout<'a>(
+    title: &'a str,
+    tabs: Element<'a, Message>,
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    widget::column::with_capacity(3)
+        .push(page_header(title))
+        .push(page_container(tabs))
+        .push(page_content(content))
+        .height(Length::Fill)
+        .into()
+}

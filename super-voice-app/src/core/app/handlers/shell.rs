@@ -33,6 +33,16 @@ impl AppModel {
 
             ShellMessage::CopyText(text) => cosmic::iced::clipboard::write(text),
 
+            ShellMessage::SelectTab(page) => {
+                match crate::state::Section::of(page) {
+                    crate::state::Section::SpeechToText => self.speech_to_text_tab = page,
+                    crate::state::Section::TextToSpeech => self.text_to_speech_tab = page,
+                    // One-page sections have no tabs to remember.
+                    _ => {}
+                }
+                self.page_shown(page)
+            }
+
             #[cfg(target_os = "macos")]
             ShellMessage::WindowOpened(id) => self.window_opened(id),
             #[cfg(target_os = "macos")]

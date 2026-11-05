@@ -16,7 +16,6 @@ use cosmic::widget::icon::{self, Icon};
 
 pub const GEAR: &[u8] = include_bytes!("../../resources/icons/phosphor/gear.svg");
 pub const MICROPHONE: &[u8] = include_bytes!("../../resources/icons/phosphor/microphone.svg");
-pub const KEYBOARD: &[u8] = include_bytes!("../../resources/icons/phosphor/keyboard.svg");
 pub const BRAIN: &[u8] = include_bytes!("../../resources/icons/phosphor/brain.svg");
 pub const PLUG: &[u8] = include_bytes!("../../resources/icons/phosphor/plug.svg");
 pub const WARNING: &[u8] = include_bytes!("../../resources/icons/phosphor/warning.svg");
@@ -28,10 +27,10 @@ pub const DOTS_THREE_VERTICAL: &[u8] =
 pub const ARROWS_CLOCKWISE: &[u8] =
     include_bytes!("../../resources/icons/phosphor/arrows-clockwise.svg");
 pub const PLAY: &[u8] = include_bytes!("../../resources/icons/phosphor/play.svg");
+pub const SPEAKER_HIGH: &[u8] = include_bytes!("../../resources/icons/phosphor/speaker-high.svg");
 pub const STOP: &[u8] = include_bytes!("../../resources/icons/phosphor/stop.svg");
 pub const GIT_BRANCH: &[u8] = include_bytes!("../../resources/icons/phosphor/git-branch.svg");
 pub const BOOKS: &[u8] = include_bytes!("../../resources/icons/phosphor/books.svg");
-pub const CARDS: &[u8] = include_bytes!("../../resources/icons/phosphor/cards.svg");
 pub const X: &[u8] = include_bytes!("../../resources/icons/phosphor/x.svg");
 pub const CIRCLE_NOTCH: &[u8] = include_bytes!("../../resources/icons/phosphor/circle-notch.svg");
 

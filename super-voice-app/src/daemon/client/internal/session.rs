@@ -12,14 +12,19 @@ use super_stt_shared::validation::get_http_socket_path;
 
 /// Scope set the settings app requests. One cached token covers
 /// everything the app does: config + registry (`settings`), the
-/// test-recording panel (`transcribe`), and the `/events` subscription
-/// (`recording_events` for the badge, `audio_visualization` for the
-/// meter, `daemon_status` for model-switch / download / install progress).
+/// test-recording panel (`transcribe`), the test utterance (`speak`), the
+/// cloned-voice library (`voices`), and the `/events` subscription
+/// (`recording_events` and `playback_events` for the two badges,
+/// `audio_visualization` for the meters, `daemon_status` for model-switch /
+/// download / install progress).
 pub(crate) const SETTINGS_SCOPES: &[&str] = &[
     "settings",
     "secrets",
     "transcribe",
     "recording_events",
+    "speak",
+    "voices",
+    "playback_events",
     "audio_visualization",
     "daemon_status",
 ];

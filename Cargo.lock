@@ -7211,8 +7211,10 @@ version = "0.3.0-beta.2"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
+ "cpal 0.18.2",
  "dirs 7.0.0",
  "futures-util",
+ "hound",
  "http-body-util",
  "hyper",
  "hyper-util",

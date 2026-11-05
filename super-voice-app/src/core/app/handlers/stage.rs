@@ -149,6 +149,11 @@ impl AppModel {
         stage: BlockStage,
         block: StageState,
     ) -> Task<cosmic::Action<Message>> {
+        // The synthesis model decides what the Voices tab offers: whether it
+        // clones at all, and in which voices.
+        let voices_changed = stage == BlockStage::Synthesis
+            && (self.synthesis.selection() != block.selection()
+                || self.synthesis.loaded != block.loaded);
         match stage {
             BlockStage::PostProcessing => self.post_processor = block,
             BlockStage::Synthesis => self.synthesis = block,
@@ -173,6 +178,13 @@ impl AppModel {
             selection.map_or_else(Task::none, |(model, source)| {
                 self.stage_selection_if_unstaged(stage.stage(), &model, &source)
             }),
+            if voices_changed {
+                Task::done(cosmic::Action::App(Message::Voices(
+                    crate::ui::messages::VoicesMessage::Refresh,
+                )))
+            } else {
+                Task::none()
+            },
         ])
     }
 

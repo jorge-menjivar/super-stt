@@ -10,51 +10,52 @@ use std::collections::HashMap;
 
 use super::{AppModel, DeviceState};
 
-/// Builds the navigation bar with all Super Voice pages inserted in order.
+/// Builds the navigation bar: what both features share, then a section per
+/// feature, then the app's own settings, split by dividers. Each feature's
+/// pages are tabs of its section.
 fn build_nav() -> nav_bar::Model {
+    use crate::state::Section;
     let mut nav = nav_bar::Model::default();
 
-    // Models is the primary page (the active backend) — first in the rail and
-    // active on launch. Library (manage/install backends) sits directly below.
+    // Models is the primary page (every stage's active backend) — first in the
+    // rail and active on launch. Library (manage/install backends) sits
+    // directly below.
     nav.insert()
         .text("Models")
-        .data::<crate::state::Page>(crate::state::Page::Models)
+        .data::<Section>(Section::Models)
         .icon(icons::phosphor(icons::BRAIN))
         .activate();
 
     nav.insert()
         .text("Library")
-        .data::<crate::state::Page>(crate::state::Page::Library)
+        .data::<Section>(Section::Library)
         .icon(icons::phosphor(icons::BOOKS));
 
     nav.insert()
-        .text("Contexts")
-        .data::<crate::state::Page>(crate::state::Page::Contexts)
-        .icon(icons::phosphor(icons::CARDS));
+        .text("Speech to text")
+        .data::<Section>(Section::SpeechToText)
+        .icon(icons::phosphor(icons::MICROPHONE))
+        .divider_above(true);
+
+    nav.insert()
+        .text("Text to speech")
+        .data::<Section>(Section::TextToSpeech)
+        .icon(icons::phosphor(icons::SPEAKER_HIGH));
 
     nav.insert()
         .text("Customization")
-        .data::<crate::state::Page>(crate::state::Page::Customization)
-        .icon(icons::phosphor(icons::GEAR));
-
-    nav.insert()
-        .text("Recording")
-        .data::<crate::state::Page>(crate::state::Page::Recording)
-        .icon(icons::phosphor(icons::MICROPHONE));
-
-    nav.insert()
-        .text("Input Simulation")
-        .data::<crate::state::Page>(crate::state::Page::InputSimulation)
-        .icon(icons::phosphor(icons::KEYBOARD));
+        .data::<Section>(Section::Customization)
+        .icon(icons::phosphor(icons::GEAR))
+        .divider_above(true);
 
     nav.insert()
         .text("Connection")
-        .data::<crate::state::Page>(crate::state::Page::Connection)
+        .data::<Section>(Section::Connection)
         .icon(icons::phosphor(icons::PLUG));
 
     nav.insert()
         .text("Updates")
-        .data::<crate::state::Page>(crate::state::Page::Updates)
+        .data::<Section>(Section::Updates)
         .icon(icons::phosphor(icons::ARROWS_CLOCKWISE));
 
     nav
@@ -138,6 +139,10 @@ impl AppModel {
             post_processor: crate::daemon::client::StageState::default(),
             synthesis: crate::daemon::client::StageState::default(),
             voice: crate::state::VoiceState::default(),
+            speech_to_text_tab: crate::state::Page::Recording,
+            text_to_speech_tab: crate::state::Page::Speech,
+            speech: crate::state::SpeechState::default(),
+            voices: crate::state::voices::VoicesState::default(),
             staged_picks: crate::state::staged_picks::StagedPicks::default(),
             device_offers: crate::state::device_offers::DeviceOffers::default(),
             stage_catalog: crate::state::stage_catalog::StageCatalog::default(),
