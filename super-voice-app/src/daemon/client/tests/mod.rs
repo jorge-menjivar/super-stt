@@ -22,3 +22,4 @@ mod session;
 mod settings;
 mod transcribe;
 mod update;
+mod voice;

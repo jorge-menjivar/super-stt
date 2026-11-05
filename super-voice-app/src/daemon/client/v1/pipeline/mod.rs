@@ -18,6 +18,7 @@ pub(crate) mod device;
 pub(crate) mod language;
 pub(crate) mod model;
 pub(crate) mod stage;
+pub(crate) mod voice;
 
 use crate::state::Stage;
 use super_stt_shared::daemon::http_client::HttpResult;

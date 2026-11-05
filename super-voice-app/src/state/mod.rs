@@ -13,6 +13,7 @@ pub mod stage;
 pub mod stage_catalog;
 pub mod staged_picks;
 pub mod update;
+pub mod voice;
 
 // Re-export commonly used types
 pub use models::{
@@ -20,3 +21,4 @@ pub use models::{
     ModelsTab, Page, RecordingStatus,
 };
 pub use stage::{BlockStage, Stage};
+pub use voice::{VoiceChoice, VoiceResolution, VoiceState};

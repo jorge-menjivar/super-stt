@@ -104,6 +104,8 @@ pub enum ErrorScope {
     /// The Models page's Post-processing section: post-processor toggle and
     /// model selection saves.
     PostProcessing,
+    /// The Models page's Synthesis section: its model and voice saves.
+    Synthesis,
     /// The Contexts page: a failed list fetch, activate, or delete. A failed
     /// *save* is not here — it belongs in the editor that caused it, beside the
     /// field the user has to fix.

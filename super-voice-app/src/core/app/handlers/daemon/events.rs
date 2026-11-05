@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, DeviceState};
-use crate::state::Stage;
+use crate::state::{BlockStage, Stage};
 use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message, UpdateMessage};
 use cosmic::prelude::*;
 use log::{debug, info, warn};
@@ -83,6 +83,10 @@ impl AppModel {
         event: &NotificationEvent,
     ) -> Option<Task<cosmic::Action<Message>>> {
         info!("Received daemon event: {:?}", event.data);
+        // Text to speech's events have a type of their own, and only one stage.
+        if feature_of(&event.data) == Some("tts") {
+            return self.process_synthesis_event(&event.data);
+        }
         // Typed deserialize replaces the former hand-matched `.get("status")` /
         // `.get("<field>")` reads: a field rename/typo is now a compile error, not
         // a silent no-op (audit 2 Tier 2 #9). The injected `timestamp` key is
@@ -105,7 +109,7 @@ impl AppModel {
                 // and this is the only notice of a load it started itself (at
                 // startup, say) or one another client asked for.
                 Some(crate::core::app::handlers::stage::load_block(
-                    crate::state::BlockStage::PostProcessing,
+                    BlockStage::PostProcessing,
                 ))
             }
             DaemonStatusEvent::Ready {
@@ -150,64 +154,7 @@ impl AppModel {
                 self.set_device_switching(target_device, status_message);
                 None
             }
-            DaemonStatusEvent::SettingsChanged { setting } => {
-                // A setting changed — possibly from another client, or this
-                // very client's own change coming back over SSE.
-                match setting.as_str() {
-                    "language" => {
-                        // Re-fetch the language state so a per-model button that
-                        // follows the global value, and the global card, reflect
-                        // the new value.
-                        // Every pair answered for, not just one: both stages
-                        // show a language control, and a block that follows the
-                        // global value goes stale on either card.
-                        let pairs: Vec<(Stage, String, String)> =
-                            self.language.model_languages.pairs().collect();
-                        let mut tasks = vec![self.load_primary_language()];
-                        tasks.extend(pairs.into_iter().map(|(stage, source, model)| {
-                            self.load_model_language(stage, &source, model)
-                        }));
-                        Some(Task::batch(tasks))
-                    }
-                    // Another client (or this one) changed the post-processor.
-                    // Re-read it so the section shows the current selection and
-                    // its live `loaded` state.
-                    "post_processor" => Some(crate::core::app::handlers::stage::load_block(
-                        crate::state::BlockStage::PostProcessing,
-                    )),
-                    // A context was added, edited, deleted, or put in force.
-                    // One topic covers the whole family because the answer to
-                    // any of them is the same: re-read the list. The open
-                    // editor is deliberately untouched — see
-                    // `ContextsState::replace`.
-                    "contexts" => Some(Task::done(cosmic::Action::App(Message::Contexts(
-                        crate::ui::messages::ContextsMessage::Reload,
-                    )))),
-                    // Both self-update settings need something beyond a plain
-                    // `SettingsChanged` no-op, but *what* they need differs —
-                    // see `self_update_setting_route`'s doc comment for why
-                    // `update_beta_optin` can't just reuse the cached-refresh
-                    // path `update_check_enabled` uses.
-                    other => match self_update_setting_route(other) {
-                        Some(SelfUpdateSettingRoute::RefreshCachedStatus) => {
-                            Some(Task::batch(vec![
-                                crate::core::app::handlers::tasks::load_update_check_enabled(),
-                                crate::core::app::handlers::tasks::refresh_update_status(),
-                            ]))
-                        }
-                        Some(SelfUpdateSettingRoute::ForceRecheck) => {
-                            // `CheckNow`'s `if self.update.checking { return }`
-                            // guard makes this a no-op for the app's own
-                            // self-triggered change (its `BetaOptinToggled`
-                            // already chains `CheckNow`), while a genuine
-                            // cross-app change still gets a correct fresh
-                            // recompute.
-                            Some(self.handle_update_messages(UpdateMessage::CheckNow))
-                        }
-                        None => None,
-                    },
-                }
-            }
+            DaemonStatusEvent::SettingsChanged { setting } => self.handle_setting_changed(&setting),
             // Stage 2's load-start is the card's only cue for a load with
             // nothing to download, and for one this app did not ask for.
             DaemonStatusEvent::LoadingModel { new_model, stage } if is_post_processing(stage) => {
@@ -311,6 +258,121 @@ impl AppModel {
         self.load_model_language(Stage::Transcription, &source, model)
     }
 
+    /// A setting changed — possibly from another client, or this very client's
+    /// own change coming back over SSE. Either feature's, or the daemon's own:
+    /// a setting means the same thing whichever names it.
+    fn handle_setting_changed(&mut self, setting: &str) -> Option<Task<cosmic::Action<Message>>> {
+        match setting {
+            "language" => {
+                // Re-fetch the language state so a per-model button that
+                // follows the global value, and the global card, reflect
+                // the new value.
+                // Every pair answered for, not just one: both stages
+                // show a language control, and a block that follows the
+                // global value goes stale on either card.
+                let pairs: Vec<(Stage, String, String)> =
+                    self.language.model_languages.pairs().collect();
+                let mut tasks = vec![self.load_primary_language()];
+                tasks.extend(
+                    pairs.into_iter().map(|(stage, source, model)| {
+                        self.load_model_language(stage, &source, model)
+                    }),
+                );
+                Some(Task::batch(tasks))
+            }
+            // Another client (or this one) changed the post-processor.
+            // Re-read it so the section shows the current selection and
+            // its live `loaded` state.
+            "post_processor" => Some(crate::core::app::handlers::stage::load_block(
+                BlockStage::PostProcessing,
+            )),
+            // A context was added, edited, deleted, or put in force.
+            // One topic covers the whole family because the answer to
+            // any of them is the same: re-read the list. The open
+            // editor is deliberately untouched — see
+            // `ContextsState::replace`.
+            "contexts" => Some(Task::done(cosmic::Action::App(Message::Contexts(
+                crate::ui::messages::ContextsMessage::Reload,
+            )))),
+            // Both self-update settings need something beyond a plain
+            // `SettingsChanged` no-op, but *what* they need differs —
+            // see `self_update_setting_route`'s doc comment for why
+            // `update_beta_optin` can't just reuse the cached-refresh
+            // path `update_check_enabled` uses.
+            other => match self_update_setting_route(other) {
+                Some(SelfUpdateSettingRoute::RefreshCachedStatus) => Some(Task::batch(vec![
+                    crate::core::app::handlers::tasks::load_update_check_enabled(),
+                    crate::core::app::handlers::tasks::refresh_update_status(),
+                ])),
+                Some(SelfUpdateSettingRoute::ForceRecheck) => {
+                    // `CheckNow`'s `if self.update.checking { return }`
+                    // guard makes this a no-op for the app's own
+                    // self-triggered change (its `BetaOptinToggled`
+                    // already chains `CheckNow`), while a genuine
+                    // cross-app change still gets a correct fresh
+                    // recompute.
+                    Some(self.handle_update_messages(UpdateMessage::CheckNow))
+                }
+                None => None,
+            },
+        }
+    }
+
+    /// Text to speech's events, on its one stage.
+    ///
+    /// Parsed with that feature's own event type: it reports voice preparation,
+    /// which speech to text's has no variant for, and names no stage. The
+    /// match is exhaustive, so an event the feature adds is handled here
+    /// deliberately rather than read as speech to text's.
+    fn process_synthesis_event(
+        &mut self,
+        data: &serde_json::Value,
+    ) -> Option<Task<cosmic::Action<Message>>> {
+        use super_tts_shared::models::protocol::DaemonStatusEvent as SynthesisEvent;
+        let event = match serde_json::from_value::<SynthesisEvent>(data.clone()) {
+            Ok(event) => event,
+            Err(e) => {
+                info!("Unhandled/unparseable text-to-speech event: {e}");
+                return None;
+            }
+        };
+        let refresh = || crate::core::app::handlers::stage::load_block(BlockStage::Synthesis);
+        match event {
+            // The daemon is authoritative about what the stage is running, and
+            // this is the only notice of a load it started itself or another
+            // client asked for.
+            SynthesisEvent::Ready { .. } => {
+                self.model_operations.set_ready(Stage::Synthesis);
+                Some(refresh())
+            }
+            // The card's only cue for a load with nothing to download, and for
+            // one this app did not ask for.
+            SynthesisEvent::LoadingModel { new_model } => {
+                self.set_model_loading(new_model, "Loading model...".to_string(), Stage::Synthesis);
+                None
+            }
+            SynthesisEvent::DeviceSwitchError { error, .. } => {
+                self.set_stage_error(Stage::Synthesis, &error);
+                Some(refresh())
+            }
+            SynthesisEvent::SettingsChanged { setting } => self.handle_setting_changed(&setting),
+            SynthesisEvent::UpdateAvailable { latest_version } => {
+                log::info!("Daemon reports update available: {latest_version}");
+                Some(self.handle_update_messages(UpdateMessage::AvailableEventReceived))
+            }
+            // A backend selected or deselected elsewhere, with no load to
+            // follow it and no `ready` to say so.
+            SynthesisEvent::ActiveBackendChanged { .. } => Some(refresh()),
+            // The `ready` that closes each of these re-reads the stage.
+            SynthesisEvent::ModelSwitched { .. }
+            | SynthesisEvent::SwitchingDevice { .. }
+            | SynthesisEvent::LoadingModelForDevice { .. }
+            // The Voices page's business, not the stage's.
+            | SynthesisEvent::PreparingVoice { .. }
+            | SynthesisEvent::VoicePrepared { .. } => None,
+        }
+    }
+
     pub(in crate::core::app) fn process_download_progress_event(
         &mut self,
         event: &NotificationEvent,
@@ -329,7 +391,7 @@ impl AppModel {
         // The daemon says which stage it is provisioning for, so the progress
         // lands on the card that started it rather than on whichever card
         // happens to render the operation.
-        let stage = Stage::speech_to_text(progress.stage)?;
+        let stage = Stage::from_wire(feature_of(&event.data), progress.stage)?;
         self.apply_download_progress(stage, &progress);
 
         // Handle download completion/failure. The `error` case is fully
@@ -357,6 +419,11 @@ impl AppModel {
         }
         None
     }
+}
+
+/// The feature an event names, or `None` for the daemon's own news.
+fn feature_of(data: &serde_json::Value) -> Option<&str> {
+    data.get("feature").and_then(serde_json::Value::as_str)
 }
 
 /// Whether an event's stage number is post-processing's. Stage 2 reports its

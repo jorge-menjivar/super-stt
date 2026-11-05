@@ -75,6 +75,7 @@ struct StageOperation {
 pub struct ModelOperations {
     transcription: StageOperation,
     post_processor: StageOperation,
+    synthesis: StageOperation,
 }
 
 impl ModelOperations {
@@ -99,6 +100,7 @@ impl ModelOperations {
         match stage {
             Stage::Transcription => &self.transcription,
             Stage::PostProcessing => &self.post_processor,
+            Stage::Synthesis => &self.synthesis,
         }
     }
 
@@ -106,6 +108,7 @@ impl ModelOperations {
         match stage {
             Stage::Transcription => &mut self.transcription,
             Stage::PostProcessing => &mut self.post_processor,
+            Stage::Synthesis => &mut self.synthesis,
         }
     }
 

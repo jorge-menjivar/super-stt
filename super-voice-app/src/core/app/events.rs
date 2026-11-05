@@ -60,11 +60,12 @@ pub(super) fn settings_widget_event_to_message(
         //
         // Both features publish these two, each naming itself in `feature`,
         // and the daemon's own news — an update, a shared setting — names
-        // none. This app takes speech to text's and the daemon's.
+        // none. This app shows both features, so it takes all three; the
+        // handlers read `feature` to find the stage an event is about.
         "daemon_status_changed" | "download_progress"
             if p.get("feature")
                 .and_then(Value::as_str)
-                .is_none_or(|feature| feature == "stt") =>
+                .is_none_or(|feature| matches!(feature, "stt" | "tts")) =>
         {
             widget_event_to_notification(evt)
                 .map(|n| Message::Daemon(DaemonMessage::DaemonEventsReceived(vec![n])))
@@ -276,8 +277,8 @@ mod widget_event_to_notification_tests {
 #[cfg(test)]
 mod feature_filter_tests {
     //! Both features publish `daemon_status_changed` and `download_progress`
-    //! on the daemon's one event stream. A model load in the other feature
-    //! must not move this app's progress bar.
+    //! on the daemon's one event stream, and the app shows both. A feature it
+    //! does not know is dropped rather than read as one of its own.
     use super::*;
     use super_stt_shared::daemon::http_client::WidgetEvent;
 
@@ -293,12 +294,14 @@ mod feature_filter_tests {
     }
 
     #[test]
-    fn this_features_events_are_routed() {
+    fn each_features_events_are_routed() {
         for name in ["daemon_status_changed", "download_progress"] {
-            assert!(
-                settings_widget_event_to_message(&event(name, "stt")).is_some(),
-                "{name} from stt must reach the app"
-            );
+            for feature in ["stt", "tts"] {
+                assert!(
+                    settings_widget_event_to_message(&event(name, feature)).is_some(),
+                    "{name} from {feature} must reach the app"
+                );
+            }
         }
     }
 
@@ -317,11 +320,11 @@ mod feature_filter_tests {
     }
 
     #[test]
-    fn the_other_features_events_are_dropped() {
+    fn an_unknown_features_events_are_dropped() {
         for name in ["daemon_status_changed", "download_progress"] {
             assert!(
-                settings_widget_event_to_message(&event(name, "tts")).is_none(),
-                "{name} from tts is not this app's"
+                settings_widget_event_to_message(&event(name, "ocr")).is_none(),
+                "{name} from a feature the app does not know is not its own"
             );
         }
     }

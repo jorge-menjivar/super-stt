@@ -4,13 +4,14 @@
 //!
 //! Each feature numbers its own pipeline from 1, under its own routes: speech
 //! to text's transcription and post-processing are `/stt/pipeline/1` and
-//! `/stt/pipeline/2`. A bare number names a different stage in each feature,
+//! `/stt/pipeline/2`, and text to speech's synthesis is `/tts/pipeline/1`. A bare number names a different stage in each feature,
 //! so the app addresses a stage by [`Stage`], and the number appears only where
 //! it meets the wire: a route, a response, an event.
 
 use std::fmt;
 
 use super_stt_shared::models::protocol::{POST_PROCESSOR_STAGE, TRANSCRIPTION_STAGE};
+use super_tts_shared::models::protocol::SYNTHESIS_STAGE;
 
 use super::ErrorScope;
 
@@ -21,11 +22,13 @@ pub enum Stage {
     Transcription,
     /// Speech to text's stage 2: that text is rewritten before it is typed.
     PostProcessing,
+    /// Text to speech's stage 1: text becomes speech.
+    Synthesis,
 }
 
 impl Stage {
     /// Every stage, in pipeline order.
-    pub const ALL: [Self; 2] = [Self::Transcription, Self::PostProcessing];
+    pub const ALL: [Self; 3] = [Self::Transcription, Self::PostProcessing, Self::Synthesis];
 
     /// The stage's number in its feature's pipeline: what its route takes and
     /// its events carry.
@@ -34,6 +37,7 @@ impl Stage {
         match self {
             Self::Transcription => TRANSCRIPTION_STAGE,
             Self::PostProcessing => POST_PROCESSOR_STAGE,
+            Self::Synthesis => SYNTHESIS_STAGE,
         }
     }
 
@@ -51,6 +55,7 @@ impl Stage {
     const fn feature(self) -> &'static str {
         match self {
             Self::Transcription | Self::PostProcessing => "stt",
+            Self::Synthesis => "tts",
         }
     }
 
@@ -64,6 +69,18 @@ impl Stage {
             _ => None,
         }
     }
+
+    /// The stage an event names: its `feature`, then its number in that
+    /// feature's pipeline. An event naming no feature is speech to text's, as
+    /// every event was before text to speech joined the daemon.
+    #[must_use]
+    pub fn from_wire(feature: Option<&str>, number: u32) -> Option<Self> {
+        match feature {
+            None | Some("stt") => Self::speech_to_text(number),
+            Some("tts") if number == SYNTHESIS_STAGE => Some(Self::Synthesis),
+            Some(_) => None,
+        }
+    }
 }
 
 impl Stage {
@@ -74,6 +91,7 @@ impl Stage {
         match self {
             Self::Transcription => None,
             Self::PostProcessing => Some(BlockStage::PostProcessing),
+            Self::Synthesis => Some(BlockStage::Synthesis),
         }
     }
 }
@@ -88,17 +106,19 @@ impl Stage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BlockStage {
     PostProcessing,
+    Synthesis,
 }
 
 impl BlockStage {
     /// Every such stage, in pipeline order.
-    pub const ALL: [Self; 1] = [Self::PostProcessing];
+    pub const ALL: [Self; 2] = [Self::PostProcessing, Self::Synthesis];
 
     /// The stage itself.
     #[must_use]
     pub const fn stage(self) -> Stage {
         match self {
             Self::PostProcessing => Stage::PostProcessing,
+            Self::Synthesis => Stage::Synthesis,
         }
     }
 
@@ -107,6 +127,7 @@ impl BlockStage {
     pub const fn error_scope(self) -> ErrorScope {
         match self {
             Self::PostProcessing => ErrorScope::PostProcessing,
+            Self::Synthesis => ErrorScope::Synthesis,
         }
     }
 
@@ -115,6 +136,7 @@ impl BlockStage {
     pub const fn noun(self) -> &'static str {
         match self {
             Self::PostProcessing => "post-processor",
+            Self::Synthesis => "speech model",
         }
     }
 }
@@ -125,6 +147,7 @@ impl fmt::Display for Stage {
         f.write_str(match self {
             Self::Transcription => "transcription",
             Self::PostProcessing => "post-processing",
+            Self::Synthesis => "synthesis",
         })
     }
 }
@@ -137,6 +160,7 @@ mod tests {
     fn each_stage_answers_on_its_features_route() {
         assert_eq!(Stage::Transcription.route(), ("stt", 1));
         assert_eq!(Stage::PostProcessing.route(), ("stt", 2));
+        assert_eq!(Stage::Synthesis.route(), ("tts", 1));
     }
 
     #[test]
@@ -151,9 +175,21 @@ mod tests {
 
     #[test]
     fn a_number_names_the_stage_it_carries() {
-        for stage in Stage::ALL {
+        for stage in [Stage::Transcription, Stage::PostProcessing] {
             assert_eq!(Stage::speech_to_text(stage.number()), Some(stage));
         }
         assert_eq!(Stage::speech_to_text(3), None);
+    }
+
+    /// An event names its feature; one that names none is speech to text's.
+    #[test]
+    fn an_event_names_its_stage_by_feature_and_number() {
+        for stage in Stage::ALL {
+            let (feature, number) = stage.route();
+            assert_eq!(Stage::from_wire(Some(feature), number), Some(stage));
+        }
+        assert_eq!(Stage::from_wire(None, 1), Some(Stage::Transcription));
+        assert_eq!(Stage::from_wire(Some("tts"), 2), None);
+        assert_eq!(Stage::from_wire(Some("ocr"), 1), None);
     }
 }

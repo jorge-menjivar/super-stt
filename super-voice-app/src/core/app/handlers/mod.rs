@@ -13,3 +13,4 @@ mod shell;
 mod stage;
 pub(in crate::core::app) mod tasks;
 mod update;
+pub(in crate::core::app) mod voice;

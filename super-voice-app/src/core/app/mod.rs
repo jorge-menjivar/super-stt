@@ -127,6 +127,10 @@ pub struct AppModel {
     /// this is replaced wholesale by every `Loaded` message rather than being
     /// edited field-by-field.
     pub post_processor: crate::daemon::client::StageState,
+    /// Text to speech's synthesis stage, read back from the daemon.
+    pub synthesis: crate::daemon::client::StageState,
+    /// The synthesis model's voice control.
+    pub voice: crate::state::VoiceState,
     /// What each stage's card has picked but not yet loaded. One store for
     /// every stage: a pick is local until Load commits it, which is true of
     /// every stage's card, so there is no per-stage copy of the rule.

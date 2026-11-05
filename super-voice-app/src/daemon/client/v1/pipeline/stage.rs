@@ -15,11 +15,11 @@
 
 use serde::Deserialize;
 
-use crate::daemon::client::internal::response::{require_success, require_unit};
+use crate::daemon::client::internal::response::require_unit;
 use crate::daemon::client::internal::session::with_settings_token;
 use crate::state::Stage;
-use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
+use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
 
 /// The backend filling one stage, and whether the stage is switched on.
 ///
@@ -51,23 +51,36 @@ fn stage_path(stage: Stage) -> String {
     format!("/{feature}/pipeline/{number}")
 }
 
+/// The reply to a stage read.
+///
+/// Its own type rather than the shared response's, whose stage block types its
+/// `role` with speech to text's roles alone: text to speech's stage reports
+/// `synthesis`, and the shared type would refuse the whole reply. The card has
+/// no use for the role.
+#[derive(Deserialize)]
+struct StageEnvelope {
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    message: Option<String>,
+    /// A daemon that predates the pipeline omits the stage; read that as
+    /// "empty, nothing selected" rather than failing the settings load.
+    #[serde(default)]
+    stage: Option<StageBackend>,
+}
+
 /// Read `stage`'s backend (HTTP `GET /stt/pipeline/{stage}`).
 pub async fn get_stage(stage: Stage) -> HttpResult<StageBackend> {
     with_settings_token(move |socket, token| async move {
-        let resp = require_success(
-            transport::settings_get(socket, &token, &stage_path(stage)).await?,
-            "get_pipeline_stage",
-        )?;
-        // A daemon that predates the pipeline omits the stage; read that as
-        // "empty, nothing selected" rather than failing the settings load.
-        Ok(resp
-            .stage
-            .map(|st| StageBackend {
-                source: st.source,
-                name: st.name,
-                enabled: st.enabled,
-            })
-            .unwrap_or_default())
+        let reply: StageEnvelope = transport::get_json(socket, &token, &stage_path(stage)).await?;
+        if reply.status != "success" {
+            return Err(HttpError::Other(
+                reply
+                    .message
+                    .unwrap_or_else(|| "get_pipeline_stage failed".to_string()),
+            ));
+        }
+        Ok(reply.stage.unwrap_or_default())
     })
     .await
 }

@@ -30,7 +30,8 @@ use crate::daemon::backends::BackendInfo;
 use crate::daemon::client::StageState;
 use crate::daemon::client::{
     clear_stage_backend, get_model_device, list_model_devices, list_stage_backends,
-    list_stage_devices, set_model_device, set_stage_backend, set_stage_model, unload_stage_model,
+    list_stage_devices, reload_stage_model, set_model_device, set_stage_backend, set_stage_model,
+    unload_stage_model,
 };
 use crate::state::device_offers::staged_device;
 use crate::state::{BlockStage, Stage};
@@ -116,6 +117,7 @@ impl AppModel {
                 Task::none()
             }
             StageMessage::Unload { stage } => self.unload_stage(stage),
+            StageMessage::Reload { stage } => self.reload_stage(stage),
             StageMessage::RefreshBlock { stage } => refresh_block(stage),
             StageMessage::BlockLoaded { stage, block } => self.block_loaded(stage, block),
             StageMessage::BlockFailed { stage, message } => {
@@ -137,6 +139,7 @@ impl AppModel {
     pub fn block(&self, stage: BlockStage) -> &StageState {
         match stage {
             BlockStage::PostProcessing => &self.post_processor,
+            BlockStage::Synthesis => &self.synthesis,
         }
     }
 
@@ -148,6 +151,7 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         match stage {
             BlockStage::PostProcessing => self.post_processor = block,
+            BlockStage::Synthesis => self.synthesis = block,
         }
         self.clear_action_error(stage.error_scope());
         // These stages have no completion event of their own: the daemon's
@@ -417,9 +421,26 @@ impl AppModel {
         }
         Task::batch([
             Self::load_staged_devices(stage, source.clone(), model.clone()),
-            // So the card can show the language control before Load.
-            self.load_model_language(stage, &source, model),
+            // So the card can show the language and voice controls before
+            // Load.
+            self.load_model_details(stage, &source, model),
         ])
+    }
+
+    /// Ask what the card shows beside a staged model: its language, and for
+    /// synthesis its voice.
+    fn load_model_details(
+        &self,
+        stage: Stage,
+        source: &str,
+        model: String,
+    ) -> Task<cosmic::Action<Message>> {
+        let voice = if stage == Stage::Synthesis {
+            super::voice::load_model_voice(source, model.clone())
+        } else {
+            Task::none()
+        };
+        Task::batch([self.load_model_language(stage, source, model), voice])
     }
 
     /// Stage the model the daemon reports for `stage`, when the user has no
@@ -444,7 +465,7 @@ impl AppModel {
             .stage_model(stage, source.to_string(), model.to_string());
         Task::batch([
             Self::load_staged_devices(stage, source.to_string(), model.to_string()),
-            self.load_model_language(stage, source, model.to_string()),
+            self.load_model_details(stage, source, model.to_string()),
         ])
     }
 
@@ -611,6 +632,27 @@ impl AppModel {
         })
     }
 
+    /// Bring `stage`'s running model back up on the device it has.
+    ///
+    /// The card shows it loading until the daemon's `ready` re-reads the
+    /// stage, as a Load does.
+    fn reload_stage(&mut self, stage: Stage) -> Task<cosmic::Action<Message>> {
+        let Some(model) = self.loaded_model(stage).map(ToString::to_string) else {
+            return Task::none();
+        };
+        self.set_model_loading(model, "Reloading model...".to_string(), stage);
+        Task::perform(reload_stage_model(stage), move |result| match result {
+            Ok(()) => stage.block().map_or(cosmic::Action::None, |block| {
+                cosmic::Action::App(Message::Stage(StageMessage::RefreshBlock { stage: block }))
+            }),
+            Err(e) => cosmic::Action::App(Message::Stage(StageMessage::LoadFailed {
+                stage,
+                prev_device: String::new(),
+                message: e.to_string(),
+            })),
+        })
+    }
+
     /// Ask the daemon what `model` can run on in `stage` and which device it
     /// already has.
     ///
@@ -658,7 +700,7 @@ impl AppModel {
     /// Both positions at once: the answer depends only on what is installed, so
     /// it is re-asked when the catalog changes rather than when a card opens.
     pub(in crate::core::app) fn load_stage_backends() -> Task<cosmic::Action<Message>> {
-        Task::batch([Stage::Transcription, Stage::PostProcessing].map(|stage| {
+        Task::batch(Stage::ALL.map(|stage| {
             Task::perform(list_stage_backends(stage), move |result| match result {
                 Ok(backends) => {
                     cosmic::Action::App(Message::Stage(StageMessage::StageBackendsLoaded {

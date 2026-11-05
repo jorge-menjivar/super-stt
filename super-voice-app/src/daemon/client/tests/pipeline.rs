@@ -42,6 +42,32 @@ async fn reading_a_stage_reports_the_backend_filling_it() {
     assert!(filled.enabled);
 }
 
+/// Text to speech's stage reports a `synthesis` role, which the shared
+/// response type's speech-to-text roles cannot hold. The stage read takes it
+/// anyway, off that feature's route.
+#[tokio::test]
+async fn text_to_speechs_stage_is_read_off_its_own_route() {
+    let daemon = FakeDaemon::start().await;
+    daemon.reply(Reply::json(&json!({
+        "status": "success",
+        "stage": {
+            "stage": 1,
+            "role": "synthesis",
+            "source": "github.com/super-libre/super-tts-kokoro",
+            "name": "Kokoro",
+            "enabled": true,
+        },
+    })));
+
+    let filled = stage::get_stage(Stage::Synthesis)
+        .await
+        .expect("stage read");
+
+    assert_eq!(daemon.request().path(), "/tts/pipeline/1");
+    assert_eq!(filled.name.as_deref(), Some("Kokoro"));
+    assert!(filled.enabled);
+}
+
 /// Every stage answers the same path, so the position is the only thing that
 /// distinguishes the two requests. It used to be a `&str` constant per stage
 /// and the copies drifted.

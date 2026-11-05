@@ -74,6 +74,18 @@ fn copy(stage: BlockStage) -> Copy {
             sheet_empty: "No installed backend provides a post-processor. Open the Library \
                           to install one.",
         },
+        BlockStage::Synthesis => Copy {
+            none_installed: "Install a text-to-speech backend from the Library to have text \
+                             read aloud.",
+            unselected: "Select a backend to start speaking.",
+            select: "Select synthesis backend",
+            not_loaded: "The selected model isn't loaded. Text can't be spoken until it is.",
+            count: ("model", "models"),
+            sheet_caption: "Pick which backend powers speech. Add and manage backends in your \
+                            Library.",
+            sheet_empty: "No installed backend provides text to speech. Open the Library to \
+                          install one.",
+        },
     }
 }
 
@@ -139,6 +151,15 @@ pub(crate) fn section(app: &AppModel, stage: BlockStage) -> Element<'_, Message>
     card = card
         .push(card_divider())
         .push(control_row(app, stage, backend));
+
+    // The one state in which a synthesis model cannot speak at all, on its own
+    // line: a sentence cannot share the controls' row.
+    if stage == BlockStage::Synthesis
+        && let Some(model) = card_model(app, stage, backend)
+        && let Some(warning) = super::voice::voice_warning(backend, &model, app)
+    {
+        card = card.push(warning);
+    }
 
     // Downloading, loading, or the failure that ended it — shown here when the
     // operation is this stage's, so its progress is on the card that started
@@ -300,10 +321,21 @@ fn control_row<'a>(
         {
             summary = summary.push(devices);
         }
+        // Voice before language: it is the one a user changes between
+        // utterances, and the one that decides whether a cloning model can
+        // speak at all.
+        if stage == BlockStage::Synthesis
+            && let Some(voice) = super::voice::voice_dropdown(backend, &model, app)
+        {
+            summary = summary.push(voice);
+        }
         // The same control the transcription card shows beside its active
         // model, from the same function.
         if let Some(lang_button) = language_button(stage.stage(), backend, &model, app) {
             summary = summary.push(lang_button);
+        }
+        if stage == BlockStage::Synthesis {
+            summary = summary.push(reload_button(app, stage));
         }
         return summary
             .push(
@@ -354,6 +386,15 @@ fn control_row<'a>(
         picker_row = picker_row.push(devices);
     }
 
+    // The voice, for the same model, before its language as on the running
+    // card.
+    if stage == BlockStage::Synthesis
+        && let Some(model) = shown.as_deref()
+        && let Some(voice) = super::voice::voice_dropdown(backend, model, app)
+    {
+        picker_row = picker_row.push(voice);
+    }
+
     // Per-model language, inline after the device dropdown — the same position
     // and the same function as the transcription card's staged picker.
     if let Some(model) = shown.as_deref()
@@ -382,6 +423,39 @@ fn control_row<'a>(
                 )),
         )
         .into()
+}
+
+/// Reload: bring the running model back up on the same device, for the case
+/// the daemon cannot see — a secret edited by another tool, a model file
+/// replaced underneath it. A glyph with its word in the tooltip, like the
+/// header's ✕, so the pickers have room. Disabled while an operation is in
+/// flight, so a second click cannot race the first.
+fn reload_button(app: &AppModel, stage: BlockStage) -> Element<'_, Message> {
+    super::surface::rounded_tooltip(
+        widget::button::icon(icons::phosphor_handle(icons::ARROWS_CLOCKWISE))
+            .class(cosmic::theme::Button::Standard)
+            .on_press_maybe(app.is_model_ready(stage.stage()).then_some(Message::Stage(
+                StageMessage::Reload {
+                    stage: stage.stage(),
+                },
+            ))),
+        text::body("Reload this model"),
+        widget::tooltip::Position::Bottom,
+    )
+}
+
+/// The model the card's controls act on: the running one, or the one its
+/// pickers show.
+fn card_model(app: &AppModel, stage: BlockStage, backend: &BackendInfo) -> Option<String> {
+    let block = app.block(stage);
+    if block.enabled {
+        block.model.clone()
+    } else {
+        shown_model(
+            app.staged_picks.for_backend(stage.stage(), &backend.source),
+            block.model.as_deref(),
+        )
+    }
 }
 
 /// Shown when post-processors are installed but none is chosen: a prompt and

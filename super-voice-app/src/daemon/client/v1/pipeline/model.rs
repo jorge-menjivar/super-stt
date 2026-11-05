@@ -232,6 +232,25 @@ pub async fn unload_stage_model(stage: Stage) -> HttpResult<()> {
     .await
 }
 
+/// Bring `stage`'s running model back up on the device it has
+/// (HTTP `POST /{feature}/pipeline/{stage}/model/reload`).
+///
+/// For a change the daemon cannot see: a secret edited by another tool, a
+/// model file replaced underneath it.
+pub async fn reload_stage_model(stage: Stage) -> HttpResult<()> {
+    let (feature, number) = stage.route();
+    let path = format!("/{feature}/pipeline/{number}/model/reload");
+    with_settings_token(move |socket, token| {
+        let path = path.clone();
+        async move {
+            let resp =
+                transport::settings_post(socket, &token, &path, &serde_json::json!({})).await?;
+            require_unit(resp, "reload_stage_model")
+        }
+    })
+    .await
+}
+
 /// Abandon the load `stage` has in flight
 /// (HTTP `POST /stt/pipeline/{stage}/model/cancel`).
 ///

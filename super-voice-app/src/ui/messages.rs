@@ -30,6 +30,7 @@ pub enum Message {
     ModelsPage(ModelsPageMessage),
     /// Filling a pipeline stage, for every stage.
     Stage(StageMessage),
+    Voice(VoiceMessage),
     Device(DeviceMessage),
     Download(DownloadMessage),
     PreviewTyping(PreviewTypingMessage),
@@ -409,6 +410,8 @@ pub enum StageMessage {
     },
     /// User clicked Unload. Drops the model but keeps the backend selected.
     Unload { stage: Stage },
+    /// User clicked Reload: bring the running model back up where it is.
+    Reload { stage: Stage },
     /// Re-read `stage`'s block: a write succeeded, so read what the daemon
     /// holds rather than assume the write took effect as sent.
     RefreshBlock { stage: BlockStage },
@@ -420,6 +423,33 @@ pub enum StageMessage {
     },
     /// Re-reading `stage`'s block failed; the message is shown on its card.
     BlockFailed { stage: BlockStage, message: String },
+}
+
+/// The synthesis model's voice.
+#[derive(Debug, Clone)]
+pub enum VoiceMessage {
+    /// Resolution block for `(source, model)`, from
+    /// `GET /tts/pipeline/{stage}/model/{model}/voice`.
+    ModelVoiceLoaded {
+        source: String,
+        model: String,
+        block: crate::state::VoiceResolution,
+    },
+    /// The voices `(source, model)` can be pinned to.
+    ///
+    /// A separate message from the block for the same reason the language pair
+    /// is split: choosing a voice rewrites the block and leaves this list as it
+    /// was, so folding the two would blank the picker on every pick.
+    ModelVoicesListed {
+        source: String,
+        model: String,
+        voices: Vec<crate::state::VoiceChoice>,
+    },
+    /// The user picked a voice for the shown model, or cleared it back to the
+    /// model's own default (`None`).
+    ModelVoiceSelected(Option<String>),
+    /// A voice request failed; carries what to show.
+    VoiceError(String),
 }
 
 /// Recording stop-mode setting.
@@ -773,6 +803,7 @@ macro_rules! message_from {
 
 message_from! {
     Shell => ShellMessage,
+    Voice => VoiceMessage,
     Daemon => DaemonMessage,
     Model => ModelMessage,
     ModelsPage => ModelsPageMessage,

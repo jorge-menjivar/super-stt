@@ -12,6 +12,7 @@ mod stage_section;
 mod status;
 mod surface;
 mod tabs;
+mod voice;
 
 use active::active_backend_card;
 use download::download_split;
@@ -195,7 +196,7 @@ pub(crate) fn gpu_summary(app: &AppModel) -> Option<Element<'_, Message>> {
 
 /// Models page view: one section per pipeline stage — Transcription (the
 /// active backend's card, or an empty state that opens the "Select a backend"
-/// sheet) and Post-processing. Installing and managing backends lives on the
+/// sheet), Post-processing, and text to speech's Synthesis. Installing and managing backends lives on the
 /// Library page; selecting them happens here.
 ///
 /// The two sections are deliberately the same shape, because the stages are:
@@ -223,7 +224,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
     // mid-description, missing the model picker below it. Scrolling gives both
     // their natural height instead, so a short window scrolls rather than
     // truncates. Only the body scrolls; the page title stays put.
-    let body = widget::column::with_capacity(4)
+    let body = widget::column::with_capacity(6)
         .push(page_container(section_heading("Transcription")))
         .push(transcription)
         // The post-processor is selected independently of the transcription
@@ -232,6 +233,13 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
         .push(page_container(stage_section::section(
             app,
             crate::state::BlockStage::PostProcessing,
+        )))
+        // Text to speech's one stage, in the same shape: it reads back from
+        // the daemon like post-processing.
+        .push(page_container(section_heading("Synthesis")))
+        .push(page_container(stage_section::section(
+            app,
+            crate::state::BlockStage::Synthesis,
         )));
 
     widget::column::with_capacity(2)

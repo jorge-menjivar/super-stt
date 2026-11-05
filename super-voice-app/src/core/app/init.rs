@@ -136,6 +136,8 @@ impl AppModel {
             // Replaced by the daemon's own state as soon as the settings load
             // completes; the default is the daemon's default too (off).
             post_processor: crate::daemon::client::StageState::default(),
+            synthesis: crate::daemon::client::StageState::default(),
+            voice: crate::state::VoiceState::default(),
             staged_picks: crate::state::staged_picks::StagedPicks::default(),
             device_offers: crate::state::device_offers::DeviceOffers::default(),
             stage_catalog: crate::state::stage_catalog::StageCatalog::default(),
