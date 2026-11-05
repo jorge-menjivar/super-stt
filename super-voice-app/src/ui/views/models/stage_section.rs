@@ -120,8 +120,9 @@ fn selected_backend(app: &AppModel, stage: BlockStage) -> Option<&BackendInfo> {
 }
 
 /// `stage`'s section: a card once a backend is selected, and a plain prompt
-/// line before that.
-pub(crate) fn section(app: &AppModel, stage: BlockStage) -> Element<'_, Message> {
+/// line before that. `narrow` gives the card's actions and buttons lines of
+/// their own (see [`super::surface::NARROW_CARD`]).
+pub(crate) fn section(app: &AppModel, stage: BlockStage, narrow: bool) -> Element<'_, Message> {
     let copy = copy(stage);
     let block = app.block(stage);
     // Nothing installed serves one: say so, rather than offering a picker that
@@ -142,7 +143,7 @@ pub(crate) fn section(app: &AppModel, stage: BlockStage) -> Element<'_, Message>
     let spacing = cosmic::theme::spacing();
     let mut card = widget::column::with_capacity(6)
         .spacing(spacing.space_s)
-        .push(header(stage, backend, app));
+        .push(header(stage, backend, app, narrow));
 
     if let Some(chips) = chip_row(stage, &copy, backend, app) {
         card = card.push(chips);
@@ -150,7 +151,7 @@ pub(crate) fn section(app: &AppModel, stage: BlockStage) -> Element<'_, Message>
 
     card = card
         .push(card_divider())
-        .push(control_row(app, stage, backend));
+        .push(control_row(app, stage, backend, narrow));
 
     // The one state in which a synthesis model cannot speak at all, on its own
     // line: a sentence cannot share the controls' row.
@@ -192,6 +193,7 @@ fn header<'a>(
     stage: BlockStage,
     backend: &'a BackendInfo,
     app: &'a AppModel,
+    narrow: bool,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let source = backend.source.clone();
@@ -210,18 +212,16 @@ fn header<'a>(
     .spacing(spacing.space_xs)
     .align_y(Alignment::Center);
 
-    row![
+    super::surface::card_header(
+        narrow,
         backend_glyph_tile(),
         card_title_block(
             backend.name.clone(),
             &backend.version,
             backend_description(app, &source),
         ),
-        actions,
-    ]
-    .spacing(spacing.space_s)
-    .align_y(Alignment::Center)
-    .into()
+        actions.into(),
+    )
 }
 
 /// Capability chips for the selected backend, plus a count of the
@@ -292,6 +292,7 @@ fn control_row<'a>(
     app: &'a AppModel,
     stage: BlockStage,
     backend: &'a BackendInfo,
+    narrow: bool,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let block = app.block(stage);
@@ -311,15 +312,14 @@ fn control_row<'a>(
         let label = text::body(format!("Active: {model}{device_suffix}"))
             .class(cosmic::theme::Text::Accent)
             .width(Length::Fill);
-        let mut summary = row![label]
-            .spacing(spacing.space_xs)
-            .align_y(Alignment::Center);
+        let mut pickers = Vec::new();
+        let mut buttons = Vec::new();
         // The same picker the disabled card shows, in the same place: a running
         // post-processor's device can be changed in place too.
         if let Some(devices) =
             super::active::device_dropdown(stage.stage(), &backend.source, &model, app)
         {
-            summary = summary.push(devices);
+            pickers.push(devices);
         }
         // Voice before language: it is the one a user changes between
         // utterances, and the one that decides whether a cloning model can
@@ -327,25 +327,31 @@ fn control_row<'a>(
         if stage == BlockStage::Synthesis
             && let Some(voice) = super::voice::voice_dropdown(backend, &model, app)
         {
-            summary = summary.push(voice);
+            pickers.push(voice);
         }
         // The same control the transcription card shows beside its active
         // model, from the same function.
         if let Some(lang_button) = language_button(stage.stage(), backend, &model, app) {
-            summary = summary.push(lang_button);
+            buttons.push(lang_button);
         }
         if stage == BlockStage::Synthesis {
-            summary = summary.push(reload_button(app, stage));
+            buttons.push(reload_button(app, stage));
         }
-        return summary
-            .push(
-                button::standard("Unload")
-                    .leading_icon(icons::phosphor_handle(icons::STOP))
-                    .on_press(Message::Stage(StageMessage::Unload {
-                        stage: stage.stage(),
-                    })),
-            )
-            .into();
+        buttons.push(
+            button::standard("Unload")
+                .leading_icon(icons::phosphor_handle(icons::STOP))
+                .on_press(Message::Stage(StageMessage::Unload {
+                    stage: stage.stage(),
+                }))
+                .into(),
+        );
+        return super::surface::control_layout(
+            narrow,
+            spacing.space_xs,
+            label.into(),
+            pickers,
+            buttons,
+        );
     }
 
     let models = stage_models(app, stage, backend);
@@ -368,10 +374,8 @@ fn control_row<'a>(
     .placeholder("Select model")
     .width(Length::FillPortion(2));
 
-    let mut picker_row = row![dropdown]
-        .spacing(spacing.space_s)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
+    let mut pickers = Vec::new();
+    let mut buttons = Vec::new();
 
     // Device dropdown — keyed on the same model the dropdown above shows, so
     // the two pickers cannot disagree about which model the card is acting on.
@@ -383,7 +387,7 @@ fn control_row<'a>(
         && let Some(devices) =
             super::active::device_dropdown(stage.stage(), &backend.source, model, app)
     {
-        picker_row = picker_row.push(devices);
+        pickers.push(devices);
     }
 
     // The voice, for the same model, before its language as on the running
@@ -392,7 +396,7 @@ fn control_row<'a>(
         && let Some(model) = shown.as_deref()
         && let Some(voice) = super::voice::voice_dropdown(backend, model, app)
     {
-        picker_row = picker_row.push(voice);
+        pickers.push(voice);
     }
 
     // Per-model language, inline after the device dropdown — the same position
@@ -400,7 +404,7 @@ fn control_row<'a>(
     if let Some(model) = shown.as_deref()
         && let Some(lang_button) = language_button(stage.stage(), backend, model, app)
     {
-        picker_row = picker_row.push(lang_button);
+        buttons.push(lang_button);
     }
 
     // Load — enabled only when a model is staged AND (a device is staged OR the
@@ -412,17 +416,17 @@ fn control_row<'a>(
         .is_some_and(|m| model_is_online(backend, m));
     let staged_ok =
         selected.is_some() && (app.staged_picks.device(stage.stage()).is_some() || staged_online);
-    picker_row
-        .push(
-            button::suggested("Load model")
-                .leading_icon(icons::phosphor_handle(icons::PLAY))
-                .on_press_maybe((staged_ok && app.is_model_ready(stage.stage())).then_some(
-                    Message::Stage(StageMessage::Load {
-                        stage: stage.stage(),
-                    }),
-                )),
-        )
-        .into()
+    buttons.push(
+        button::suggested("Load model")
+            .leading_icon(icons::phosphor_handle(icons::PLAY))
+            .on_press_maybe((staged_ok && app.is_model_ready(stage.stage())).then_some(
+                Message::Stage(StageMessage::Load {
+                    stage: stage.stage(),
+                }),
+            ))
+            .into(),
+    );
+    super::surface::control_layout(narrow, spacing.space_s, dropdown.into(), pickers, buttons)
 }
 
 /// Reload: bring the running model back up on the same device, for the case

@@ -433,3 +433,77 @@ pub(in crate::ui::views) fn accent_button_class(radius: [f32; 4]) -> cosmic::the
         pressed: Box::new(move |_, _| style(0.34)),
     }
 }
+
+/// The width below which a card gives what sits beside its title, and the
+/// buttons of its control row, lines of their own instead of squeezing them
+/// into one: a narrow window, or a wide one with the side panel open.
+pub(super) const NARROW_CARD: f32 = 480.0;
+
+/// A card's header: its glyph tile and title block, then its actions. On a
+/// narrow card the actions take a line of their own, at its end, so the title
+/// keeps the width it needs to be read.
+pub(super) fn card_header<'a>(
+    narrow: bool,
+    glyph: Element<'a, Message>,
+    title: Element<'a, Message>,
+    actions: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let spacing = cosmic::theme::spacing();
+    if narrow {
+        widget::column::with_capacity(2)
+            .push(
+                row![glyph, title]
+                    .spacing(spacing.space_s)
+                    .align_y(cosmic::iced::Alignment::Center),
+            )
+            .push(
+                row![widget::space::horizontal(), actions].align_y(cosmic::iced::Alignment::Center),
+            )
+            .spacing(spacing.space_xs)
+            .into()
+    } else {
+        row![glyph, title, actions]
+            .spacing(spacing.space_s)
+            .align_y(cosmic::iced::Alignment::Center)
+            .into()
+    }
+}
+
+/// A card's control row: `lead` (the running model, or the model picker), the
+/// other pickers, then the buttons.
+///
+/// One line on a wide card. On a narrow one each group takes a line, the
+/// buttons at the end of the last, so no dropdown is squeezed below the width
+/// of what it shows.
+pub(super) fn control_layout<'a>(
+    narrow: bool,
+    gap: u16,
+    lead: Element<'a, Message>,
+    pickers: Vec<Element<'a, Message>>,
+    buttons: Vec<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let line = |items: Vec<Element<'a, Message>>| {
+        items
+            .into_iter()
+            .fold(row![].spacing(gap), widget::Row::push)
+            .align_y(cosmic::iced::Alignment::Center)
+    };
+    if !narrow {
+        let mut all = vec![lead];
+        all.extend(pickers);
+        all.extend(buttons);
+        return line(all).width(Length::Fill).into();
+    }
+    let mut lines = widget::column::with_capacity(3)
+        .spacing(cosmic::theme::spacing().space_xs)
+        .push(lead);
+    if !pickers.is_empty() {
+        lines = lines.push(line(pickers).width(Length::Fill));
+    }
+    if !buttons.is_empty() {
+        let mut end = vec![widget::space::horizontal().into()];
+        end.extend(buttons);
+        lines = lines.push(line(end).width(Length::Fill));
+    }
+    lines.into()
+}

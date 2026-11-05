@@ -87,10 +87,12 @@ pub(super) fn backend_header(
 
 /// The selected backend, shown above the tabs: its model picker + Select, an
 /// in-card status line (loading / download progress / error), Configure, and
-/// Deselect.
+/// Deselect. `narrow` gives the header's actions and the control row's buttons
+/// lines of their own (see [`super::surface::NARROW_CARD`]).
 pub(super) fn active_backend_card<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
+    narrow: bool,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let online = backend_is_online(backend);
@@ -117,13 +119,12 @@ pub(super) fn active_backend_card<'a>(
     ]
     .spacing(spacing.space_xs)
     .align_y(Alignment::Center);
-    let header = row![
+    let header = super::surface::card_header(
+        narrow,
         backend_glyph_tile(),
         super::surface::card_title_block(backend.name.clone(), &backend.version, description),
-        actions,
-    ]
-    .spacing(spacing.space_s)
-    .align_y(Alignment::Center);
+        actions.into(),
+    );
 
     let mut card = widget::column::with_capacity(6)
         .spacing(spacing.space_s)
@@ -183,9 +184,9 @@ pub(super) fn active_backend_card<'a>(
     if missing.is_empty() {
         card = card.push(card_divider());
         if model_loaded {
-            card = card.push(loaded_model_summary(backend, app));
+            card = card.push(loaded_model_summary(backend, app, narrow));
         } else {
-            card = card.push(staged_model_picker(backend, app));
+            card = card.push(staged_model_picker(backend, app, narrow));
         }
     }
 
@@ -264,6 +265,7 @@ pub(super) fn resolved_suffix(running: &str, chosen: Option<&str>) -> String {
 pub(super) fn loaded_model_summary<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
+    narrow: bool,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let label = text::body(format!(
@@ -276,9 +278,8 @@ pub(super) fn loaded_model_summary<'a>(
     ))
     .class(cosmic::theme::Text::Accent)
     .width(Length::Fill);
-    let mut summary = row![label]
-        .spacing(spacing.space_xs)
-        .align_y(Alignment::Center);
+    let mut pickers = Vec::new();
+    let mut buttons = Vec::new();
     // The same picker the unloaded card shows, in the same place. Changing it
     // now reloads the model onto the new device rather than staging a choice
     // for a Load that is not coming.
@@ -288,25 +289,25 @@ pub(super) fn loaded_model_summary<'a>(
         &app.current_model,
         app,
     ) {
-        summary = summary.push(devices);
+        pickers.push(devices);
     }
     // Per-model language trigger, inline before Unload, for a multilingual model.
     if let Some(lang_button) =
         language_button(Stage::Transcription, backend, &app.current_model, app)
     {
-        summary = summary.push(lang_button);
+        buttons.push(lang_button);
     }
     // A leading stop glyph fronts the Unload label, mirroring the Load button's
     // play icon so load/unload read as a play/stop pair.
-    summary
-        .push(
-            button::standard("Unload")
-                .leading_icon(icons::phosphor_handle(icons::STOP))
-                .on_press(Message::Stage(StageMessage::Unload {
-                    stage: Stage::Transcription,
-                })),
-        )
-        .into()
+    buttons.push(
+        button::standard("Unload")
+            .leading_icon(icons::phosphor_handle(icons::STOP))
+            .on_press(Message::Stage(StageMessage::Unload {
+                stage: Stage::Transcription,
+            }))
+            .into(),
+    );
+    super::surface::control_layout(narrow, spacing.space_xs, label.into(), pickers, buttons)
 }
 
 /// Pure VRAM-fit check for a staged load: given the staged `device`, the
@@ -369,6 +370,7 @@ pub(super) fn staged_vram_shortfall(backend: &BackendInfo, app: &AppModel) -> Op
 pub(super) fn staged_model_picker<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
+    narrow: bool,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
@@ -395,10 +397,8 @@ pub(super) fn staged_model_picker<'a>(
     .placeholder("Select model")
     .width(Length::FillPortion(2));
 
-    let mut picker_row = row![model_dropdown]
-        .spacing(spacing.space_s)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
+    let mut pickers = Vec::new();
+    let mut buttons = Vec::new();
 
     // Device dropdown — only once the daemon has answered what the staged
     // model can run on here, and only when that answer offers something. The
@@ -414,7 +414,7 @@ pub(super) fn staged_model_picker<'a>(
     if let Some(model) = staged_model
         && let Some(devices) = device_dropdown(Stage::Transcription, &backend.source, model, app)
     {
-        picker_row = picker_row.push(devices);
+        pickers.push(devices);
     }
 
     // Per-model language trigger, inline after the device dropdown — shown only
@@ -422,7 +422,7 @@ pub(super) fn staged_model_picker<'a>(
     if let Some(model) = staged_model
         && let Some(lang_button) = language_button(Stage::Transcription, backend, model, app)
     {
-        picker_row = picker_row.push(lang_button);
+        buttons.push(lang_button);
     }
 
     // Load button — enabled only when a model is staged AND (the staged
@@ -447,7 +447,14 @@ pub(super) fn staged_model_picker<'a>(
                 },
             )),
         );
-    picker_row = picker_row.push(load_button);
+    buttons.push(load_button.into());
+    let picker_row = super::surface::control_layout(
+        narrow,
+        spacing.space_s,
+        model_dropdown.into(),
+        pickers,
+        buttons,
+    );
 
     // Below the picker: either the "can't be loaded here" advisory for a
     // staged model with no viable device (blocking — Load is already
@@ -467,7 +474,7 @@ pub(super) fn staged_model_picker<'a>(
             .spacing(spacing.space_xs)
             .into()
     } else {
-        picker_row.into()
+        picker_row
     }
 }
 

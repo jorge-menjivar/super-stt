@@ -161,7 +161,10 @@ fn status_dot<'a>(status: ModelStatus, size: f32) -> Element<'a, Message> {
 /// GPU's (shortened) name + total memory, and a live usage meter — wrapped in a
 /// [`header_pill`]. The hover tooltip lists every detected GPU with its
 /// used/free memory and full name. `None` when the daemon reported no GPUs.
-pub(crate) fn gpu_summary(app: &AppModel) -> Option<Element<'_, Message>> {
+///
+/// `compact` drops the name and figures, leaving the glyph and the meter, for a
+/// window too narrow for both; the tooltip still has them.
+pub(crate) fn gpu_summary(app: &AppModel, compact: bool) -> Option<Element<'_, Message>> {
     use fmt::{fmt_gib, fmt_gib_pair, short_gpu_name, vram_meter};
     use surface::rounded_tooltip;
     let primary = app.gpu_info.first()?;
@@ -193,8 +196,10 @@ pub(crate) fn gpu_summary(app: &AppModel) -> Option<Element<'_, Message>> {
     let mut inner = widget::row::with_capacity(3)
         .spacing(6.0)
         .align_y(Alignment::Center)
-        .push(icons::phosphor_tinted(icons::GRAPHICS_CARD, 14.0, muted))
-        .push(pill_label(label));
+        .push(icons::phosphor_tinted(icons::GRAPHICS_CARD, 14.0, muted));
+    if !compact {
+        inner = inner.push(pill_label(label));
+    }
     if let Some(used) = primary.used_bytes {
         inner = inner.push(vram_meter(used, primary.total_bytes));
     }
@@ -218,21 +223,27 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
         .push(text::title3("Models").width(Length::Fill));
 
     let stage = app.models_page.pipeline_step;
-    let card = match stage.block() {
-        // The active backend's card when one is selected (and still
-        // installed); otherwise the empty state that opens the "Select a
-        // backend" sheet.
-        None => match app
-            .models_page
-            .active_backend
-            .as_deref()
-            .and_then(|source| app.backends.iter().find(|b| b.source == source))
-        {
-            Some(backend) => active_backend_card(backend, app),
-            None => select_sheet::no_backend_empty_state(),
-        },
-        Some(block) => stage_section::section(app, block),
-    };
+    // Measured where the card is drawn, so a wide window with the side panel
+    // open lays it out narrow too.
+    let card = widget::responsive(move |size| {
+        let narrow = size.width < surface::NARROW_CARD;
+        match stage.block() {
+            // The active backend's card when one is selected (and still
+            // installed); otherwise the empty state that opens the "Select a
+            // backend" sheet.
+            None => match app
+                .models_page
+                .active_backend
+                .as_deref()
+                .and_then(|source| app.backends.iter().find(|b| b.source == source))
+            {
+                Some(backend) => active_backend_card(backend, app, narrow),
+                None => select_sheet::no_backend_empty_state(),
+            },
+            Some(block) => stage_section::section(app, block, narrow),
+        }
+    })
+    .height(Length::Shrink);
 
     // The rows and a card in a fixed-height column compete for it: the column
     // hands each child its share, and the loser is drawn clipped. Scrolling

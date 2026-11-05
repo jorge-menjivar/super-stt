@@ -134,6 +134,9 @@ pub struct AppModel {
     /// The tab each feature's section shows, kept while the user is elsewhere.
     pub speech_to_text_tab: crate::state::Page,
     pub text_to_speech_tab: crate::state::Page,
+    /// The main window's width in logical pixels, from its resize events; `0`
+    /// until the first one, which reads as wide.
+    pub window_width: f32,
     /// The Speech tab.
     pub speech: crate::state::SpeechState,
     /// The Voices tab: the cloned-voice library and a recording in progress.
@@ -292,14 +295,16 @@ impl cosmic::Application for AppModel {
         // App name + logo, pinned to the header's leading edge so the window
         // always identifies itself. The logo keeps its own brand colors; the
         // name sits beside it in the header's text color.
-        let brand = cosmic::widget::container(
-            cosmic::widget::row::with_capacity(2)
-                .align_y(cosmic::iced::Alignment::Center)
-                .spacing(8.0)
-                .push(crate::ui::icons::app_logo(22.0))
-                .push(cosmic::widget::text("Super Voice").size(16.0)),
-        )
-        .padding([0, 12, 0, 8]);
+        // A narrow window keeps the logo and drops the name, which would
+        // otherwise wrap onto two lines.
+        let mut mark = cosmic::widget::row::with_capacity(2)
+            .align_y(cosmic::iced::Alignment::Center)
+            .spacing(8.0)
+            .push(crate::ui::icons::app_logo(22.0));
+        if !self.core.is_condensed() {
+            mark = mark.push(cosmic::widget::text("Super Voice").size(16.0));
+        }
+        let brand = cosmic::widget::container(mark).padding([0, 12, 0, 8]);
 
         let menu_bar = menu::bar(vec![menu::Tree::with_children(
             menu::root("View").apply(Element::from),
@@ -390,6 +395,9 @@ impl cosmic::Application for AppModel {
             // handler, so it's a no-op while disconnected).
             cosmic::iced::time::every(std::time::Duration::from_secs(GPU_POLL_INTERVAL_SECS))
                 .map(|_| Message::ModelsPage(ModelsPageMessage::RefreshGpuInfo)),
+            // The window's width, for what the header has room for.
+            cosmic::iced::window::resize_events()
+                .map(|(id, size)| Message::Shell(ShellMessage::WindowWidth(id, size.width))),
         ];
         if self.voices.is_recording() {
             subs.push(

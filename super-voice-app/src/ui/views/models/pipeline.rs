@@ -6,7 +6,8 @@
 //! that says which backend fills it and how its model stands; pressing one
 //! opens that stage's card under the rows. The ends of each row are not
 //! settings, only where the feature starts and stops, so they are drawn as
-//! plain labels rather than as steps.
+//! plain labels rather than as steps. Too narrow for a row, each feature's
+//! items stack instead, in the same order.
 //!
 //! The rows are what tell the two features apart: a stage sits in the row of
 //! the feature it belongs to, so a speech-to-text model never reads as a peer
@@ -150,42 +151,70 @@ fn summary(app: &AppModel, stage: Stage) -> StepSummary {
     )
 }
 
-/// Both features' rows.
+/// The content width the rows need to stay rows: both ends, three carets and
+/// two steps wide enough to read. Narrower, each feature's steps stack.
+const ROW_WIDTH: f32 = 600.0;
+
+/// One item of a feature's pipeline.
+enum Item {
+    /// Where the feature starts or stops: a name and a line about it.
+    End(&'static str, &'static str),
+    /// A stage the user sets.
+    Step(Stage),
+}
+
+/// Both features' pipelines: a row each where the page is wide enough, and a
+/// column each, joined by down carets, where it is not.
+///
+/// Measured where the rows are drawn rather than from the window, so the side
+/// panel opening on a wide window stacks them too.
 pub(super) fn pipelines(app: &AppModel) -> Element<'_, Message> {
-    let spacing = cosmic::theme::spacing();
-    let selected = app.models_page.pipeline_step;
-    column![
-        feature_row(
-            icons::MICROPHONE,
-            "Speech to text",
-            vec![
-                end("Microphone", "Your voice"),
-                step(app, Stage::Transcription, selected),
-                step(app, Stage::PostProcessing, selected),
-                end("Typed", "Into your app"),
-            ],
-        ),
-        feature_row(
-            icons::SPEAKER_HIGH,
-            "Text to speech",
-            vec![
-                end("Text", "From your app"),
-                step(app, Stage::Synthesis, selected),
-                end("Speakers", "Read aloud"),
-            ],
-        ),
-    ]
-    .spacing(spacing.space_m)
+    widget::responsive(move |size| {
+        let stacked = size.width < ROW_WIDTH;
+        let spacing = cosmic::theme::spacing();
+        column![
+            feature(
+                app,
+                stacked,
+                icons::MICROPHONE,
+                "Speech to text",
+                &[
+                    Item::End("Microphone", "Your voice"),
+                    Item::Step(Stage::Transcription),
+                    Item::Step(Stage::PostProcessing),
+                    Item::End("Typed", "Into your app"),
+                ],
+            ),
+            feature(
+                app,
+                stacked,
+                icons::SPEAKER_HIGH,
+                "Text to speech",
+                &[
+                    Item::End("Text", "From your app"),
+                    Item::Step(Stage::Synthesis),
+                    Item::End("Speakers", "Read aloud"),
+                ],
+            ),
+        ]
+        .spacing(spacing.space_m)
+        .into()
+    })
+    .height(Length::Shrink)
     .into()
 }
 
-/// One feature: its name over its row, each item joined to the next by a caret.
-fn feature_row<'a>(
+/// One feature: its name over its items, each joined to the next by a caret
+/// pointing the way the feature runs.
+fn feature<'a>(
+    app: &'a AppModel,
+    stacked: bool,
     glyph: &'static [u8],
     name: &'a str,
-    items: Vec<Element<'a, Message>>,
+    items: &[Item],
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
+    let selected = app.models_page.pipeline_step;
     let heading = row![
         icons::phosphor(glyph).size(18),
         text::title4(name).line_height(1.0),
@@ -193,36 +222,68 @@ fn feature_row<'a>(
     .spacing(spacing.space_xs)
     .align_y(Alignment::Center);
 
-    let mut steps = row![].spacing(spacing.space_xxs).align_y(Alignment::Center);
+    let built = items.iter().map(|item| match *item {
+        Item::End(name, caption) => end(name, caption, stacked),
+        Item::Step(stage) => step(app, stage, selected),
+    });
     let count = items.len();
-    for (index, item) in items.into_iter().enumerate() {
-        steps = steps.push(item);
-        if index + 1 < count {
-            steps = steps.push(icons::phosphor_tinted(
-                icons::CARET_RIGHT,
-                14.0,
-                muted_text_color(),
-            ));
+    let body: Element<'a, Message> = if stacked {
+        let mut steps = column![].spacing(spacing.space_xxs);
+        for (index, item) in built.enumerate() {
+            steps = steps.push(item);
+            if index + 1 < count {
+                steps = steps.push(widget::container(caret(true)).padding([0, 0, 0, 14]));
+            }
         }
-    }
+        steps.into()
+    } else {
+        let mut steps = row![].spacing(spacing.space_xxs).align_y(Alignment::Center);
+        for (index, item) in built.enumerate() {
+            steps = steps.push(item);
+            if index + 1 < count {
+                steps = steps.push(caret(false));
+            }
+        }
+        steps.into()
+    };
 
-    column![heading, steps].spacing(spacing.space_xs).into()
+    column![heading, body].spacing(spacing.space_xs).into()
 }
 
-/// Where a feature starts or stops: a name and a line under it, with no surface
-/// of its own, since there is nothing to set there.
-fn end<'a>(name: &'a str, caption: &'a str) -> Element<'a, Message> {
+/// The caret between two items: right in a row, down in a column.
+fn caret<'a>(down: bool) -> Element<'a, Message> {
+    let glyph = icons::phosphor_tinted(icons::CARET_RIGHT, 14.0, muted_text_color());
+    if down {
+        glyph
+            .rotation(cosmic::iced::Radians(std::f32::consts::FRAC_PI_2))
+            .into()
+    } else {
+        glyph.into()
+    }
+}
+
+/// Where a feature starts or stops, with no surface of its own, since there is
+/// nothing to set there: in a row, a name over a line about it, at a fixed
+/// width so both rows' steps start at the same place; in a column, the two
+/// side by side on one line.
+fn end<'a>(name: &'a str, caption: &'a str, stacked: bool) -> Element<'a, Message> {
     let muted = muted_text_color();
-    widget::container(
-        column![
-            text::body(name).font(cosmic::font::semibold()),
-            text::caption(caption).class(cosmic::theme::Text::Color(muted)),
-        ]
-        .spacing(2),
-    )
-    .padding([10, 12])
-    .width(Length::Fixed(112.0))
-    .into()
+    let name = text::body(name).font(cosmic::font::semibold());
+    let caption = text::caption(caption).class(cosmic::theme::Text::Color(muted));
+    if stacked {
+        widget::container(
+            row![name, caption]
+                .spacing(cosmic::theme::spacing().space_xs)
+                .align_y(Alignment::Center),
+        )
+        .padding([2, 4])
+        .into()
+    } else {
+        widget::container(column![name, caption].spacing(2))
+            .padding([10, 12])
+            .width(Length::Fixed(112.0))
+            .into()
+    }
 }
 
 /// A stage: its name and status dot, the backend in it and how its model

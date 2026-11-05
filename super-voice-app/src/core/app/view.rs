@@ -11,6 +11,11 @@ use cosmic::widget::{self, nav_bar};
 
 use super::AppModel;
 
+/// The narrowest window that still shows the GPU pill. Below it the header
+/// holds the sidebar button, the logo, the View menu, both feature pills and the
+/// close button, and nothing else fits.
+const GPU_PILL_MIN_WINDOW: f32 = 460.0;
+
 impl AppModel {
     /// Window header-bar readouts (right side): the GPU summary and model
     /// readiness pills. Shown only while connected — when the daemon is down the
@@ -30,7 +35,13 @@ impl AppModel {
         let mut row = widget::row::with_capacity(3)
             .spacing(8.0)
             .align_y(cosmic::iced::Alignment::Center);
-        if let Some(gpu) = views::models::gpu_summary(self) {
+        // A narrow window shows the GPU as its glyph and meter only, and the
+        // narrowest leave it out, so the two feature pills and the window's
+        // own buttons keep their room. Its figures are in its tooltip.
+        let width = self.window_width;
+        if !(width > 0.0 && width < GPU_PILL_MIN_WINDOW)
+            && let Some(gpu) = views::models::gpu_summary(self, self.core.is_condensed())
+        {
             row = row.push(gpu);
         }
         row = row.push(views::models::feature_status_pills(self));
