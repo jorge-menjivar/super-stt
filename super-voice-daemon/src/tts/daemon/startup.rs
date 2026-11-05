@@ -25,6 +25,8 @@ impl SuperTTSDaemon {
         let voices = Arc::new(crate::tts::voices::VoiceLibrary::new(
             crate::tts::voices::VoiceLibrary::default_dir(),
         ));
+        // Before the HTTP server exists, so no voice can be mid-create.
+        voices.sweep_incomplete();
 
         SuperTTSDaemon {
             // Empty until a model loads.
