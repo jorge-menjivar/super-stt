@@ -120,9 +120,10 @@ fn selected_backend(app: &AppModel, stage: BlockStage) -> Option<&BackendInfo> {
 }
 
 /// `stage`'s section: a card once a backend is selected, and a plain prompt
-/// line before that. `narrow` gives the card's actions and buttons lines of
-/// their own (see [`super::surface::NARROW_CARD`]).
-pub(crate) fn section(app: &AppModel, stage: BlockStage, narrow: bool) -> Element<'_, Message> {
+/// line before that. `width` is the card's: under
+/// [`super::surface::NARROW_CARD`] its actions take a line of their own, and its
+/// control row splits when its controls do not fit.
+pub(crate) fn section(app: &AppModel, stage: BlockStage, width: f32) -> Element<'_, Message> {
     let copy = copy(stage);
     let block = app.block(stage);
     // Nothing installed serves one: say so, rather than offering a picker that
@@ -143,7 +144,12 @@ pub(crate) fn section(app: &AppModel, stage: BlockStage, narrow: bool) -> Elemen
     let spacing = cosmic::theme::spacing();
     let mut card = widget::column::with_capacity(6)
         .spacing(spacing.space_s)
-        .push(header(stage, backend, app, narrow));
+        .push(header(
+            stage,
+            backend,
+            app,
+            width < super::surface::NARROW_CARD,
+        ));
 
     if let Some(chips) = chip_row(stage, &copy, backend, app) {
         card = card.push(chips);
@@ -151,7 +157,7 @@ pub(crate) fn section(app: &AppModel, stage: BlockStage, narrow: bool) -> Elemen
 
     card = card
         .push(card_divider())
-        .push(control_row(app, stage, backend, narrow));
+        .push(control_row(app, stage, backend, width));
 
     // The one state in which a synthesis model cannot speak at all, on its own
     // line: a sentence cannot share the controls' row.
@@ -292,7 +298,7 @@ fn control_row<'a>(
     app: &'a AppModel,
     stage: BlockStage,
     backend: &'a BackendInfo,
-    narrow: bool,
+    width: f32,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let block = app.block(stage);
@@ -346,7 +352,7 @@ fn control_row<'a>(
                 .into(),
         );
         return super::surface::control_layout(
-            narrow,
+            width,
             spacing.space_xs,
             label.into(),
             pickers,
@@ -426,7 +432,7 @@ fn control_row<'a>(
             ))
             .into(),
     );
-    super::surface::control_layout(narrow, spacing.space_s, dropdown.into(), pickers, buttons)
+    super::surface::control_layout(width, spacing.space_s, dropdown.into(), pickers, buttons)
 }
 
 /// Reload: bring the running model back up on the same device, for the case

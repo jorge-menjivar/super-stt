@@ -226,7 +226,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
     // Measured where the card is drawn, so a wide window with the side panel
     // open lays it out narrow too.
     let card = widget::responsive(move |size| {
-        let narrow = size.width < surface::NARROW_CARD;
+        let width = size.width;
         match stage.block() {
             // The active backend's card when one is selected (and still
             // installed); otherwise the empty state that opens the "Select a
@@ -237,10 +237,10 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
                 .as_deref()
                 .and_then(|source| app.backends.iter().find(|b| b.source == source))
             {
-                Some(backend) => active_backend_card(backend, app, narrow),
+                Some(backend) => active_backend_card(backend, app, width),
                 None => select_sheet::no_backend_empty_state(),
             },
-            Some(block) => stage_section::section(app, block, narrow),
+            Some(block) => stage_section::section(app, block, width),
         }
     })
     .height(Length::Shrink);

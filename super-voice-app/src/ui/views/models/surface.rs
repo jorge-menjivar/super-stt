@@ -469,19 +469,33 @@ pub(super) fn card_header<'a>(
     }
 }
 
+/// The least a dropdown in a card's control row can show its value in, and a
+/// button its label.
+const PICKER_WIDTH: f32 = 180.0;
+const BUTTON_WIDTH: f32 = 120.0;
+
 /// A card's control row: `lead` (the running model, or the model picker), the
 /// other pickers, then the buttons.
 ///
-/// One line on a wide card. On a narrow one each group takes a line, the
-/// buttons at the end of the last, so no dropdown is squeezed below the width
-/// of what it shows.
+/// One line when `width`, the card's, holds them all at [`PICKER_WIDTH`] and
+/// [`BUTTON_WIDTH`]. Otherwise each group takes a line of its own, or several:
+/// the pickers one each when two do not fit side by side, the buttons as many
+/// to a line as fit, against the end. No dropdown is squeezed below the width of what it shows.
+/// Counted rather than fixed because the cards differ: synthesis adds a voice
+/// to what the others show.
+// reason: a handful of controls, far inside f32's exact integers
+#[allow(clippy::cast_precision_loss)]
 pub(super) fn control_layout<'a>(
-    narrow: bool,
+    width: f32,
     gap: u16,
     lead: Element<'a, Message>,
     pickers: Vec<Element<'a, Message>>,
     buttons: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
+    // The card's own padding comes off the width its content gets.
+    let room = width - 2.0 * f32::from(cosmic::theme::spacing().space_s);
+    let needed = PICKER_WIDTH * (1 + pickers.len()) as f32 + BUTTON_WIDTH * buttons.len() as f32;
+    let narrow = room < needed;
     let line = |items: Vec<Element<'a, Message>>| {
         items
             .into_iter()
@@ -497,13 +511,30 @@ pub(super) fn control_layout<'a>(
     let mut lines = widget::column::with_capacity(3)
         .spacing(cosmic::theme::spacing().space_xs)
         .push(lead);
-    if !pickers.is_empty() {
-        lines = lines.push(line(pickers).width(Length::Fill));
+    // The pickers share a line when they fit on one, and otherwise take a line
+    // each: a long voice name beside the device picker squeezed it to its arrow.
+    if room >= PICKER_WIDTH * pickers.len() as f32 {
+        if !pickers.is_empty() {
+            lines = lines.push(line(pickers).width(Length::Fill));
+        }
+    } else {
+        for picker in pickers {
+            lines = lines.push(picker);
+        }
     }
-    if !buttons.is_empty() {
+    // The buttons take as many lines as they need, each against the end, the
+    // last line holding the last button: Load or Unload.
+    // reason: the room is a few hundred pixels and the quotient small
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let per_line = ((room / BUTTON_WIDTH).floor() as usize).max(1);
+    let mut buttons = buttons.into_iter().peekable();
+    let first = buttons.len() % per_line;
+    let mut take = if first == 0 { per_line } else { first };
+    while buttons.peek().is_some() {
         let mut end = vec![widget::space::horizontal().into()];
-        end.extend(buttons);
+        end.extend(buttons.by_ref().take(take));
         lines = lines.push(line(end).width(Length::Fill));
+        take = per_line;
     }
     lines.into()
 }

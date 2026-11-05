@@ -87,12 +87,13 @@ pub(super) fn backend_header(
 
 /// The selected backend, shown above the tabs: its model picker + Select, an
 /// in-card status line (loading / download progress / error), Configure, and
-/// Deselect. `narrow` gives the header's actions and the control row's buttons
-/// lines of their own (see [`super::surface::NARROW_CARD`]).
+/// Deselect. `width` is the card's: under [`super::surface::NARROW_CARD`] the
+/// header's actions take a line of their own, and the control row splits when
+/// its controls do not fit.
 pub(super) fn active_backend_card<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
-    narrow: bool,
+    width: f32,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let online = backend_is_online(backend);
@@ -120,7 +121,7 @@ pub(super) fn active_backend_card<'a>(
     .spacing(spacing.space_xs)
     .align_y(Alignment::Center);
     let header = super::surface::card_header(
-        narrow,
+        width < super::surface::NARROW_CARD,
         backend_glyph_tile(),
         super::surface::card_title_block(backend.name.clone(), &backend.version, description),
         actions.into(),
@@ -184,9 +185,9 @@ pub(super) fn active_backend_card<'a>(
     if missing.is_empty() {
         card = card.push(card_divider());
         if model_loaded {
-            card = card.push(loaded_model_summary(backend, app, narrow));
+            card = card.push(loaded_model_summary(backend, app, width));
         } else {
-            card = card.push(staged_model_picker(backend, app, narrow));
+            card = card.push(staged_model_picker(backend, app, width));
         }
     }
 
@@ -265,7 +266,7 @@ pub(super) fn resolved_suffix(running: &str, chosen: Option<&str>) -> String {
 pub(super) fn loaded_model_summary<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
-    narrow: bool,
+    width: f32,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let label = text::body(format!(
@@ -307,7 +308,7 @@ pub(super) fn loaded_model_summary<'a>(
             }))
             .into(),
     );
-    super::surface::control_layout(narrow, spacing.space_xs, label.into(), pickers, buttons)
+    super::surface::control_layout(width, spacing.space_xs, label.into(), pickers, buttons)
 }
 
 /// Pure VRAM-fit check for a staged load: given the staged `device`, the
@@ -370,7 +371,7 @@ pub(super) fn staged_vram_shortfall(backend: &BackendInfo, app: &AppModel) -> Op
 pub(super) fn staged_model_picker<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
-    narrow: bool,
+    width: f32,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
@@ -449,7 +450,7 @@ pub(super) fn staged_model_picker<'a>(
         );
     buttons.push(load_button.into());
     let picker_row = super::surface::control_layout(
-        narrow,
+        width,
         spacing.space_s,
         model_dropdown.into(),
         pickers,
