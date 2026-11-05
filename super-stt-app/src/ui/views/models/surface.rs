@@ -161,7 +161,7 @@ pub(super) fn card_surface<'a>(
 /// action in the row that throws something away, and a bare glyph would sit in
 /// the row looking as harmless as Configure. The tooltip carries the label the
 /// icon drops, so the action stays discoverable.
-pub(super) fn deselect_button(tooltip_text: &str, message: Message) -> Element<'_, Message> {
+pub(super) fn deselect_button(tooltip_text: String, message: Message) -> Element<'static, Message> {
     // The icon is left untinted so it takes the pill's foreground colour;
     // tinting it destructive would paint red on red.
     let button = widget::button::icon(icons::phosphor_handle(icons::X))
@@ -226,7 +226,7 @@ pub(super) fn menu_surface<'a>(
 /// without one, a menu of short verbs reads as a wall of text.
 pub(super) fn menu_item(
     glyph: &'static [u8],
-    label: &'static str,
+    label: String,
     message: Message,
 ) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
@@ -306,7 +306,7 @@ pub(super) fn repo_button(source: &str) -> Element<'static, Message> {
     rounded_tooltip(
         widget::button::icon(icons::phosphor_handle(icons::GIT_BRANCH))
             .on_press(Message::Shell(ShellMessage::LaunchUrl(url))),
-        text::body("Open repository"),
+        text::body(crate::fl!("open-repository")),
         widget::tooltip::Position::Top,
     )
 }

@@ -73,8 +73,7 @@ pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
     // one" and then replacing it.
     if post_processor_backends(app).is_some_and(<[BackendInfo]>::is_empty) {
         return prompt_row(
-            "Install a post-processor from the Library to clean up text before \
-             is is typed and remove filler words.",
+            crate::fl!("install-a-post-processor-from-the-library"),
             None,
         );
     }
@@ -107,9 +106,9 @@ pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
     // nothing else on the card would say so. `enabled` and `loaded` are
     // separate fields for exactly this case.
     if app.post_processor.enabled && !app.post_processor.loaded {
-        card = card.push(notice(
-            "The selected model isn't loaded — transcripts are used as they are.",
-        ));
+        card = card.push(notice(crate::fl!(
+            "the-selected-model-isn-t-loaded-transcripts"
+        )));
     }
 
     // A failed save surfaces on the card that owns it rather than only reaching
@@ -133,11 +132,11 @@ fn header<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, Messag
     let source = backend.source.clone();
     let actions = row![
         repo_button(&source),
-        button::standard("Configure").on_press(Message::ModelsPage(
+        button::standard(crate::fl!("configure")).on_press(Message::ModelsPage(
             ModelsPageMessage::OpenBackendConfig(source.clone()),
         )),
         super::surface::deselect_button(
-            "Deselect this backend",
+            crate::fl!("deselect-this-backend"),
             Message::Stage(StageMessage::DeselectBackend { stage: PP_STAGE }),
         ),
     ]
@@ -182,9 +181,9 @@ fn chip_row<'a>(backend: &'a BackendInfo, app: &AppModel) -> Option<Element<'a, 
     }
     if count > 0 {
         let label = if count == 1 {
-            "1 post-processor".to_string()
+            crate::fl!("count-1-post-processor")
         } else {
-            format!("{count} post-processors")
+            crate::fl!("post-processors-count", count = (count).to_string())
         };
         chips = chips.push(count_chip(label));
     }
@@ -232,9 +231,13 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
             app.post_processor.running_device().unwrap_or_default(),
             app.staged_picks.device(PP_STAGE),
         );
-        let label = text::body(format!("Active: {model}{device_suffix}"))
-            .class(cosmic::theme::Text::Accent)
-            .width(Length::Fill);
+        let label = text::body(crate::fl!(
+            "active-model",
+            model = model.as_str(),
+            device_suffix = device_suffix.as_str()
+        ))
+        .class(cosmic::theme::Text::Accent)
+        .width(Length::Fill);
         let mut summary = row![label]
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center);
@@ -252,7 +255,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         }
         return summary
             .push(
-                button::standard("Unload")
+                button::standard(crate::fl!("unload"))
                     .leading_icon(icons::phosphor_handle(icons::STOP))
                     .on_press(Message::Stage(StageMessage::Unload { stage: PP_STAGE })),
             )
@@ -276,7 +279,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
             model: models_pick[index].clone(),
         })
     })
-    .placeholder("Select model")
+    .placeholder(crate::fl!("select-model"))
     .width(Length::FillPortion(2));
 
     let mut picker_row = row![dropdown]
@@ -315,7 +318,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         selected.is_some() && (app.staged_picks.device(PP_STAGE).is_some() || staged_online);
     picker_row
         .push(
-            button::suggested("Load model")
+            button::suggested(crate::fl!("load-model"))
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
                 .on_press_maybe(
                     (staged_ok && app.is_model_ready(PP_STAGE))
@@ -332,10 +335,9 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
 /// line only has to say what a post-processor is for.
 fn unselected_state<'a>() -> Element<'a, Message> {
     prompt_row(
-        "Optional. Clean up text before it is typed. Remove filler words. Improve punctuation and \
-         formatting.",
+        crate::fl!("optional-clean-up-text-before-it-is"),
         Some(
-            button::suggested("Select post-processor backend")
+            button::suggested(crate::fl!("select-post-processor-backend"))
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
                 .on_press(Message::Shell(ShellMessage::ToggleContextPage(
                     ContextPage::SelectPostProcessor,
@@ -347,7 +349,7 @@ fn unselected_state<'a>() -> Element<'a, Message> {
 
 /// A card-less line for the two states that name no backend: a muted prompt
 /// taking the width, with an optional action opposite it.
-fn prompt_row<'a>(caption: &'a str, action: Option<Element<'a, Message>>) -> Element<'a, Message> {
+fn prompt_row(caption: String, action: Option<Element<'_, Message>>) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let mut line = widget::row::with_capacity(2)
         .spacing(spacing.space_s)
@@ -365,10 +367,10 @@ fn prompt_row<'a>(caption: &'a str, action: Option<Element<'a, Message>>) -> Ele
 
 /// A warning glyph plus text, for the not-loaded notice. Mirrors
 /// [`card_error`](super::active::card_error), which is private to its module.
-fn notice(message: &str) -> Element<'_, Message> {
+fn notice(message: String) -> Element<'static, Message> {
     row![
         icons::phosphor_destructive(icons::WARNING, 18.0),
-        text::body(message.to_string()),
+        text::body(message),
     ]
     .spacing(cosmic::theme::spacing().space_xs)
     .align_y(Alignment::Center)
@@ -393,20 +395,16 @@ pub fn post_processor_sheet(app: &AppModel) -> Element<'_, Message> {
         .spacing(spacing.space_xs)
         .width(Length::Fill)
         .push(
-            text::caption(
-                "Pick which backend cleans up your transcripts. Add and manage backends \
-                 in your Library.",
-            )
-            .class(cosmic::theme::Text::Color(muted)),
+            text::caption(crate::fl!("pick-which-backend-cleans-up-your-transcripts"))
+                .class(cosmic::theme::Text::Color(muted)),
         );
 
     if eligible.is_empty() {
         return col
             .push(text::body(if answered.is_none() {
-                "Loading…"
+                crate::fl!("loading-progress")
             } else {
-                "No installed backend provides a post-processor. Open the Library to \
-                 install one."
+                crate::fl!("no-installed-backend-provides-a-post-processor")
             }))
             .into();
     }
@@ -440,11 +438,11 @@ fn sheet_row(backend: &BackendInfo, is_selected: bool) -> Element<'static, Messa
     }
 
     let trailing: Element<'static, Message> = if is_selected {
-        text::caption("Selected")
+        text::caption(crate::fl!("selected"))
             .class(cosmic::theme::Text::Accent)
             .into()
     } else {
-        button::suggested("Select")
+        button::suggested(crate::fl!("select"))
             .on_press(Message::Stage(StageMessage::SelectBackend {
                 stage: PP_STAGE,
                 source: backend.source.clone(),

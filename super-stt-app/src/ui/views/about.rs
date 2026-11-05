@@ -32,11 +32,15 @@ pub fn page() -> Element<'static, Message> {
         icon,
         title,
         link,
-        button::link(format!("Git: {short_hash} ({date})"))
-            .on_press(Message::Shell(ShellMessage::LaunchUrl(format!(
-                "{REPOSITORY}/commits/{hash}"
-            ))))
-            .padding(0),
+        button::link(crate::fl!(
+            "git-commit",
+            short_hash = short_hash.as_str(),
+            date = (date).to_string()
+        ))
+        .on_press(Message::Shell(ShellMessage::LaunchUrl(format!(
+            "{REPOSITORY}/commits/{hash}"
+        ))))
+        .padding(0),
     ]
     .align_x(Alignment::Center)
     .spacing(space_xxs)

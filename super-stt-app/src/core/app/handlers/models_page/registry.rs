@@ -10,7 +10,7 @@ fn pick_folder_task() -> Task<cosmic::Action<Message>> {
     Task::perform(
         async {
             rfd::AsyncFileDialog::new()
-                .set_title("Choose a backend folder")
+                .set_title(crate::fl!("choose-backend-folder"))
                 .pick_folder()
                 .await
                 .map(|h| h.path().to_string_lossy().into_owned())

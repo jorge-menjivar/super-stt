@@ -10,7 +10,7 @@ use crate::ui::messages::Message;
 #[allow(clippy::cast_precision_loss)]
 pub(super) fn fmt_gib(bytes: u64) -> String {
     let gib = bytes as f64 / (1024.0 * 1024.0 * 1024.0);
-    format!("{gib:.1} GiB")
+    crate::fl!("memory-size", gib = format!("{:.1}", gib))
 }
 
 /// Two byte counts as a shared-unit GiB pair, e.g. `"3.2 / 24.0 GiB"` — the
@@ -19,7 +19,11 @@ pub(super) fn fmt_gib(bytes: u64) -> String {
 #[allow(clippy::cast_precision_loss)]
 pub(super) fn fmt_gib_pair(used: u64, total: u64) -> String {
     const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-    format!("{:.1} / {:.1} GiB", used as f64 / GIB, total as f64 / GIB)
+    crate::fl!(
+        "memory-pair",
+        value0 = format!("{:.1}", used as f64 / GIB),
+        value1 = format!("{:.1}", total as f64 / GIB)
+    )
 }
 
 /// Strip the marketing vendor prefix from a GPU name for compact display
@@ -109,10 +113,10 @@ pub(super) fn vram_warning<'a>(needed: u64, available: u64) -> Element<'a, Messa
 
     row![
         icons::phosphor_warning(icons::WARNING, 16.0),
-        text::body(format!(
-            "This model may not fit on your GPU — needs ~{}, {} available.",
-            fmt_gib(needed),
-            fmt_gib(available),
+        text::body(crate::fl!(
+            "model-memory-warning",
+            value0 = fmt_gib(needed),
+            value1 = fmt_gib(available)
         )),
     ]
     .spacing(cosmic::theme::spacing().space_xs)
@@ -134,8 +138,9 @@ pub(super) fn no_viable_device_warning<'a>(model: &str) -> Element<'a, Message> 
 
     row![
         icons::phosphor_warning(icons::WARNING, 16.0),
-        text::body(format!(
-            "{model} needs a device this install doesn't have, so it can't be loaded here."
+        text::body(crate::fl!(
+            "model-device-unavailable",
+            model = (model).to_string()
         )),
     ]
     .spacing(cosmic::theme::spacing().space_xs)

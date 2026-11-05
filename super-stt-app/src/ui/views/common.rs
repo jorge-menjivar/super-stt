@@ -13,7 +13,7 @@ use crate::ui::messages::Message;
 /// message. Shared by the pages that render `AppModel::action_error` (the
 /// Customization page and the Configure sheet) so a failed save surfaces
 /// inline instead of hijacking the UI. Mirrors the Models card's `card_error`.
-pub fn error_banner(message: &str) -> Element<'_, Message> {
+pub fn error_banner(message: &str) -> Element<'static, Message> {
     row![
         icons::phosphor_destructive(icons::WARNING, 18.0),
         text::body(message.to_string()),
@@ -39,9 +39,7 @@ pub fn page_container<'a>(content: impl Into<Element<'a, Message>>) -> Element<'
 }
 
 /// Create page title header
-// reason: explicit 'a makes the input→output lifetime connection visible in this public API; elision would hide that the returned Element borrows from `title`.
-#[allow(clippy::elidable_lifetime_names)]
-pub fn page_header<'a>(title: &'a str) -> Element<'a, Message> {
+pub fn page_header<'a>(title: impl Into<std::borrow::Cow<'a, str>> + 'a) -> Element<'a, Message> {
     page_container(text::title3(title))
 }
 
@@ -55,7 +53,7 @@ pub fn page_content<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a,
 
 /// Create a standard two-part page layout (header + scrollable content)
 pub fn page_layout<'a>(
-    title: &'a str,
+    title: impl Into<std::borrow::Cow<'a, str>> + 'a,
     content: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     widget::column::with_capacity(2)
