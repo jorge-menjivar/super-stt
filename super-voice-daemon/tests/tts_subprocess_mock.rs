@@ -26,7 +26,7 @@ impl Drop for CleanupDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
         if let Some(name) = self.0.file_name() {
-            let cache = super_tts_shared::paths::cache_dir()
+            let cache = super_stt_shared::paths::cache_dir()
                 .join("backends")
                 .join(name);
             let _ = std::fs::remove_dir_all(cache);
@@ -386,7 +386,7 @@ async fn serve_model_files() -> String {
 /// The files the mock's prepare saw, one per line, or `None` when no prepare
 /// finished. See the mock's `PREPARED_MARKER`.
 fn prepared_with(dir: &std::path::Path) -> Option<String> {
-    let cache = super_tts_shared::paths::cache_dir()
+    let cache = super_stt_shared::paths::cache_dir()
         .join("backends")
         .join(dir.file_name().unwrap());
     std::fs::read_to_string(cache.join("prepared")).ok()

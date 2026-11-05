@@ -7151,22 +7151,15 @@ name = "super-tts-shared"
 version = "0.3.0-beta.2"
 dependencies = [
  "anyhow",
- "async-stream",
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-util",
  "log",
  "rubato 3.0.0",
  "serde",
  "serde_json",
  "super-engine-client",
  "super-engine-protocol",
- "super-engine-spec",
  "super-stt-shared",
  "super-voice-registry-types",
  "thiserror 2.0.21",
- "tokio",
  "utoipa",
  "uuid",
 ]

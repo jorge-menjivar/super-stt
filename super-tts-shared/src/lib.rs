@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 pub mod daemon;
 pub mod models;
-pub mod paths;
-pub mod product;
-pub mod registry;
 pub mod utils;
 pub mod validation;
 
-pub use product::SUPER_VOICE;
 pub use super_engine_protocol::logging;
 
 pub mod audio;
