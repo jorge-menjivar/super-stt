@@ -90,9 +90,47 @@ pub async fn get_stage_view(stage: Stage) -> HttpResult<StageState> {
     Ok(StageState {
         source: backend.source,
         name: backend.name,
-        enabled: backend.enabled,
+        enabled: switched_on(stage, backend.enabled, model.loaded),
         model: model.model,
         loaded: model.loaded,
         device: model.device,
     })
+}
+
+/// Whether `stage` is switched on, from what the daemon reports of it.
+///
+/// Post-processing has a switch of its own, which Load sets and Unload clears
+/// whether or not the model comes up, so `enabled` with nothing loaded is a
+/// stage meant to run that does not. Synthesis has none: the daemon reports it
+/// on exactly when a backend is selected, the only state text to speech keeps.
+/// Taken as it is, a backend picked a moment ago read as a model that failed to
+/// come up, and its card offered Unload, which changes nothing, instead of a
+/// model to load. It is on when its model runs.
+fn switched_on(stage: Stage, reported: bool, loaded: bool) -> bool {
+    match stage {
+        Stage::Synthesis => reported && loaded,
+        Stage::Transcription | Stage::PostProcessing => reported,
+    }
+}
+
+#[cfg(test)]
+mod switch_tests {
+    use super::*;
+
+    /// A synthesis backend selected with no model running is waiting for a
+    /// Load, not failing.
+    #[test]
+    fn synthesis_is_on_when_its_model_runs() {
+        assert!(!switched_on(Stage::Synthesis, true, false));
+        assert!(switched_on(Stage::Synthesis, true, true));
+        assert!(!switched_on(Stage::Synthesis, false, false));
+    }
+
+    /// Post-processing keeps the daemon's switch: on with nothing loaded is a
+    /// stage meant to run that does not, which its card warns about.
+    #[test]
+    fn post_processing_keeps_the_daemons_switch() {
+        assert!(switched_on(Stage::PostProcessing, true, false));
+        assert!(!switched_on(Stage::PostProcessing, false, true));
+    }
 }
