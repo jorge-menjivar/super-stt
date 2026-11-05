@@ -212,14 +212,14 @@ impl AppModel {
 
             NotificationMethodMessage::Loaded(method) => {
                 self.notification_method = method;
-                self.clear_action_error(crate::state::ErrorScope::Recording);
+                self.clear_action_error(crate::state::ErrorScope::Customization);
                 Task::none()
             }
 
             NotificationMethodMessage::Error(err) => {
                 log::warn!("Notification method error: {err}");
                 self.set_action_error(
-                    crate::state::ErrorScope::Recording,
+                    crate::state::ErrorScope::Customization,
                     format!("Couldn't save notification method: {err}"),
                 );
                 Task::none()

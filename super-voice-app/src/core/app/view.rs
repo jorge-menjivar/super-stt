@@ -230,12 +230,12 @@ impl AppModel {
                 &self.selected_audio_theme,
                 self.volume,
                 self.language.primary_language.as_deref(),
+                self.notification_method,
                 self.action_error_for(crate::state::ErrorScope::Customization),
             ),
             Page::Recording => views::recording::page(
                 self.recording_stop_mode,
                 self.preview_typing_enabled,
-                self.notification_method,
                 &self.recording_status,
                 &self.transcription_text,
                 &self.preview_text,

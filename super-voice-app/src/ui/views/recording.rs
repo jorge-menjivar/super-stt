@@ -3,15 +3,13 @@ use cosmic::Element;
 use cosmic::iced::widget::row;
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, settings, text};
-use super_stt_shared::models::notification_method::NotificationMethod;
 use super_stt_shared::models::protocol::PreviewSource;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 
 use super::common::error_banner;
 use crate::state::RecordingStatus;
 use crate::ui::messages::{
-    Message, NotificationMethodMessage, PreviewTypingMessage, RecordingMessage,
-    RecordingStopModeMessage,
+    Message, PreviewTypingMessage, RecordingMessage, RecordingStopModeMessage,
 };
 
 /// Recording settings section: stop mode + preview typing
@@ -45,41 +43,6 @@ fn settings_section(
                     cosmic::widget::toggler(preview_typing_enabled)
                         .on_toggle(|b| Message::PreviewTyping(PreviewTypingMessage::Toggled(b))),
                 ),
-        )
-        .into()
-}
-
-/// Notifications section: how recording failures reach the user
-fn notifications_section(notification_method: NotificationMethod) -> Element<'static, Message> {
-    let methods = [
-        NotificationMethod::Auto,
-        NotificationMethod::Desktop,
-        NotificationMethod::Typed,
-        NotificationMethod::Off,
-    ];
-    let method_names: Vec<String> = methods
-        .iter()
-        .map(|m| m.pretty_name().to_string())
-        .collect();
-    let selected_index = methods.iter().position(|m| *m == notification_method);
-
-    settings::section()
-        .title("Notifications")
-        .add(
-            settings::item::builder("Failure Notices")
-                .description(
-                    "How recording failures are reported. Desktop notifications \
-                     work on any desktop with a notification server.",
-                )
-                .control(widget::dropdown(
-                    method_names,
-                    selected_index,
-                    move |index| {
-                        Message::NotificationMethod(NotificationMethodMessage::Changed(
-                            methods[index],
-                        ))
-                    },
-                )),
         )
         .into()
 }
@@ -205,7 +168,6 @@ fn test_section<'a>(
 pub fn page<'a>(
     recording_stop_mode: RecordingStopMode,
     preview_typing_enabled: bool,
-    notification_method: NotificationMethod,
     recording_status: &'a RecordingStatus,
     transcription_text: &'a str,
     preview_text: &'a str,
@@ -222,7 +184,6 @@ pub fn page<'a>(
         recording_stop_mode,
         preview_typing_enabled,
     ));
-    blocks.push(notifications_section(notification_method));
     blocks.push(test_section(
         recording_status,
         transcription_text,
