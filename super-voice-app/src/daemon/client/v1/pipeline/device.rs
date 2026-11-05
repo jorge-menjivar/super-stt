@@ -58,8 +58,8 @@ pub async fn get_model_device(stage: Stage, model: String) -> HttpResult<ModelDe
 
 /// Set a model's device (HTTP `POST /stt/pipeline/{stage}/model/{model}/device`).
 ///
-/// `device` is the `cpu`/`gpu` preference. Reloads the model when it is the
-/// one its stage is running; otherwise only records the choice.
+/// `device` is a framework (`cuda`). Reloads the model when it is the one its
+/// stage is running; otherwise only records the choice.
 pub async fn set_model_device(stage: Stage, model: String, device: String) -> HttpResult<()> {
     let path = device_path(stage, &model);
     let body = serde_json::json!({ "device": device });
@@ -67,7 +67,12 @@ pub async fn set_model_device(stage: Stage, model: String, device: String) -> Ht
         let path = path.clone();
         let body = body.clone();
         async move {
-            let resp = transport::settings_post(socket, &token, &path, &body).await?;
+            // No timeout, as for a load: the daemon answers once the reload is
+            // done, and a first load on a framework builds its kernels, which
+            // can take minutes. Giving up at a fixed timeout dropped the
+            // connection, the daemon cancelled the reload halfway, and the
+            // stage was left with nothing loaded.
+            let resp = transport::settings_post_no_timeout(socket, &token, &path, &body).await?;
             require_unit(resp, "set_model_device")
         }
     })
