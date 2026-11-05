@@ -49,3 +49,14 @@ macro_rules! fl {
         i18n_embed_fl::fl!($crate::i18n::LANGUAGE_LOADER, $message_id, $($args), *)
     }};
 }
+
+#[cfg(test)]
+mod tests {
+    /// The loader finds its fallback language under the crate's own name. A
+    /// rename that leaves the file under the old one panics the app at
+    /// startup, and nothing else starts the app in a test.
+    #[test]
+    fn the_fallback_language_loads() {
+        let _ = &*super::LANGUAGE_LOADER;
+    }
+}
