@@ -64,6 +64,9 @@ pub enum ShellMessage {
     /// Show one of a feature section's tabs.
     SelectTab(crate::state::Page),
     LaunchUrl(String),
+    /// A window's width changed, in logical pixels. Only the main window's is
+    /// kept: it decides what the header has room for.
+    WindowWidth(cosmic::iced::window::Id, f32),
     /// Put a command on the clipboard. The app does not run these itself —
     /// they act on the user's session, not on the app — so handing over the
     /// exact command is the most it can usefully do.
@@ -174,6 +177,8 @@ pub enum ModelMessage {
 pub enum ModelsPageMessage {
     /// Activate a Models-page tab (Installed / Download) in the tab bar.
     ModelsTabActivated(segmented_button::Entity),
+    /// Open a pipeline step's card on the Models page.
+    SelectPipelineStep(crate::state::Stage),
     /// Open the per-backend configuration sub-view for `source`.
     OpenBackendConfig(String),
     /// Leave the configuration sub-view and return to the backend list.

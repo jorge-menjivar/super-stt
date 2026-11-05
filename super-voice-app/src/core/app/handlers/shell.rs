@@ -33,6 +33,13 @@ impl AppModel {
 
             ShellMessage::CopyText(text) => cosmic::iced::clipboard::write(text),
 
+            ShellMessage::WindowWidth(id, width) => {
+                if self.core.main_window_id() == Some(id) {
+                    self.window_width = width;
+                }
+                Task::none()
+            }
+
             ShellMessage::SelectTab(page) => {
                 match crate::state::Section::of(page) {
                     crate::state::Section::SpeechToText => self.speech_to_text_tab = page,

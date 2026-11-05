@@ -26,6 +26,8 @@ pub struct ModelsPageState {
     pub browse_menu_open: bool,
     /// The Installed tab's "Runs on" / kind filters.
     pub installed_filters: crate::state::registry::InstalledFilters,
+    /// The pipeline step whose card the Models page shows under the rows.
+    pub pipeline_step: crate::state::Stage,
 }
 
 impl Default for ModelsPageState {
@@ -47,6 +49,7 @@ impl Default for ModelsPageState {
             installed_menu_open: None,
             browse_menu_open: false,
             installed_filters: crate::state::registry::InstalledFilters::default(),
+            pipeline_step: crate::state::Stage::Transcription,
         }
     }
 }

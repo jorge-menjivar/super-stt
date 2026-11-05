@@ -141,6 +141,7 @@ impl AppModel {
             voice: crate::state::VoiceState::default(),
             speech_to_text_tab: crate::state::Page::Recording,
             text_to_speech_tab: crate::state::Page::Speech,
+            window_width: 0.0,
             speech: crate::state::SpeechState::default(),
             voices: crate::state::voices::VoicesState::default(),
             staged_picks: crate::state::staged_picks::StagedPicks::default(),

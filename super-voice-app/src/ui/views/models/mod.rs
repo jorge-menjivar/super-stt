@@ -7,6 +7,7 @@ mod download;
 mod fmt;
 mod installed;
 mod language;
+mod pipeline;
 mod select_sheet;
 mod stage_section;
 mod status;
@@ -17,7 +18,7 @@ mod voice;
 use active::active_backend_card;
 use download::download_split;
 use installed::installed_tab;
-use status::{ModelStatus, model_status};
+use status::{ModelStatus, stage_status};
 use surface::{bordered_scroll_view, muted_text_color, tab_bar_container, toolbar_container};
 use tabs::models_tab_switcher;
 
@@ -88,38 +89,59 @@ pub(crate) fn pill_label_tinted<'a>(
         .into()
 }
 
-/// A pill in the window header showing model readiness: a small colored dot
-/// (gray = none → red = blocked → yellow = idle → green = ready) and a short
-/// label, over the neutral [`header_pill`] surface. The hover tooltip carries
-/// the longer description so the indicator isn't color-only.
-pub(crate) fn status_pill(app: &AppModel) -> Element<'_, Message> {
-    use surface::rounded_tooltip;
-    let (color_fn, short, detail): (fn(&cosmic::Theme) -> cosmic::iced::Color, &str, &str) =
-        match model_status(app) {
-            ModelStatus::None => (
-                |t| t.cosmic().palette.neutral_5.into(),
-                "No backend",
-                "No backend selected",
-            ),
-            ModelStatus::Blocked => (
-                |t| t.cosmic().destructive.base.into(),
-                "Incomplete",
-                "Backend configuration incomplete",
-            ),
-            ModelStatus::Idle => (
-                |t| t.cosmic().warning.base.into(),
-                "Idle",
-                "Backend ready — pick a model",
-            ),
-            ModelStatus::Ready => (
-                |t| t.cosmic().success.base.into(),
-                "Ready",
-                "Model loaded and ready",
-            ),
-        };
+/// The two pills in the window header, one per feature: speech to text's
+/// microphone and text to speech's speaker, each with a dot in its state's
+/// color. The hover tooltip names the feature and says what the color means,
+/// so the indicator is not color-only.
+///
+/// A glyph and a dot, not words: two labelled pills would crowd the title bar.
+/// The surface stays neutral, since a tinted pill reads as a button. Speech to
+/// text's pill follows transcription, the stage that has to run for dictation
+/// to type anything; text to speech's follows synthesis.
+pub(crate) fn feature_status_pills(app: &AppModel) -> Element<'_, Message> {
+    row![
+        feature_pill(
+            icons::MICROPHONE,
+            "Speech to text",
+            stage_status(app, crate::state::Stage::Transcription),
+        ),
+        feature_pill(
+            icons::SPEAKER_HIGH,
+            "Text to speech",
+            stage_status(app, crate::state::Stage::Synthesis),
+        ),
+    ]
+    .spacing(6.0)
+    .align_y(Alignment::Center)
+    .into()
+}
 
-    let size = 10.0_f32;
-    let dot = widget::container(widget::text(""))
+fn feature_pill<'a>(
+    glyph: &'static [u8],
+    feature: &'static str,
+    status: ModelStatus,
+) -> Element<'a, Message> {
+    // 14px like the GPU pill's glyph, so both pills keep the bar's height.
+    let inner = row![icons::phosphor(glyph).size(14), status_dot(status, 10.0)]
+        .spacing(6.0)
+        .align_y(Alignment::Center);
+    surface::rounded_tooltip(
+        header_pill(inner),
+        text::body(format!("{feature}: {}", status.detail())),
+        widget::tooltip::Position::Bottom,
+    )
+}
+
+/// A round dot in `status`'s color: gray for no backend, yellow for idle or
+/// loading, green for ready, red for setup incomplete or not running.
+fn status_dot<'a>(status: ModelStatus, size: f32) -> Element<'a, Message> {
+    let color_fn: fn(&cosmic::Theme) -> cosmic::iced::Color = match status {
+        ModelStatus::None => |t| t.cosmic().palette.neutral_5.into(),
+        ModelStatus::Blocked | ModelStatus::Failed => |t| t.cosmic().destructive.base.into(),
+        ModelStatus::Idle => |t| t.cosmic().warning.base.into(),
+        ModelStatus::Ready => |t| t.cosmic().success.base.into(),
+    };
+    widget::container(widget::text(""))
         .width(Length::Fixed(size))
         .height(Length::Fixed(size))
         .class(cosmic::theme::Container::custom(move |theme| {
@@ -131,24 +153,18 @@ pub(crate) fn status_pill(app: &AppModel) -> Element<'_, Message> {
                 },
                 ..Default::default()
             }
-        }));
-
-    let inner = row![dot, pill_label(short)]
-        .spacing(6.0)
-        .align_y(Alignment::Center);
-
-    rounded_tooltip(
-        header_pill(inner),
-        text::body(detail),
-        widget::tooltip::Position::Bottom,
-    )
+        }))
+        .into()
 }
 
 /// A compact GPU readout for the header: a graphics-card glyph, the primary
 /// GPU's (shortened) name + total memory, and a live usage meter — wrapped in a
 /// [`header_pill`]. The hover tooltip lists every detected GPU with its
 /// used/free memory and full name. `None` when the daemon reported no GPUs.
-pub(crate) fn gpu_summary(app: &AppModel) -> Option<Element<'_, Message>> {
+///
+/// `compact` drops the name and figures, leaving the glyph and the meter, for a
+/// window too narrow for both; the tooltip still has them.
+pub(crate) fn gpu_summary(app: &AppModel, compact: bool) -> Option<Element<'_, Message>> {
     use fmt::{fmt_gib, fmt_gib_pair, short_gpu_name, vram_meter};
     use surface::rounded_tooltip;
     let primary = app.gpu_info.first()?;
@@ -180,8 +196,10 @@ pub(crate) fn gpu_summary(app: &AppModel) -> Option<Element<'_, Message>> {
     let mut inner = widget::row::with_capacity(3)
         .spacing(6.0)
         .align_y(Alignment::Center)
-        .push(icons::phosphor_tinted(icons::GRAPHICS_CARD, 14.0, muted))
-        .push(pill_label(label));
+        .push(icons::phosphor_tinted(icons::GRAPHICS_CARD, 14.0, muted));
+    if !compact {
+        inner = inner.push(pill_label(label));
+    }
     if let Some(used) = primary.used_bytes {
         inner = inner.push(vram_meter(used, primary.total_bytes));
     }
@@ -194,53 +212,48 @@ pub(crate) fn gpu_summary(app: &AppModel) -> Option<Element<'_, Message>> {
 
 // ── Models page ─────────────────────────────────────────────────────────────
 
-/// Models page view: one section per pipeline stage — Transcription (the
-/// active backend's card, or an empty state that opens the "Select a backend"
-/// sheet), Post-processing, and text to speech's Synthesis. Installing and managing backends lives on the
-/// Library page; selecting them happens here.
-///
-/// The two sections are deliberately the same shape, because the stages are:
-/// each names a backend, its capabilities, and the model running in it. The
-/// headings are what tell them apart.
+/// Models page view: each feature's pipeline as a row of steps, and under the
+/// rows the open step's card. Transcription's card is the active backend's, or
+/// the empty state that opens the "Select a backend" sheet; post-processing's
+/// and synthesis's come from [`stage_section`]. Installing and managing
+/// backends lives on the Library page; selecting them happens here.
 pub fn page(app: &AppModel) -> Element<'_, Message> {
     let title_row = widget::row::with_capacity(1)
         .align_y(Alignment::Center)
         .push(text::title3("Models").width(Length::Fill));
 
-    // The active backend's card when one is selected (and still installed);
-    // otherwise the empty state that opens the "Select a backend" sheet.
-    let transcription = match app
-        .models_page
-        .active_backend
-        .as_deref()
-        .and_then(|source| app.backends.iter().find(|b| b.source == source))
-    {
-        Some(backend) => page_container(active_backend_card(backend, app)),
-        None => page_container(select_sheet::no_backend_empty_state()),
-    };
+    let stage = app.models_page.pipeline_step;
+    // Measured where the card is drawn, so a wide window with the side panel
+    // open lays it out narrow too.
+    let card = widget::responsive(move |size| {
+        let width = size.width;
+        match stage.block() {
+            // The active backend's card when one is selected (and still
+            // installed); otherwise the empty state that opens the "Select a
+            // backend" sheet.
+            None => match app
+                .models_page
+                .active_backend
+                .as_deref()
+                .and_then(|source| app.backends.iter().find(|b| b.source == source))
+            {
+                Some(backend) => active_backend_card(backend, app, width),
+                None => select_sheet::no_backend_empty_state(),
+            },
+            Some(block) => stage_section::section(app, block, width),
+        }
+    })
+    .height(Length::Shrink);
 
-    // Two sections in a fixed-height column compete for it: the column hands
-    // each child its share, and the loser is drawn clipped — a card cut off
-    // mid-description, missing the model picker below it. Scrolling gives both
-    // their natural height instead, so a short window scrolls rather than
-    // truncates. Only the body scrolls; the page title stays put.
-    let body = widget::column::with_capacity(6)
-        .push(page_container(section_heading("Transcription")))
-        .push(transcription)
-        // The post-processor is selected independently of the transcription
-        // backend, so its section is shown whether or not one is selected.
-        .push(page_container(section_heading("Post-processing")))
-        .push(page_container(stage_section::section(
-            app,
-            crate::state::BlockStage::PostProcessing,
-        )))
-        // Text to speech's one stage, in the same shape: it reads back from
-        // the daemon like post-processing.
-        .push(page_container(section_heading("Synthesis")))
-        .push(page_container(stage_section::section(
-            app,
-            crate::state::BlockStage::Synthesis,
-        )));
+    // The rows and a card in a fixed-height column compete for it: the column
+    // hands each child its share, and the loser is drawn clipped. Scrolling
+    // gives each its natural height instead, so a short window scrolls rather
+    // than truncates. Only the body scrolls; the page title stays put.
+    let body = widget::column::with_capacity(4)
+        .push(page_container(pipeline::pipelines(app)))
+        .push(page_container(widget::divider::horizontal::default()))
+        .push(page_container(section_heading(pipeline::stage_name(stage))))
+        .push(page_container(card));
 
     widget::column::with_capacity(2)
         .push(page_container(title_row))
@@ -254,8 +267,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
         .into()
 }
 
-/// A Models-page section heading. One helper so the two sections cannot drift
-/// apart in weight or spacing.
+/// The heading over the open step's card.
 fn section_heading(label: &str) -> Element<'_, Message> {
     widget::row::with_capacity(1)
         .align_y(Alignment::Center)

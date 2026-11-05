@@ -20,6 +20,11 @@ impl AppModel {
         match message {
             ModelsPageMessage::ModelsTabActivated(entity) => self.activate_models_tab(entity),
 
+            ModelsPageMessage::SelectPipelineStep(stage) => {
+                self.models_page.pipeline_step = stage;
+                Task::none()
+            }
+
             ModelsPageMessage::OpenBackendConfig(_)
             | ModelsPageMessage::CloseBackendConfig
             | ModelsPageMessage::RefreshGpuInfo

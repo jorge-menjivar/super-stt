@@ -319,30 +319,40 @@ pub(super) fn card_title_block<'a>(
     version: &str,
     description: Option<String>,
 ) -> Element<'a, Message> {
-    let spacing = cosmic::theme::spacing();
-    // The version rides beside the name, muted: it answers "what am I running"
-    // without competing with the name for the eye. Backends installed before
-    // the daemon reported it have none, so the row simply omits it rather than
-    // showing a placeholder.
-    let title: Element<'a, Message> = if version.is_empty() {
-        text::title4(name).line_height(1.0).into()
-    } else {
-        row![
-            text::title4(name).line_height(1.0),
-            text::body(format!("v{version}")).class(cosmic::theme::Text::Color(muted_text_color())),
-        ]
-        .spacing(spacing.space_xxs)
-        .align_y(cosmic::iced::Alignment::End)
-        .into()
-    };
     let mut col = widget::column::with_capacity(2)
-        .spacing(spacing.space_xxxs)
+        .spacing(cosmic::theme::spacing().space_xxxs)
         .width(Length::Fill)
-        .push(title);
+        .push(card_title_line(name, version));
     if let Some(desc) = description {
-        col = col.push(text::body(desc).class(cosmic::theme::Text::Color(muted_text_color())));
+        col = col.push(card_description(desc));
     }
     col.into()
+}
+
+/// A card's name with its version beside it.
+///
+/// The version rides beside the name, muted: it answers "what am I running"
+/// without competing with the name for the eye. Backends installed before the
+/// daemon reported it have none, so the row simply omits it rather than
+/// showing a placeholder.
+fn card_title_line<'a>(name: String, version: &str) -> Element<'a, Message> {
+    if version.is_empty() {
+        return text::title4(name).line_height(1.0).into();
+    }
+    row![
+        text::title4(name).line_height(1.0),
+        text::body(format!("v{version}")).class(cosmic::theme::Text::Color(muted_text_color())),
+    ]
+    .spacing(cosmic::theme::spacing().space_xxs)
+    .align_y(cosmic::iced::Alignment::End)
+    .into()
+}
+
+/// A card's description, muted under its name.
+fn card_description<'a>(description: String) -> Element<'a, Message> {
+    text::body(description)
+        .class(cosmic::theme::Text::Color(muted_text_color()))
+        .into()
 }
 
 /// A backend's one-line description, resolved by `source`; `None` when neither
@@ -432,4 +442,88 @@ pub(in crate::ui::views) fn accent_button_class(radius: [f32; 4]) -> cosmic::the
         hovered: Box::new(move |_, _| style(0.26)),
         pressed: Box::new(move |_, _| style(0.34)),
     }
+}
+
+/// The width below which a card gives what sits beside its title, and the
+/// buttons of its control row, lines of their own instead of squeezing them
+/// into one: a narrow window, or a wide one with the side panel open.
+pub(super) const NARROW_CARD: f32 = 480.0;
+
+/// A card's header: its glyph tile, its name and description, then its
+/// actions.
+///
+/// On a narrow card the glyph sits beside the name alone, the description
+/// takes the card's width under them, and the actions a line of their own at
+/// its end: beside the glyph, a description ran five lines down a narrow
+/// column with the glyph floating halfway down it.
+pub(super) fn card_header<'a>(
+    narrow: bool,
+    glyph: Element<'a, Message>,
+    name: String,
+    version: &str,
+    description: Option<String>,
+    actions: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let spacing = cosmic::theme::spacing();
+    if !narrow {
+        return row![glyph, card_title_block(name, version, description), actions]
+            .spacing(spacing.space_s)
+            .align_y(cosmic::iced::Alignment::Center)
+            .into();
+    }
+    let mut column = widget::column::with_capacity(3)
+        .spacing(spacing.space_xs)
+        .push(
+            row![glyph, card_title_line(name, version)]
+                .spacing(spacing.space_s)
+                .align_y(cosmic::iced::Alignment::Center),
+        );
+    if let Some(description) = description {
+        column = column.push(card_description(description));
+    }
+    column
+        .push(row![widget::space::horizontal(), actions].align_y(cosmic::iced::Alignment::Center))
+        .into()
+}
+
+/// One of a card's control rows: its label, the line under the label when
+/// there is something to add, and the control.
+pub(super) type ControlRow<'a> = (&'static str, Option<String>, Element<'a, Message>);
+
+/// A card's controls: one labeled settings row per choice (the model, its
+/// device, voice and language), then the buttons at the end.
+///
+/// The rows are libcosmic's own `settings::flex_item`, as on the settings
+/// pages, so a control sits at the end of its row at its natural width and
+/// moves under its label when the card runs out of room for both.
+pub(super) fn control_rows<'a>(
+    rows: Vec<ControlRow<'a>>,
+    buttons: Vec<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let spacing = cosmic::theme::spacing();
+    let mut column = widget::column::with_capacity(2 * rows.len() + 1).spacing(spacing.space_xs);
+    for (index, (label, note, control)) in rows.into_iter().enumerate() {
+        if index > 0 {
+            column = column.push(widget::divider::horizontal::light());
+        }
+        let mut item = widget::settings::item::builder(label);
+        if let Some(note) = note {
+            item = item.description(note);
+        }
+        column = column.push(
+            item.flex_control(control)
+                .align_items(cosmic::iced::Alignment::Center),
+        );
+    }
+    if !buttons.is_empty() {
+        let end = buttons.into_iter().fold(
+            row![widget::space::horizontal()].spacing(spacing.space_xs),
+            widget::Row::push,
+        );
+        column = column.push(
+            end.align_y(cosmic::iced::Alignment::Center)
+                .width(Length::Fill),
+        );
+    }
+    column.into()
 }
