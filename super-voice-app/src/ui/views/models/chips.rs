@@ -1019,7 +1019,7 @@ mod update_offer_tests {
             description: None,
             license: "Apache-2.0".to_string(),
             kind: "wasm".to_string(),
-            contract: "v1".to_string(),
+            contract: "v4".to_string(),
             min_client: None,
             allowed_hosts: Vec::new(),
             online: true,

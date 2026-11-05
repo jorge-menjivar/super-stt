@@ -11,7 +11,7 @@
     kind = "wasm"
     entrypoint = "dummy.wasm"
     product = "super-voice"
-    contract = "v1"
+    contract = "v4"
     id = "app.test.dummy-tts"
     description = "Test backend."
     license = "Apache-2.0"

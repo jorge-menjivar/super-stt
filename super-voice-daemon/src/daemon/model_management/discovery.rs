@@ -124,7 +124,7 @@ mod tests {
     version    = "{version}"
     kind       = "subprocess"
     entrypoint = "y"
-    contract   = "v1"
+    contract   = "v4"
     id = "app.test.y"
     product = "super-voice"
     description = "Test backend."

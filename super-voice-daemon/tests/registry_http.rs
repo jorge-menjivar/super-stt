@@ -169,7 +169,7 @@ fn fixture_index_wasm(asset_url: &str) -> String {
             "description": null,
             "license": "Apache-2.0",
             "kind": "wasm",
-            "contract": "v1",
+            "contract": "v4",
             "entrypoint": "openai.wasm",
             "allowed_hosts": ["api.openai.com"],
             "online": true,
@@ -211,7 +211,7 @@ fn fixture_index_at_version(asset_url: &str, version: &str) -> String {
             "description": null,
             "license": "Apache-2.0",
             "kind": "wasm",
-            "contract": "v1",
+            "contract": "v4",
             "entrypoint": "openai.wasm",
             "allowed_hosts": ["api.openai.com"],
             "online": true,
@@ -251,7 +251,7 @@ name = "OpenAI"
 version = "1.0.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
-contract = "v1"
+contract = "v4"
 id = "app.test.y"
 product = "super-voice"
 description = "Installed at 1.0.0, so the catalog can offer something newer."

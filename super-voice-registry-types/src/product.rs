@@ -75,12 +75,14 @@ impl Voice {
 /// what it implements.
 ///
 /// A contract generation names a set of manifest fields and backend routes.
-/// Each generation is additive over the one before, so a backend declares the
-/// *lowest* generation whose fields it uses, and a daemon supports every
-/// generation up to the one it was built with.
+/// Each generation is additive over the one before (v2 is v1 plus the
+/// `[[models]].role` field and the `POST /v1/process` route), so a backend
+/// declares the *lowest* generation whose fields it uses, and a daemon
+/// supports every generation up to the one it was built with.
 ///
-/// Super Voice starts a line of its own. Its `v1` holds every field Super
-/// STT's `v4` and Super TTS's `v1` had, so no backend needs a later one yet.
+/// Super Voice continues Super STT's line: every backend published for Super
+/// STT declares one of these generations and keeps working. Text to speech
+/// joins at v4, the first generation Super Voice ships.
 ///
 /// Closed on purpose; see [`Generation`].
 ///
@@ -89,13 +91,33 @@ impl Voice {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Contract {
-    /// The v1 contract (`docs/protocol/backend/contract.md`).
+    /// The v1 contract (`docs/protocol/backend/contract.md`): transcription
+    /// only.
     V1,
+    /// v1 plus `[[models]].role` and `POST /v1/process`: a backend may serve
+    /// transcript post-processors.
+    V2,
+    /// v2 plus nothing in the manifest: what v3 adds is what the daemon
+    /// provides. A subprocess backend is granted a cache directory that
+    /// survives the process (`SUPER_VOICE_BACKEND_CACHE_DIR`, with
+    /// `XDG_CACHE_HOME` and `CUDA_CACHE_PATH` pointed into it), and the
+    /// load-progress fields of `GET /v1/status` (`phase`, `step`, `progress`)
+    /// are read. A backend that builds GPU kernels at load needs both: without
+    /// the cache it rebuilds them on every load, and without the progress it
+    /// runs into the flat load limit of a daemon that predates the stall rule.
+    V3,
+    /// v3 plus a required `[backend].product`, so the manifest says it is
+    /// built for Super Voice, and `[[models]].prepare_files`: the daemon
+    /// downloads those files first and sends `POST /v1/prepare`, so a first
+    /// load's GPU kernels are built while the weights still download. Text to
+    /// speech starts here: `role = "synthesis"`, its model keys, and
+    /// `POST /v1/synthesize`.
+    V4,
 }
 
 impl Generation for Contract {
-    const ALL: &'static [Self] = &[Self::V1];
-    const LATEST: Self = Self::V1;
+    const ALL: &'static [Self] = &[Self::V1, Self::V2, Self::V3, Self::V4];
+    const LATEST: Self = Self::V4;
 
     /// A new row is a forecast until its release ships, and nothing can check
     /// it: the version that introduces a generation is by definition not yet
@@ -103,8 +125,14 @@ impl Generation for Contract {
     /// renumbering here.
     fn min_client(self) -> &'static str {
         match self {
-            // The first Super Voice release.
-            Self::V1 => "0.3.0",
+            // Not 0.1.0: `[backend].contract` (and the backend manifest
+            // itself) first shipped in 0.2.0 (#212). A 0.1.x daemon has no
+            // notion of an installable backend to gate.
+            Self::V1 => "0.2.0",
+            Self::V2 => "0.2.4-beta.1",
+            // v4 ships in the same release as v3. There is no 0.2.5: the
+            // release after 0.2.4 is 0.3.0, the first Super Voice release.
+            Self::V3 | Self::V4 => "0.3.0",
         }
     }
 }
@@ -113,6 +141,9 @@ impl fmt::Display for Contract {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::V1 => write!(f, "v1"),
+            Self::V2 => write!(f, "v2"),
+            Self::V3 => write!(f, "v3"),
+            Self::V4 => write!(f, "v4"),
         }
     }
 }
@@ -179,7 +210,12 @@ pub struct VoiceCapabilities {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VoiceModel {
     /// What the model is for: transcribing audio, post-processing a
-    /// transcript, or speaking text. Required.
+    /// transcript, or speaking text. Default [`ModelRole::Transcription`], so
+    /// every manifest written before the field existed keeps its models
+    /// transcribing.
+    ///
+    /// A v2 field, and `synthesis` a v4 value.
+    #[serde(default)]
     pub role: ModelRole,
 
     /// Speech to text: force live previews onto a model that has none of its
@@ -259,11 +295,13 @@ impl VoiceModel {
 }
 
 /// What a model is for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ModelRole {
-    /// Speech to text, stage 1: audio in, text out.
+    /// Speech to text, stage 1: audio in, text out. The default, and what
+    /// every model was before the field existed.
+    #[default]
     Transcription,
     /// Speech to text, a later stage: rewrites the text the stage before it
     /// produced. Driven over `POST /v1/process`.
@@ -394,8 +432,16 @@ fn default_voice_kinds() -> Vec<VoiceKind> {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceIndexModel {
-    /// `transcription`, `post_processor` or `synthesis`.
+    /// `transcription`, `post_processor` or `synthesis`. An index published
+    /// before the field existed has none, and its models transcribe.
+    #[serde(default = "default_role")]
     pub role: String,
+}
+
+/// The index's role when an entry has none: [`ModelRole`]'s default, spelled,
+/// so the two cannot drift.
+fn default_role() -> String {
+    ModelRole::default().to_string()
 }
 
 /// A Super Voice rule a manifest breaks, reported as
@@ -406,6 +452,11 @@ pub enum VoiceManifestError {
     EmptyDescription,
     #[error("`[capabilities] streaming_input` is reserved and not yet supported")]
     StreamingInputReserved,
+    #[error(
+        "model `{model}` has role = synthesis, which requires `contract = \"v4\"`; this \
+         manifest declares `contract = \"{declared}\"`"
+    )]
+    SynthesisRequiresV4 { model: String, declared: Contract },
     #[error("model `{model}` has role = {role}, which does not take `{key}`")]
     FieldNotForRole {
         model: String,
@@ -459,6 +510,16 @@ impl From<VoiceManifestError> for ManifestError {
     }
 }
 
+/// A text-to-speech model key: added in v4.
+const fn synthesis_key(key: &'static str) -> ContractField<Contract> {
+    ContractField {
+        since: Contract::V4,
+        rule: FieldRule::Added,
+        table: "models",
+        key,
+    }
+}
+
 impl Product for Voice {
     type Contract = Contract;
     type Capabilities = VoiceCapabilities;
@@ -468,22 +529,57 @@ impl Product for Voice {
     const SLUG: &'static str = "super-voice";
 
     const CONTRACT_FIELDS: &'static [ContractField<Contract>] = &[
-        // `id` names the install directory and is what the registry matches
-        // an entry against, and `product` is what keeps another product's
-        // backend out. Both are required from the first generation: every
-        // Super Voice manifest is written for this contract line.
         ContractField {
-            since: Contract::V1,
+            since: Contract::V2,
+            rule: FieldRule::Added,
+            table: "models",
+            key: "role",
+        },
+        ContractField {
+            since: Contract::V2,
+            rule: FieldRule::Added,
+            table: "models",
+            key: "force_preview_support",
+        },
+        // `id` names the install directory and is what the registry matches an
+        // entry against, so a published backend has always needed one: the
+        // indexer refuses a release without it. It stayed optional in the type
+        // only so backends installed before the field existed keep loading, and
+        // v2 is new enough that no such backend can declare it. Requiring it
+        // here moves the failure from a rejected release to the author's
+        // editor.
+        ContractField {
+            since: Contract::V2,
             rule: FieldRule::RequiredFrom,
             table: "backend",
             key: "id",
         },
+        // Every backend published before the field existed is a speech-to-text
+        // backend of this line, so it stays optional below v4 and an absent one
+        // still reads as this product's. Another product's manifest always
+        // names its product, so the rule that refuses it needs no generation.
         ContractField {
-            since: Contract::V1,
+            since: Contract::V4,
             rule: FieldRule::RequiredFrom,
             table: "backend",
             key: "product",
         },
+        ContractField {
+            since: Contract::V4,
+            rule: FieldRule::Added,
+            table: "models",
+            key: "prepare_files",
+        },
+        // Text to speech's model keys. A daemon of an older generation cannot
+        // speak, so a backend using them declares v4; the role value itself
+        // is checked in `validate`, since this table holds keys only.
+        synthesis_key("max_input_chars"),
+        synthesis_key("output_sample_rate"),
+        synthesis_key("default_voice"),
+        synthesis_key("voice_kinds"),
+        synthesis_key("clone_ref_seconds"),
+        synthesis_key("clone_needs_transcript"),
+        synthesis_key("voices"),
     ];
 
     const SCHEMA: SchemaNames = SchemaNames {
@@ -510,6 +606,16 @@ impl Product for Voice {
         }
         for model in &manifest.models {
             if model.product.role.is_synthesis() {
+                // Older generations are read by daemons that have no
+                // synthesis, which would list the backend and then fail to
+                // install it.
+                if manifest.backend.contract < Contract::V4 {
+                    return Err(VoiceManifestError::SynthesisRequiresV4 {
+                        model: model.name.clone(),
+                        declared: manifest.backend.contract,
+                    }
+                    .into());
+                }
                 validate_synthesis(model)?;
             } else {
                 validate_speech_to_text(model)?;

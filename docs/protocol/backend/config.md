@@ -61,21 +61,21 @@ version     = "0.1.0"
 kind        = "subprocess"
 entrypoint  = "whisper-backend"
 product     = "super-voice"
-contract    = "v1"
+contract    = "v4"
 license     = "Apache-2.0"
 description = "Local Whisper speech-to-text."
 ```
 
 | Field        | Type   | Required        | Notes                                                                 |
 |--------------|--------|-----------------|-----------------------------------------------------------------------|
-| `id`         | string | yes             | Globally unique reverse-DNS identifier for the backend, e.g. `app.super-voice.voxtral`. Names the directory the backend is installed into, and is what the registry matches an entry against. |
+| `id`         | string | **yes** from `contract = "v2"`; for publication under `v1` | Globally unique reverse-DNS identifier for the backend, e.g. `app.super-voice.voxtral`. Names the directory the backend is installed into, and is what the registry matches an entry against. Required outright from `v2`; see [contract generations](#contract-generations). |
 | `source`     | string | yes             | Canonical repository id for this backend. Becomes the `source` of every model it provides (see [identity](./contract.md#model-identity)). Must be unique across installed backends. |
 | `name`       | string | yes             | Human-readable display name.                                          |
 | `version`    | string | yes             | Backend version (semver).                                            |
 | `kind`       | string | yes             | `subprocess` or `wasm` — selects the transport.                       |
 | `entrypoint` | string | yes             | Path, relative to the backend directory, to the executable (`subprocess`) or the `.wasm` component (`wasm`). |
-| `product`    | string | yes             | The product the backend is built for: `super-voice`. A manifest naming any other product is refused. |
-| `contract`   | string | yes             | The [contract generation](#contract-generations) the backend implements: `v1`. Unknown values are rejected. |
+| `product`    | string | **yes** from `contract = "v4"` | The product the backend is built for: `super-voice`. A manifest naming any other product is refused under every contract. Below `v4` it may be left out, and the backend is read as a Super Voice one; see [contract generations](#contract-generations). |
+| `contract`   | string | yes             | The [contract generation](#contract-generations) the backend implements: `v1`, `v2`, `v3` or `v4`. Declare the lowest generation whose fields you use. Unknown values are rejected. |
 | `license`    | string | for publication | SPDX identifier of a current OSI-approved or FSF Free/Libre license (e.g. `Apache-2.0`, `MIT`, `GPL-3.0-only`), or the literal `other` for a license outside that set. Required for registry publication; optional for locally installed backends. |
 | `description`| string | yes             | One-line, human-readable summary shown in the registry/Browse listing. |
 
@@ -106,17 +106,21 @@ the `(name, source)` pair described in [contract.md](./contract.md).
 
 `contract` is the one thing a manifest says about what it needs from Super
 Voice. A generation names a set of manifest fields and backend routes, and
-each later generation **extends** the one before rather than replacing it.
-Declare the lowest generation whose fields you use.
+each generation **extends** the one before rather than replacing it: `v2` is
+everything `v1` defines, plus what `v2` adds. Declare the lowest generation
+whose fields you use: a backend that only transcribes is `v1` however new it
+is.
+
+Super Voice continues Super STT's line, so every backend published for Super
+STT declares one of these generations and keeps its meaning. Text to speech
+joins at `v4`, the first generation Super Voice ships.
 
 | Generation | Adds                                                                         | First supported by |
 |------------|------------------------------------------------------------------------------|--------------------|
-| `v1`       | The whole contract today: transcription over [`POST /v1/transcribe`](./contract.md#post-v1transcribe), post-processing over [`POST /v1/process`](./contract.md#post-v1process), synthesis over [`POST /v1/synthesize`](./contract.md#post-v1synthesize) with the cloned-voice routes for models that declare them, [`POST /v1/prepare`](./contract.md#post-v1prepare) for models that declare `prepare_files`, and every manifest field on this page. **Requires** [`[backend].id`](#backend) and [`[backend].product`](#backend). | Super Voice 0.3.0  |
-
-Super Voice starts a contract line of its own. Super STT's backends were on
-its `v1` to `v4`, and Super TTS's on its own `v1`; Super Voice's `v1` holds
-everything both had, so a backend moving over declares `v1` whatever it
-declared before.
+| `v1`       | The base contract: transcription over [`POST /v1/transcribe`](./contract.md#post-v1transcribe). | Super STT 0.2.0    |
+| `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process): transcript post-processors. [`[[models]].force_preview_support`](#models): live previews for a model that has none of its own. Also **requires** [`[backend].id`](#backend). | Super STT 0.2.4    |
+| `v3`       | No manifest field. The daemon grants a subprocess backend a [cache directory](./subprocess.md) that survives the process, and reads the [load progress](./contract.md#get-v1status) (`phase`, `step`, `progress`) of `GET /v1/status`. Declare it when a load builds GPU kernels: an older daemon rebuilds them on every load and cuts a slow one off at its flat load limit. | Super Voice 0.3.0  |
+| `v4`       | [`[[models]].prepare_files`](#models) and [`POST /v1/prepare`](./contract.md#post-v1prepare): a first load's GPU kernels are built from the model's configuration files while its weights still download. Text to speech: `role = "synthesis"`, its model keys, and [`POST /v1/synthesize`](./contract.md#post-v1synthesize) with the cloned-voice routes for models that declare them. **Requires** [`[backend].product`](#backend). | Super Voice 0.3.0  |
 
 Extending the contract does not oblige a backend to serve all of it. Which
 routes a backend must implement is decided by the models it declares, not by
@@ -126,7 +130,7 @@ the daemon may *expect to find*; the models say what it will actually call.
 
 You never write a Super Voice version. The generation implies one, and the
 registry carries it: the indexer stamps every index entry with `min_client`,
-the release that first understood that entry's generation (`0.3.0` for `v1`).
+the release that first understood that entry's generation (`0.3.0` for `v4`).
 It is **reported, never compared**. A daemon decides compatibility by whether
 it can parse the generation at all, so a prerelease of the release named there
 (`0.3.0-beta.1`, which semver orders *below* `0.3.0`) is not wrongly locked
@@ -135,7 +139,7 @@ install can name the version to update to, instead of showing only a failure
 to parse.
 
 A Super Voice that predates the generation cannot parse it, so it shows the
-backend in **Browse** as needing a newer Super Voice, naming the version — and
+backend in **Browse** as needing a newer Super Voice, naming the version, and
 does so whether or not "Show incompatible" is on, since that toggle is for
 hardware this machine cannot satisfy, not for something the user can fix by
 updating.
@@ -145,7 +149,7 @@ side, so a build that predates a generation cannot parse a manifest declaring
 it, and says which ones it does know:
 
 ```
-unknown contract `v2`; this build knows v1
+unknown contract `v5`; this build knows v1, v2, v3, v4
 ```
 
 It is the *absence* of knowledge that refuses. That is what makes every
@@ -154,19 +158,17 @@ released, this one included, with no `min_version` field anyone had to think
 to add first.
 
 Which generation introduced, or began requiring, each manifest field lives in
-one table (`CONTRACT_FIELDS`, in `super-voice-registry-types`). Its rows so far
-are `v1` requiring [`[backend].id`](#backend) and
-[`[backend].product`](#backend). Adding a field to a `v2` means adding a row.
-Both the manifest parser and the published `backend.schema.json` learn the
-rule from that row, so an editor bound to the schema flags exactly what the
-parser would refuse, before anything is released.
+one table (`CONTRACT_FIELDS`, in `super-voice-registry-types`). Both the
+manifest parser and the published `backend.schema.json` learn the rule from
+that row, so an editor bound to the schema flags exactly what the parser would
+refuse, before anything is released.
 
 A row expresses one of two rules:
 
 1. A field **added** in a generation may not be spelled under an older one:
 
    ```
-   `[[models]].example_field` requires `contract = "v2"`, but this manifest declares
+   `[[models]].role` requires `contract = "v2"`, but this manifest declares
    `contract = "v1"` — raise the contract to use the field, or remove the field to
    stay on `v1`
    ```
@@ -178,20 +180,16 @@ A row expresses one of two rules:
    field with its default value still counts as declaring it: the rule is about
    what the document says, not about what the parsed manifest ends up holding.
 2. A field a generation **requires** is the mirror image, for closing an
-   optionality that only survived for backward compatibility. `v1` is the
-   first generation, so its required fields can only be added:
+   optionality that only survived for backward compatibility. `id` is the
+   first: a published backend has always needed one (the indexer refuses a
+   release without it), but the field stayed optional so that backends
+   installed before it existed keep loading. No `v2` backend can predate it,
+   so `v2` requires it, and the failure moves from a rejected release to the
+   author's editor:
 
    ```
-   `contract = "v1"` requires `[backend].id`, which this manifest does not declare
-   — add it
-   ```
-
-   A later generation that requires a field also names the older one where it
-   is optional:
-
-   ```
-   `contract = "v2"` requires `[backend].example_field`, which this manifest does not
-   declare — add it, or drop to `contract = "v1"` where it is optional
+   `contract = "v2"` requires `[backend].id`, which this manifest does not declare
+   — add it, or drop to `contract = "v1"` where it is optional
    ```
 
 These rules apply to a manifest being **admitted**: a registry install, a
@@ -205,15 +203,25 @@ rule below is not exempt: a backend built for another product cannot run here
 however it got onto disk.
 
 `product` keeps other products' backends out. Super Voice refuses a manifest
-that names any product but `super-voice`, the two it replaces included:
+that names any product but `super-voice`, under every contract:
 
 ```
-this backend is built for super-stt, not super-voice
+this backend is built for super-tts, not super-voice
 ```
+
+Every backend published before the field existed is a speech-to-text backend
+of this line, so below `v4` it may be left out, and a manifest without it is
+read as a Super Voice one. `v4` requires it.
 
 Only field *names* are versioned this way. A generation that widens an
-existing field's value set instead — a new model `role`, a new device — cannot
-be expressed in that table, and is caught by that field's own parser.
+existing field's value set instead (a new model `role`, a new device) cannot
+be expressed in that table. `role = "synthesis"` is the one such value so
+far, and the parser refuses it below `v4` itself:
+
+```
+model `m` has role = synthesis, which requires `contract = "v4"`; this manifest
+declares `contract = "v2"`
+```
 
 ## `[network]`
 
@@ -680,7 +688,7 @@ processing_interval_ms = 1000
 | Field                    | Type            | Required | Notes                                                            |
 |--------------------------|-----------------|----------|------------------------------------------------------------------|
 | `name`                   | string          | yes      | Wire model name.                                                 |
-| `role`                   | string          | yes      | What the model is for: `transcription`, `post_processor` or `synthesis`. See [model roles](#model-roles). |
+| `role`                   | string          | no       | What the model is for: `transcription`, `post_processor` or `synthesis`. Default `transcription`. A `v2` field; `synthesis` needs `v4`. See [model roles](#model-roles). |
 | `multilingual`           | bool            | no       | Whether the model accepts more than one language. Default `true`. When `true`, the model's route (`POST /v1/transcribe`, `/v1/process` or `/v1/synthesize`) accepts a `language` from `supported_languages`. |
 | `primary_language`       | string          | yes      | Default language code (e.g. `en`); used when `language` is omitted. |
 | `supported_languages`    | array of string | yes      | Language codes the model accepts; must include `primary_language`. When `multilingual` is `false`, it is exactly `[primary_language]`. |
@@ -688,7 +696,7 @@ processing_interval_ms = 1000
 | `estimated_vram_bytes`   | integer         | no       | Conservative GPU memory estimate. Default `0`; use `0` for cloud models. |
 | `processing_interval_ms` | integer         | no       | Suggested minimum interval between streaming passes, in ms.      |
 | `realtime`               | bool            | no       | When `true`, the model is driven over the consumer-facing WebSocket endpoint (`GET /v1/stt/transcribe/realtime`) rather than batch `POST /v1/transcribe`. Requires `[capabilities] websocket = true`. Default `false`. For a synthesis model it is **reserved**: the transport works, but no session payload is defined yet. |
-| `force_preview_support`  | bool            | no       | **Speech to text only.** Force live previews onto a model that has none of its own: while its microphone is open, the daemon re-transcribes a sliding window of the capture every `processing_interval_ms` and shows the result. Each pass is a full transcription the final pass repeats, and for an online model a billed request whose output is discarded, so it is off unless the manifest turns it on. Default `false`. Not consulted for a `realtime` model, which streams its own previews. See [previews](../endpoints/v1/transcribe.md#previews). |
+| `force_preview_support`  | bool            | no       | **Speech to text only.** A `v2` field. Force live previews onto a model that has none of its own: while its microphone is open, the daemon re-transcribes a sliding window of the capture every `processing_interval_ms` and shows the result. Each pass is a full transcription the final pass repeats, and for an online model a billed request whose output is discarded, so it is off unless the manifest turns it on. Default `false`. Not consulted for a `realtime` model, which streams its own previews. See [previews](../endpoints/v1/transcribe.md#previews). |
 | `max_input_chars`        | integer         | no       | **Text to speech only.** Longest `text` the model accepts in one `POST /v1/synthesize`. Absent means unbounded: the daemon sends whole utterances and never splits for length. When set, the daemon chunks on sentence boundaries to stay under it. Must be non-zero. |
 | `output_sample_rate`      | integer         | no       | **Text to speech only.** Native output rate in Hz, e.g. `24000`. **Advisory** — the authoritative rate is the `x-tts-sample-rate` response header on each synthesis, since a manifest cannot know what a cloud provider will actually return. It lets the settings UI show a rate and the daemon pre-size buffers before the first response. Must be 8000–192000. |
 | `default_voice`          | string          | no       | **Text to speech only.** Voice used when a request omits `voice`. **Required** when `voices` is non-empty, and must name one of them. |
@@ -696,7 +704,7 @@ processing_interval_ms = 1000
 | `clone_ref_seconds`      | number          | no       | **Text to speech only.** Longest reference audio accepted for a cloned voice, in seconds. **Required** when `voice_kinds` contains `cloned`, forbidden otherwise. Must be positive. The daemon trims a longer recording to this before registering it, so the value is a budget rather than a filter. |
 | `clone_needs_transcript` | boolean         | no       | **Text to speech only.** Whether registering a cloned voice also requires the reference clip's transcript. Default `false`; forbidden without `cloned` in `voice_kinds`. Set it for in-context cloning, which conditions on the words as well as the audio — the daemon then refuses to register a clip stored without one, instead of letting every synthesis fail. Speaker-embedding cloning leaves it unset. |
 | `voices`                 | array of table  | no       | **Text to speech only.** Preset voices the model provides — see [`[[models.voices]]`](#voices). Empty for models whose voices are entirely cloned or described. |
-| `prepare_files`          | array of string | no       | The files the model's [prepare](./contract.md#post-v1prepare) reads, each a `destination` from the model's [`files`](#modelsfiles). The daemon downloads these first, starts the backend and sends `POST /v1/prepare`, then downloads the rest while the backend builds its kernels. Declaring it promises the backend serves `POST /v1/prepare` for this model, and that the prepare reads only these files. An entry that is not one of the model's `destination`s is refused. Default empty: no prepare. |
+| `prepare_files`          | array of string | no       | The files the model's [prepare](./contract.md#post-v1prepare) reads, each a `destination` from the model's [`files`](#modelsfiles). The daemon downloads these first, starts the backend and sends `POST /v1/prepare`, then downloads the rest while the backend builds its kernels. Declaring it promises the backend serves `POST /v1/prepare` for this model, and that the prepare reads only these files. An entry that is not one of the model's `destination`s is refused. Default empty: no prepare. A `v4` field. |
 | `provider`               | string          | no       | Compatibility field. Not part of model identity and read by nothing in the daemon; it is echoed back verbatim as `provider` in [`POST /v1/load`](./contract.md#post-v1load) so a backend that still validates it keeps loading. |
 
 > **Compatibility.** `provider` was part of model identity before it became
@@ -714,8 +722,10 @@ describe language capability. When `multilingual` is `true`,
 
 ### Model roles
 
-Every model declares its `role`. There is no default: one backend can hold
-models of both features, so no role is the obvious one.
+A model's `role` says what it is for. A model that leaves it out
+transcribes, as every model did before the field existed in `v2`. Declare it
+on every model of a backend that holds more than one role, so the manifest
+reads the way the daemon does.
 
 `role` decides which `/v1` route the daemon drives a model over, and where the
 model can be selected:
@@ -952,7 +962,7 @@ version     = "0.1.0"
 kind        = "subprocess"
 entrypoint  = "whisper-backend"
 product     = "super-voice"
-contract    = "v1"
+contract    = "v4"
 license     = "Apache-2.0"
 description = "Local Whisper speech-to-text."
 
@@ -1014,7 +1024,7 @@ version     = "0.1.0"
 kind        = "wasm"
 entrypoint  = "openai.wasm"
 product     = "super-voice"
-contract    = "v1"
+contract    = "v4"
 license     = "Apache-2.0"
 description = "OpenAI cloud transcription API."
 

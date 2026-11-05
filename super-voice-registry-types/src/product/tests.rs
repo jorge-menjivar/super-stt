@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The Super Voice manifest rules, read through the shared parser.
 
-use super::{ModelRole, Product, SUPER_VOICE, Voice, VoiceKind, VoiceManifestError};
+use super::Generation;
+use super::{Contract, ModelRole, Product, SUPER_VOICE, Voice, VoiceKind, VoiceManifestError};
 use crate::index::IndexModel;
 use crate::manifest::{Manifest, ManifestError};
 
@@ -14,7 +15,7 @@ const VALID: &str = r#"
     entrypoint = "y.wasm"
     id = "com.example.y"
     product = "super-voice"
-    contract = "v1"
+    contract = "v4"
     description = "Test backend."
     "#;
 
@@ -267,36 +268,181 @@ fn a_manifest_names_super_voice() {
     assert_eq!(SUPER_VOICE.slug, Voice::SLUG);
 }
 
-/// v1 requires `[backend].product` and `[backend].id`, and there is no older
-/// contract to drop to.
+/// The versions each generation is reported as needing are the releases
+/// that shipped them. A daemon that predates a generation shows this to the
+/// user as what to update to.
 #[test]
-fn a_manifest_must_name_its_product_and_id() {
-    for (line, field) in [
-        ("    product = \"super-voice\"\n", "product"),
-        ("    id = \"com.example.y\"\n", "id"),
-    ] {
-        let without = VALID.replace(line, "");
-        assert_ne!(without, VALID, "the test removed `{field}`");
-        let err = Manifest::parse(&without).expect_err("v1 requires it");
-        assert_eq!(
-            err.to_string(),
-            format!(
-                "`contract = \"v1\"` requires `[backend].{field}`, which this manifest does \
-                 not declare — add it"
-            )
-        );
+fn each_generation_names_the_release_that_shipped_it() {
+    assert_eq!(Contract::V1.min_client(), "0.2.0");
+    assert_eq!(Contract::V2.min_client(), "0.2.4-beta.1");
+    assert_eq!(Contract::V3.min_client(), "0.3.0");
+    assert_eq!(Contract::V4.min_client(), "0.3.0");
+    assert_eq!(Contract::LATEST, Contract::V4);
+}
+
+/// `VALID` with `contract` set to `contract` and `backend` lines in place of
+/// its `id` and `product`, plus one model with `model` inside it.
+fn at(contract: &str, backend: &str, model: &str) -> String {
+    let head = VALID
+        .replace("contract = \"v4\"", &format!("contract = \"{contract}\""))
+        .replace("    id = \"com.example.y\"\n", "")
+        .replace("    product = \"super-voice\"\n", "");
+    format!(
+        "{head}
+        {backend}
+        [[models]]
+        name = \"m\"
+        primary_language = \"en\"
+        supported_languages = [\"en\"]
+        supported_devices = [\"cpu\"]
+        {model}
+        "
+    )
+}
+
+/// v4 is v3 plus a required `[backend].product`. Both v2 and later require
+/// `[backend].id`.
+#[test]
+fn v4_requires_the_product_and_v2_the_id() {
+    let id = "id = \"com.example.y\"";
+    match Manifest::parse(&at("v4", id, "")) {
+        Err(ManifestError::FieldRequiredByContract {
+            field, previous, ..
+        }) => {
+            assert_eq!(field, "[backend].product");
+            assert_eq!(previous.as_deref(), Some("v3"));
+        }
+        other => panic!("v4 without a product must be refused, got {other:?}"),
+    }
+    for contract in ["v2", "v3", "v4"] {
+        match Manifest::parse(&at(contract, "product = \"super-voice\"", "")) {
+            Err(ManifestError::FieldRequiredByContract { field, .. }) => {
+                assert_eq!(field, "[backend].id");
+            }
+            other => panic!("{contract} without an id must be refused, got {other:?}"),
+        }
+    }
+    let m = Manifest::parse(&at("v4", &format!("{id}\nproduct = \"super-voice\""), ""))
+        .expect("v4 with a product parses");
+    assert_eq!(m.backend.contract, Contract::V4);
+    assert_eq!(m.backend.product.as_deref(), Some("super-voice"));
+}
+
+/// Below v4 the product is optional, because every backend published before
+/// the field existed is a speech-to-text backend of this line. One may still
+/// name it. These are the manifests Super STT's published backends carry.
+#[test]
+fn older_generations_may_name_the_product_or_leave_it_out() {
+    let id = "id = \"com.example.y\"";
+    for contract in ["v1", "v2", "v3"] {
+        let without = Manifest::parse(&at(contract, id, ""))
+            .unwrap_or_else(|e| panic!("{contract} without a product: {e}"));
+        assert_eq!(without.backend.product, None);
+        Manifest::parse(&at(
+            contract,
+            &format!("{id}\nproduct = \"super-voice\""),
+            "",
+        ))
+        .unwrap_or_else(|e| panic!("{contract} with a product: {e}"));
     }
 }
 
-/// `prepare_files` is a v1 field.
+/// `prepare_files` is a v4 field: a v3 manifest that declares it is refused,
+/// naming the field, and a v4 one parses with it.
 #[test]
-fn prepare_files_parse_under_v1() {
-    let m = Manifest::parse(&with_model(
-        r#"prepare_files = ["m/config.json"]
-        files = [{ url = "https://h/config.json", destination = "m/config.json" }]"#,
-    ))
-    .expect("prepare_files under v1 parses");
+fn prepare_files_requires_v4() {
+    let id = "id = \"com.example.y\"";
+    let model = r#"prepare_files = ["m/config.json"]
+        files = [{ url = "https://h/config.json", destination = "m/config.json" }]"#;
+    match Manifest::parse(&at("v3", id, model)) {
+        Err(ManifestError::FieldRequiresContract {
+            field,
+            since,
+            declared,
+        }) => {
+            assert_eq!(field, "[[models]].prepare_files");
+            assert_eq!(since, "v4");
+            assert_eq!(declared, "v3");
+        }
+        other => panic!("prepare_files under v3 must be refused, got {other:?}"),
+    }
+    let m = Manifest::parse(&with_model(model)).expect("prepare_files under v4 parses");
     assert_eq!(m.models[0].prepare_files, ["m/config.json"]);
+}
+
+/// `role` and `force_preview_support` are v2 fields: a v1 manifest that
+/// spells either one is refused, naming the field.
+#[test]
+fn v2_model_fields_are_refused_under_v1() {
+    for key in ["role = \"post_processor\"", "force_preview_support = true"] {
+        match Manifest::parse(&at("v1", "", key)) {
+            Err(ManifestError::FieldRequiresContract {
+                since, declared, ..
+            }) => {
+                assert_eq!(since, "v2");
+                assert_eq!(declared, "v1");
+            }
+            other => panic!("`{key}` under v1 must be refused, got {other:?}"),
+        }
+    }
+}
+
+/// v3 adds no field, and keeps everything v2 does.
+#[test]
+fn v3_is_v2_with_nothing_removed() {
+    let fields = "role = \"post_processor\"\nforce_preview_support = true";
+    for contract in ["v2", "v3"] {
+        let m = Manifest::parse(&at(contract, "id = \"com.example.y\"", fields))
+            .unwrap_or_else(|e| panic!("{contract}: {e}"));
+        assert!(m.models[0].product.role.is_post_processor());
+        assert!(m.models[0].product.force_preview_support);
+    }
+}
+
+/// A model that leaves `role` out transcribes, in a manifest and in an index
+/// published before the field existed.
+#[test]
+fn a_missing_role_reads_as_transcription() {
+    let m = Manifest::parse(&at("v1", "", "")).expect("parses");
+    assert_eq!(m.models[0].product.role, ModelRole::Transcription);
+
+    let model: IndexModel =
+        serde_json::from_str(r#"{"name":"m","supported_devices":["cpu"]}"#).expect("parses");
+    assert_eq!(model.product.role, "transcription");
+}
+
+/// Text to speech starts at v4: a synthesis model, or a synthesis key, under
+/// an older contract is refused. A daemon of that generation would list the
+/// backend and then fail to install it.
+#[test]
+fn synthesis_requires_v4() {
+    let id = "id = \"com.example.y\"";
+    for contract in ["v2", "v3"] {
+        let err = refusal(&at(contract, id, "role = \"synthesis\""));
+        assert!(
+            matches!(&err, VoiceManifestError::SynthesisRequiresV4 { declared, .. }
+                if declared.to_string() == contract),
+            "{err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "model `m` has role = synthesis, which requires `contract = \"v4\"`; this \
+                 manifest declares `contract = \"{contract}\"`"
+            )
+        );
+        match Manifest::parse(&at(
+            contract,
+            id,
+            "role = \"synthesis\"\nvoice_kinds = [\"preset\"]",
+        )) {
+            Err(ManifestError::FieldRequiresContract { field, since, .. }) => {
+                assert_eq!(field, "[[models]].voice_kinds");
+                assert_eq!(since, "v4");
+            }
+            other => panic!("voice_kinds under {contract} must be refused, got {other:?}"),
+        }
+    }
 }
 
 /// A manifest naming any product but Super Voice is refused, the two it
@@ -315,16 +461,10 @@ fn a_manifest_for_another_product_is_refused() {
     }
 }
 
-/// Every model says what it is for. There is no default: a backend can hold
-/// models of either feature, so no role is the obvious one.
+/// A role this build does not know is refused, naming it.
 #[test]
-fn a_model_must_declare_its_role() {
-    let without = with_model("").replace("        role = \"synthesis\"\n", "");
-    assert!(!without.contains("role ="), "the test removed `role`");
-    let err = Manifest::parse(&without).expect_err("role is required");
-    assert!(err.to_string().contains("role"), "{err}");
-    let unknown = model("dictation", "");
-    let err = Manifest::parse(&unknown).expect_err("an unknown role is refused");
+fn an_unknown_role_is_refused() {
+    let err = Manifest::parse(&model("dictation", "")).expect_err("an unknown role is refused");
     assert!(err.to_string().contains("dictation"), "{err}");
 }
 

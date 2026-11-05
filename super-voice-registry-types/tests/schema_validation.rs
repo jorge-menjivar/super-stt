@@ -149,7 +149,7 @@ fn wasm_base() -> Value {
     json!({
         "backend": { "id": "app.test.y", "source": "github.com/x/y", "name": "Y",
                       "version": "1.0.0", "kind": "wasm", "entrypoint": "y.wasm",
-                      "contract": "v1", "product": "super-voice", "license": "Apache-2.0",
+                      "contract": "v4", "product": "super-voice", "license": "Apache-2.0",
                       "description": "Y backend." },
         "assets": { "wasm": "y.wasm" }
     })
@@ -163,11 +163,11 @@ fn model(role: &str) -> Value {
     })
 }
 
-/// Every model declares its role, and each of the three validates. A model
-/// without one is refused at the model, so an editor points at the right
-/// line. The schema half of `Manifest::parse` requiring the key.
+/// Each of the three roles validates, and so does a model that leaves the
+/// key out, which transcribes. The schema half of `Manifest::parse`'s
+/// default. Below v2 the key may not be spelled at all.
 #[test]
-fn the_schema_requires_each_model_to_declare_its_role() {
+fn the_schema_takes_every_role_and_none() {
     let v = backend_validator();
     for role in ["transcription", "post_processor", "synthesis"] {
         let mut manifest = wasm_base();
@@ -182,18 +182,18 @@ fn the_schema_requires_each_model_to_declare_its_role() {
     let mut without = wasm_base();
     let mut m = model("transcription");
     m.as_object_mut().unwrap().remove("role");
-    without["models"] = json!([m]);
-    let at: Vec<String> = v
-        .iter_errors(&without)
-        .map(|e| e.instance_path().to_string())
-        .collect();
-    assert!(
-        at.iter().any(|path| path.ends_with("/models/0")),
-        "a model without a role must be refused at the model: {at:#?}"
-    );
+    without["models"] = json!([m.clone()]);
+    assert!(v.is_valid(&without), "a model without a role validates");
+
+    let mut v1 = wasm_base();
+    v1["backend"]["contract"] = json!("v1");
+    v1["models"] = json!([model("transcription")]);
+    assert!(!v.is_valid(&v1), "`role` is refused under v1");
+    v1["models"] = json!([m]);
+    assert!(v.is_valid(&v1), "v1 without a role validates");
 }
 
-/// `[backend].product` takes `super-voice` and nothing else, and v1 requires
+/// `[backend].product` takes `super-voice` and nothing else, and v4 requires
 /// it. The schema half of `Manifest::parse`'s `OtherProduct` and
 /// `FieldRequiredByContract`.
 #[test]
@@ -212,7 +212,7 @@ fn the_schema_takes_only_super_voice_and_requires_it() {
         .as_object_mut()
         .unwrap()
         .remove("product");
-    assert!(!v.is_valid(&without), "v1 requires the product");
+    assert!(!v.is_valid(&without), "v4 requires the product");
 }
 
 /// Every generation the parser knows is one the schema offers, and nothing

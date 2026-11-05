@@ -47,7 +47,7 @@ GET /registry/backend/list?include_incompatible=false&kind=wasm&online=true&q=op
       "description": "…",
       "license": "Apache-2.0",
       "kind": "subprocess",
-      "contract": "v1",
+      "contract": "v4",
       "min_client": "0.1.0",
       "allowed_hosts": [],
       "online": false,

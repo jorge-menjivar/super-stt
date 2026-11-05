@@ -28,7 +28,7 @@ fn registry_backend() -> serde_json::Value {
         "name": "OpenAI",
         "license": "Apache-2.0",
         "kind": "wasm",
-        "contract": "v1",
+        "contract": "v4",
         "online": true,
         "supports_gpu": false,
         "supports_cpu": false,

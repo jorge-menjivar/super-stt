@@ -103,8 +103,10 @@ The rest of this section is shared by every role.
 
 The manifest's [`contract`](./config.md#contract-generations) names a
 *generation* of this agreement — which fields a `backend.toml` may declare
-and which routes exist to be served. Each generation extends the one before
-it. `v1` is the only generation so far, and it is everything on this page.
+and which routes exist to be served. Each generation extends the last: `v2` is
+`v1` plus `[[models]].role` and `POST /v1/process`, and `v4` adds
+`POST /v1/prepare` and text to speech. The table is in
+[contract generations](./config.md#contract-generations).
 
 A generation does not oblige a backend to serve all of it. What a backend must
 implement follows from the models it declares, not from the generation it
@@ -113,14 +115,14 @@ names:
 1. A backend serving only `post_processor` models implements
    `POST /v1/process` and never `POST /v1/transcribe`.
 2. A backend whose models are all preset or described serves
-   `POST /v1/synthesize` and never `POST /v1/voices`, and is no less a `v1`
+   `POST /v1/synthesize` and never `POST /v1/voices`, and is no less a `v4`
    backend for it.
 
 The `/v1` in the route paths is not that number. It is a path segment inside
-the agreement, and an extending generation leaves it alone: a future `v2`
-backend would serve whatever `v2` adds *next to* the `/v1` routes, renaming
-nothing. The prefix would move only for a generation that changed the shape of
-a route that already exists, which none has.
+the agreement, and an extending generation leaves it alone: a `v2` backend
+serves `/v1/process` next to `/v1/transcribe`, and renames nothing. The prefix
+would move only for a generation that changed the shape of a route that
+already exists, which none has.
 
 ### Request headers
 
