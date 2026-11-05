@@ -15,6 +15,7 @@
 
 use crate::daemon::client::internal::response::require_success;
 use crate::daemon::client::internal::session::with_settings_token;
+use crate::state::Stage;
 use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 
@@ -28,13 +29,17 @@ fn enc(s: &str) -> String {
 /// `multilingual`, `supported`, `primary`, `override`), or `Value::Null`
 /// when the model is not found.
 pub async fn get_model_language(
-    stage: u32,
+    stage: Stage,
     model: String,
 ) -> HttpResult<crate::state::LanguageResolution> {
     with_settings_token(move |socket, token| {
         let model = model.clone();
         async move {
-            let path = format!("/stt/pipeline/{stage}/model/{}/language", enc(&model));
+            let (feature, number) = stage.route();
+            let path = format!(
+                "/{feature}/pipeline/{number}/model/{}/language",
+                enc(&model)
+            );
             let resp = require_success(
                 transport::settings_get(socket, &token, &path).await?,
                 "get_model_language",
@@ -55,14 +60,18 @@ pub async fn get_model_language(
 /// (HTTP `POST /stt/pipeline/{stage}/model/{model}/language`).
 /// Returns the updated resolution block.
 pub async fn set_model_language(
-    stage: u32,
+    stage: Stage,
     model: String,
     language: String,
 ) -> HttpResult<crate::state::LanguageResolution> {
     with_settings_token(move |socket, token| {
         let (model, language) = (model.clone(), language.clone());
         async move {
-            let path = format!("/stt/pipeline/{stage}/model/{}/language", enc(&model));
+            let (feature, number) = stage.route();
+            let path = format!(
+                "/{feature}/pipeline/{number}/model/{}/language",
+                enc(&model)
+            );
             let resp = require_success(
                 transport::settings_post(
                     socket,
@@ -86,13 +95,17 @@ pub async fn set_model_language(
 /// (HTTP `DELETE /stt/pipeline/{stage}/model/{model}/language`).
 /// Returns the updated resolution block.
 pub async fn clear_model_language(
-    stage: u32,
+    stage: Stage,
     model: String,
 ) -> HttpResult<crate::state::LanguageResolution> {
     with_settings_token(move |socket, token| {
         let model = model.clone();
         async move {
-            let path = format!("/stt/pipeline/{stage}/model/{}/language", enc(&model));
+            let (feature, number) = stage.route();
+            let path = format!(
+                "/{feature}/pipeline/{number}/model/{}/language",
+                enc(&model)
+            );
             let resp = require_success(
                 transport::settings_delete(socket, &token, &path).await?,
                 "clear_model_language",
@@ -112,11 +125,15 @@ pub async fn clear_model_language(
 /// What the setter accepts — the model's own tags plus the reserved `auto` —
 /// not a general BCP-47 list. Empty for a monolingual model, which is what
 /// tells a picker there is nothing to choose.
-pub async fn list_model_languages(stage: u32, model: String) -> HttpResult<Vec<String>> {
+pub async fn list_model_languages(stage: Stage, model: String) -> HttpResult<Vec<String>> {
     with_settings_token(move |socket, token| {
         let model = model.clone();
         async move {
-            let path = format!("/stt/pipeline/{stage}/model/{}/language/list", enc(&model));
+            let (feature, number) = stage.route();
+            let path = format!(
+                "/{feature}/pipeline/{number}/model/{}/language/list",
+                enc(&model)
+            );
             let resp = require_success(
                 transport::settings_get(socket, &token, &path).await?,
                 "list_model_languages",

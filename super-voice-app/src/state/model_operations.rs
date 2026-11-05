@@ -12,13 +12,13 @@
 //! the loaded stage-1 model. Each stage gets its own slot here instead, so a
 //! card reads, and writes, only its own.
 //!
-//! A stage this app does not know is ignored rather than rejected. The numbers
-//! arrive off the wire, and a daemon that grows a third stage should leave an
+//! A stage number this app does not know is dropped where it arrives (see
+//! [`Stage::speech_to_text`]), so a daemon that grows a third stage leaves an
 //! older app rendering the two it understands.
 
 use std::time::{Duration, Instant};
 
-pub use super::device_offers::{PP_STAGE, STT_STAGE};
+use crate::state::Stage;
 
 /// A stage's model operation: provisioning its files, loading them, or done.
 #[derive(Debug, Clone, Default)]
@@ -85,7 +85,7 @@ impl ModelOperations {
     pub fn opening(status_message: String) -> Self {
         let mut ops = Self::default();
         ops.start(
-            STT_STAGE,
+            Stage::Transcription,
             ModelOperationState::Loading {
                 target_model: String::new(),
                 status_message,
@@ -95,70 +95,62 @@ impl ModelOperations {
         ops
     }
 
-    fn slot(&self, stage: u32) -> Option<&StageOperation> {
+    fn slot(&self, stage: Stage) -> &StageOperation {
         match stage {
-            STT_STAGE => Some(&self.transcription),
-            PP_STAGE => Some(&self.post_processor),
-            _ => None,
+            Stage::Transcription => &self.transcription,
+            Stage::PostProcessing => &self.post_processor,
         }
     }
 
-    fn slot_mut(&mut self, stage: u32) -> Option<&mut StageOperation> {
+    fn slot_mut(&mut self, stage: Stage) -> &mut StageOperation {
         match stage {
-            STT_STAGE => Some(&mut self.transcription),
-            PP_STAGE => Some(&mut self.post_processor),
-            _ => None,
+            Stage::Transcription => &mut self.transcription,
+            Stage::PostProcessing => &mut self.post_processor,
         }
     }
 
-    /// What `stage` has in flight, or `None` for a stage this app does not
-    /// track — which renders as nothing rather than as somebody else's work.
+    /// What `stage` has in flight.
     #[must_use]
-    pub fn get(&self, stage: u32) -> Option<&ModelOperationState> {
-        self.slot(stage).map(|s| &s.state)
+    pub fn get(&self, stage: Stage) -> &ModelOperationState {
+        &self.slot(stage).state
     }
 
-    /// Whether `stage` is free to start an operation. An untracked stage has
-    /// nothing in flight, so it reads as ready.
+    /// Whether `stage` is free to start an operation.
     #[must_use]
-    pub fn is_ready(&self, stage: u32) -> bool {
-        self.slot(stage)
-            .is_none_or(|s| matches!(s.state, ModelOperationState::Ready))
+    pub fn is_ready(&self, stage: Stage) -> bool {
+        matches!(self.get(stage), ModelOperationState::Ready)
     }
 
     /// The stages still owed an outcome, in pipeline order. What the progress
     /// poll asks about: each stage is polled for its own download, so a
     /// stage-1 answer can never clear a stage-2 card.
     #[must_use]
-    pub fn pending_stages(&self) -> Vec<u32> {
-        [STT_STAGE, PP_STAGE]
+    pub fn pending_stages(&self) -> Vec<Stage> {
+        Stage::ALL
             .into_iter()
-            .filter(|&stage| self.get(stage).is_some_and(ModelOperationState::is_pending))
+            .filter(|&stage| self.get(stage).is_pending())
             .collect()
     }
 
     /// Record `state` for `stage`, leaving the stall clock alone. For the
     /// terminal writes — an outcome arrived, so there is no longer anything to
     /// time.
-    pub fn set(&mut self, stage: u32, operation: ModelOperationState) {
-        if let Some(slot) = self.slot_mut(stage) {
-            slot.state = operation;
-        }
+    pub fn set(&mut self, stage: Stage, operation: ModelOperationState) {
+        self.slot_mut(stage).state = operation;
     }
 
     /// Finish `stage`'s operation, whatever it was.
-    pub fn set_ready(&mut self, stage: u32) {
+    pub fn set_ready(&mut self, stage: Stage) {
         self.set(stage, ModelOperationState::Ready);
     }
 
     /// Begin (or advance) an operation on `stage`, restarting its stall clock.
     /// For the writes that mean the daemon is working: a switch starting, a
     /// download tick, a load beginning.
-    pub fn start(&mut self, stage: u32, operation: ModelOperationState) {
-        if let Some(slot) = self.slot_mut(stage) {
-            slot.state = operation;
-            slot.last_progress_at = Some(Instant::now());
-        }
+    pub fn start(&mut self, stage: Stage, operation: ModelOperationState) {
+        let slot = self.slot_mut(stage);
+        slot.state = operation;
+        slot.last_progress_at = Some(Instant::now());
     }
 
     /// Put every stage back to idle. For a daemon reconnect, where any
@@ -170,12 +162,10 @@ impl ModelOperations {
     /// Fail every stage whose in-flight operation has shown no progress for
     /// `timeout`, and name them. A stage that has already failed, or has
     /// nothing in flight, is left alone.
-    pub fn fail_stalled(&mut self, timeout: Duration, message: &str) -> Vec<u32> {
+    pub fn fail_stalled(&mut self, timeout: Duration, message: &str) -> Vec<Stage> {
         let mut stalled = Vec::new();
-        for stage in [STT_STAGE, PP_STAGE] {
-            let Some(slot) = self.slot_mut(stage) else {
-                continue;
-            };
+        for stage in Stage::ALL {
+            let slot = self.slot_mut(stage);
             if !slot.state.is_pending() {
                 continue;
             }
@@ -209,14 +199,14 @@ mod tests {
     #[test]
     fn a_stage_starts_idle_and_reads_back_what_it_was_given() {
         let mut ops = ModelOperations::default();
-        assert!(ops.is_ready(STT_STAGE));
-        assert!(ops.is_ready(PP_STAGE));
+        assert!(ops.is_ready(Stage::Transcription));
+        assert!(ops.is_ready(Stage::PostProcessing));
 
-        ops.start(PP_STAGE, loading("s1-mini"));
-        assert!(!ops.is_ready(PP_STAGE));
+        ops.start(Stage::PostProcessing, loading("s1-mini"));
+        assert!(!ops.is_ready(Stage::PostProcessing));
         assert!(matches!(
-            ops.get(PP_STAGE),
-            Some(ModelOperationState::Loading { target_model, .. }) if target_model == "s1-mini"
+            ops.get(Stage::PostProcessing),
+            ModelOperationState::Loading { target_model, .. } if target_model == "s1-mini"
         ));
     }
 
@@ -225,19 +215,25 @@ mod tests {
     #[test]
     fn one_stages_operation_leaves_the_other_free() {
         let mut ops = ModelOperations::default();
-        ops.start(PP_STAGE, loading("s1-mini"));
+        ops.start(Stage::PostProcessing, loading("s1-mini"));
         assert!(
-            ops.is_ready(STT_STAGE),
+            ops.is_ready(Stage::Transcription),
             "stage 2's load must not block stage 1"
         );
 
-        ops.start(STT_STAGE, loading("whisper-large"));
-        assert!(!ops.is_ready(STT_STAGE));
-        assert!(!ops.is_ready(PP_STAGE), "and stage 2 keeps its own");
+        ops.start(Stage::Transcription, loading("whisper-large"));
+        assert!(!ops.is_ready(Stage::Transcription));
+        assert!(
+            !ops.is_ready(Stage::PostProcessing),
+            "and stage 2 keeps its own"
+        );
 
-        ops.set_ready(PP_STAGE);
-        assert!(ops.is_ready(PP_STAGE));
-        assert!(!ops.is_ready(STT_STAGE), "finishing one leaves the other");
+        ops.set_ready(Stage::PostProcessing);
+        assert!(ops.is_ready(Stage::PostProcessing));
+        assert!(
+            !ops.is_ready(Stage::Transcription),
+            "finishing one leaves the other"
+        );
     }
 
     #[test]
@@ -245,30 +241,23 @@ mod tests {
         let mut ops = ModelOperations::default();
         assert!(ops.pending_stages().is_empty());
 
-        ops.start(PP_STAGE, loading("s1-mini"));
-        assert_eq!(ops.pending_stages(), vec![PP_STAGE]);
+        ops.start(Stage::PostProcessing, loading("s1-mini"));
+        assert_eq!(ops.pending_stages(), vec![Stage::PostProcessing]);
 
-        ops.start(STT_STAGE, loading("whisper-large"));
-        assert_eq!(ops.pending_stages(), vec![STT_STAGE, PP_STAGE]);
+        ops.start(Stage::Transcription, loading("whisper-large"));
+        assert_eq!(
+            ops.pending_stages(),
+            vec![Stage::Transcription, Stage::PostProcessing]
+        );
 
         // A failure is an outcome: the stage is no longer owed one.
         ops.set(
-            STT_STAGE,
+            Stage::Transcription,
             ModelOperationState::Error {
                 message: "no".to_string(),
             },
         );
-        assert_eq!(ops.pending_stages(), vec![PP_STAGE]);
-    }
-
-    #[test]
-    fn a_stage_the_app_does_not_know_is_ignored() {
-        let mut ops = ModelOperations::default();
-        ops.start(7, loading("from-the-future"));
-        assert!(ops.get(7).is_none(), "it is rendered by nothing");
-        assert!(ops.is_ready(7), "and blocks nothing");
-        assert!(ops.is_ready(STT_STAGE), "least of all another stage");
-        assert!(ops.pending_stages().is_empty());
+        assert_eq!(ops.pending_stages(), vec![Stage::PostProcessing]);
     }
 
     /// A zero timeout makes every in-flight stage overdue at once, which is
@@ -276,16 +265,19 @@ mod tests {
     #[test]
     fn a_stalled_stage_fails_alone() {
         let mut ops = ModelOperations::default();
-        ops.start(PP_STAGE, loading("s1-mini"));
-        ops.set(STT_STAGE, ModelOperationState::Ready);
+        ops.start(Stage::PostProcessing, loading("s1-mini"));
+        ops.set(Stage::Transcription, ModelOperationState::Ready);
 
         let stalled = ops.fail_stalled(Duration::ZERO, "stalled");
-        assert_eq!(stalled, vec![PP_STAGE]);
+        assert_eq!(stalled, vec![Stage::PostProcessing]);
         assert!(matches!(
-            ops.get(PP_STAGE),
-            Some(ModelOperationState::Error { message }) if message == "stalled"
+            ops.get(Stage::PostProcessing),
+            ModelOperationState::Error { message } if message == "stalled"
         ));
-        assert!(ops.is_ready(STT_STAGE), "an idle stage is not failed");
+        assert!(
+            ops.is_ready(Stage::Transcription),
+            "an idle stage is not failed"
+        );
 
         // Already failed: nothing left to time out, so it is not re-reported.
         assert!(ops.fail_stalled(Duration::ZERO, "stalled").is_empty());
@@ -294,19 +286,19 @@ mod tests {
     #[test]
     fn a_reconnect_drops_every_stages_operation() {
         let mut ops = ModelOperations::default();
-        ops.start(STT_STAGE, loading("whisper-large"));
-        ops.start(PP_STAGE, loading("s1-mini"));
+        ops.start(Stage::Transcription, loading("whisper-large"));
+        ops.start(Stage::PostProcessing, loading("s1-mini"));
 
         ops.reset();
-        assert!(ops.is_ready(STT_STAGE));
-        assert!(ops.is_ready(PP_STAGE));
+        assert!(ops.is_ready(Stage::Transcription));
+        assert!(ops.is_ready(Stage::PostProcessing));
     }
 
     #[test]
     fn the_app_opens_reading_the_transcription_stage() {
         let ops = ModelOperations::opening("Loading initial model state...".to_string());
-        assert!(!ops.is_ready(STT_STAGE));
-        assert_eq!(ops.pending_stages(), vec![STT_STAGE]);
-        assert!(ops.is_ready(PP_STAGE));
+        assert!(!ops.is_ready(Stage::Transcription));
+        assert_eq!(ops.pending_stages(), vec![Stage::Transcription]);
+        assert!(ops.is_ready(Stage::PostProcessing));
     }
 }

@@ -2,6 +2,7 @@
 use crate::core::app::AppModel;
 use crate::daemon::client::v1::pipeline::language as model_lang;
 use crate::daemon::client::v1::settings::language as client;
+use crate::state::Stage;
 use crate::state::models::ContextPage;
 use crate::ui::messages::{DaemonMessage, LanguageMessage, Message};
 use cosmic::prelude::*;
@@ -176,7 +177,7 @@ impl AppModel {
     #[allow(clippy::unused_self)]
     pub(in crate::core::app) fn load_model_language(
         &self,
-        stage: u32,
+        stage: Stage,
         source: &str,
         model: String,
     ) -> Task<cosmic::Action<Message>> {
@@ -216,7 +217,7 @@ impl AppModel {
     /// separate endpoints because they answer separate questions, and only one
     /// of them changes when the user picks a language.
     fn load_model_languages(
-        stage: u32,
+        stage: Stage,
         source: &str,
         model: String,
     ) -> Task<cosmic::Action<Message>> {

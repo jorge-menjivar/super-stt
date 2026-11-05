@@ -19,6 +19,7 @@ pub(crate) mod language;
 pub(crate) mod model;
 pub(crate) mod stage;
 
+use crate::state::Stage;
 use super_stt_shared::daemon::http_client::HttpResult;
 
 pub use model::StageDevice;
@@ -82,7 +83,7 @@ impl StageState {
 /// Two requests over a Unix socket, which is what a card needs and what the
 /// split costs. A failure in either fails the read, since a half-drawn card is
 /// worse than one that reports it could not load.
-pub async fn get_stage_view(stage: u32) -> HttpResult<StageState> {
+pub async fn get_stage_view(stage: Stage) -> HttpResult<StageState> {
     let backend = stage::get_stage(stage).await?;
     let model = model::get_stage_model(stage).await?;
     Ok(StageState {

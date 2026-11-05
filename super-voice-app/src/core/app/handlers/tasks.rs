@@ -9,7 +9,7 @@ use crate::daemon::client::{
     list_backends, ping_daemon,
 };
 use crate::state::AudioTheme;
-use crate::state::device_offers::PP_STAGE;
+use crate::state::Stage;
 use crate::ui::messages::{
     BackendMessage, DaemonMessage, Message, ModelsPageMessage, NotificationMethodMessage,
     PostProcessorMessage, PreviewTypingMessage, RecordingStopModeMessage, UpdateMessage,
@@ -189,17 +189,20 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
 /// section at its default (off, nothing selected) rather than failing the whole
 /// settings load, like every other getter in the batch.
 pub(in crate::core::app) fn load_post_processor() -> Task<cosmic::Action<Message>> {
-    Task::perform(get_stage_view(PP_STAGE), |result| match result {
-        Ok(state) => {
-            cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(state)))
-        }
-        Err(e) => {
-            log::warn!("Failed to load the post-processor setting: {e}");
-            cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(
-                crate::daemon::client::StageState::default(),
-            )))
-        }
-    })
+    Task::perform(
+        get_stage_view(Stage::PostProcessing),
+        |result| match result {
+            Ok(state) => {
+                cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(state)))
+            }
+            Err(e) => {
+                log::warn!("Failed to load the post-processor setting: {e}");
+                cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(
+                    crate::daemon::client::StageState::default(),
+                )))
+            }
+        },
+    )
 }
 
 /// Re-fetch the self-update status. Used by connection-time settings loads

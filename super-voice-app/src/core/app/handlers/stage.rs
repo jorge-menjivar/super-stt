@@ -31,7 +31,8 @@ use crate::daemon::client::{
     clear_stage_backend, get_model_device, list_model_devices, list_stage_backends,
     list_stage_devices, set_model_device, set_stage_backend, set_stage_model, unload_stage_model,
 };
-use crate::state::device_offers::{PP_STAGE, STT_STAGE, staged_device};
+use crate::state::Stage;
+use crate::state::device_offers::staged_device;
 use crate::ui::messages::{Message, ModelMessage, PostProcessorMessage, StageMessage};
 
 impl AppModel {
@@ -87,7 +88,7 @@ impl AppModel {
                 // back on that rather than leaving it showing one the daemon
                 // never adopted.
                 self.staged_picks.set_device(stage, prev_device.clone());
-                if stage == STT_STAGE {
+                if stage == Stage::Transcription {
                     self.device_state = crate::core::app::DeviceState::Ready;
                     if let Some(device) = prev_device {
                         self.current_device = device;
@@ -107,7 +108,7 @@ impl AppModel {
             } => {
                 // Roll the device back rather than leaving the card on one the
                 // daemon never adopted.
-                if stage == STT_STAGE {
+                if stage == Stage::Transcription {
                     self.current_device = prev_device;
                 }
                 self.set_stage_error(stage, &message);
@@ -182,8 +183,8 @@ impl AppModel {
     /// Stage 1 owns its selection locally so the card can move optimistically;
     /// later stages read it back from the daemon's own stage block.
     #[must_use]
-    pub fn selected_backend(&self, stage: u32) -> Option<String> {
-        if stage == STT_STAGE {
+    pub fn selected_backend(&self, stage: Stage) -> Option<String> {
+        if stage == Stage::Transcription {
             self.models_page.active_backend.clone()
         } else {
             self.post_processor.source.clone()
@@ -195,8 +196,8 @@ impl AppModel {
     /// A no-op for stages the daemon is authoritative for: their block is
     /// replaced wholesale when it is re-read, and writing here would only
     /// create a second truth to disagree with.
-    fn set_selected_backend(&mut self, stage: u32, source: Option<String>) {
-        if stage == STT_STAGE {
+    fn set_selected_backend(&mut self, stage: Stage, source: Option<String>) {
+        if stage == Stage::Transcription {
             self.models_page.active_backend = source;
         }
     }
@@ -210,8 +211,8 @@ impl AppModel {
     /// when nothing is up — which, since a stage remembers its selection
     /// through an unload, is not the same as having no model selected.
     #[must_use]
-    fn loaded_model(&self, stage: u32) -> Option<&str> {
-        if stage == STT_STAGE {
+    fn loaded_model(&self, stage: Stage) -> Option<&str> {
+        if stage == Stage::Transcription {
             (!self.current_model.is_empty()).then_some(self.current_model.as_str())
         } else if self.post_processor.loaded {
             self.post_processor.model.as_deref()
@@ -227,8 +228,8 @@ impl AppModel {
     /// Stage 1 announces the new identity, which bumps the epoch that protects
     /// it from a stale snapshot. Later stages have no identity of their own to
     /// announce and simply re-read their block.
-    fn load_committed(stage: u32, model: &str, source: &str) -> cosmic::Action<Message> {
-        if stage == STT_STAGE {
+    fn load_committed(stage: Stage, model: &str, source: &str) -> cosmic::Action<Message> {
+        if stage == Stage::Transcription {
             cosmic::Action::App(Message::Model(ModelMessage::ModelChanged {
                 model: model.to_string(),
                 source: source.to_string(),
@@ -248,9 +249,9 @@ impl AppModel {
     /// failure the same way, with the same `$HOME` sanitizing. Stage 1 also
     /// drops its locally-held identity: a failed switch leaves it with no model
     /// loaded.
-    pub(in crate::core::app) fn set_stage_error(&mut self, stage: u32, err: &str) {
+    pub(in crate::core::app) fn set_stage_error(&mut self, stage: Stage, err: &str) {
         self.report_stage_error(stage, err);
-        if stage == STT_STAGE {
+        if stage == Stage::Transcription {
             self.clear_loaded_model();
         }
     }
@@ -262,7 +263,7 @@ impl AppModel {
     /// wants: the daemon puts the model back on the device it had, so it is
     /// still up, and dropping stage 1's identity here would blank a card whose
     /// model never stopped running.
-    fn report_stage_error(&mut self, stage: u32, err: &str) {
+    fn report_stage_error(&mut self, stage: Stage, err: &str) {
         log::warn!("Stage {stage} operation failed: {err}");
         let home = std::env::var("HOME").unwrap_or_default();
         let sanitized = super::model::sanitize_home(err, &home);
@@ -279,7 +280,7 @@ impl AppModel {
     /// selection never leaves the card showing a backend the daemon rejected.
     fn select_stage_backend(
         &mut self,
-        stage: u32,
+        stage: Stage,
         source: String,
     ) -> Task<cosmic::Action<Message>> {
         // Re-selecting what is already selected is not a change; round-tripping
@@ -291,7 +292,7 @@ impl AppModel {
         let prev = self.selected_backend(stage);
         self.set_selected_backend(stage, Some(source.clone()));
         self.staged_picks.clear(stage);
-        if stage == STT_STAGE {
+        if stage == Stage::Transcription {
             self.clear_loaded_model();
         }
         self.model_operations.set_ready(stage);
@@ -321,10 +322,10 @@ impl AppModel {
     }
 
     /// Empty `stage`, forgetting its model with it.
-    fn deselect_stage_backend(&mut self, stage: u32) -> Task<cosmic::Action<Message>> {
+    fn deselect_stage_backend(&mut self, stage: Stage) -> Task<cosmic::Action<Message>> {
         self.set_selected_backend(stage, None);
         self.staged_picks.clear(stage);
-        if stage == STT_STAGE {
+        if stage == Stage::Transcription {
             self.clear_loaded_model();
             self.models_page.configure_backend = None;
         }
@@ -349,7 +350,7 @@ impl AppModel {
     /// The device is left unset until that answer lands: an empty answer is
     /// what disables Load and shows the advisory, so staging a device before
     /// the answer would be guessing at exactly the case that must not guess.
-    fn stage_model(&mut self, stage: u32, model: String) -> Task<cosmic::Action<Message>> {
+    fn stage_model(&mut self, stage: Stage, model: String) -> Task<cosmic::Action<Message>> {
         let Some(source) = self.selected_backend(stage) else {
             return Task::none();
         };
@@ -372,7 +373,7 @@ impl AppModel {
     /// device picker after an unload.
     pub(in crate::core::app) fn stage_selection_if_unstaged(
         &mut self,
-        stage: u32,
+        stage: Stage,
         model: &str,
         source: &str,
     ) -> Task<cosmic::Action<Message>> {
@@ -396,7 +397,7 @@ impl AppModel {
     /// running the choice goes straight to the daemon, which reloads it onto
     /// the new device in place — something it has always done, and that the
     /// card used to make the user do by hand as unload, re-pick, load.
-    fn choose_device(&mut self, stage: u32, device: String) -> Task<cosmic::Action<Message>> {
+    fn choose_device(&mut self, stage: Stage, device: String) -> Task<cosmic::Action<Message>> {
         // Re-picking the same device is not a change; sending it would reload a
         // running model for nothing.
         let previous = self.staged_picks.device(stage).map(ToString::to_string);
@@ -424,7 +425,7 @@ impl AppModel {
         }
 
         let source = self.selected_backend(stage).unwrap_or_default();
-        let prev_device = if stage == STT_STAGE {
+        let prev_device = if stage == Stage::Transcription {
             let prev = self.current_device.clone();
             self.set_device_switching(device.clone(), format!("Switching to {device}..."));
             self.current_device.clone_from(&device);
@@ -451,7 +452,7 @@ impl AppModel {
     }
 
     /// Commit `stage`'s staged pick: set the model's device, then load it.
-    fn load_staged(&mut self, stage: u32) -> Task<cosmic::Action<Message>> {
+    fn load_staged(&mut self, stage: Stage) -> Task<cosmic::Action<Message>> {
         let Some(pick) = self.staged_picks.get(stage) else {
             log::warn!("Load ignored — nothing staged for stage {stage}");
             return Task::none();
@@ -485,7 +486,7 @@ impl AppModel {
             "Initiating model switch...".to_string(),
             stage,
         );
-        if stage == STT_STAGE
+        if stage == Stage::Transcription
             && let Some(dev) = &device_to_set
         {
             self.current_device.clone_from(dev);
@@ -533,14 +534,14 @@ impl AppModel {
     /// Optimistic: the card returns to its pickers at once. The staged pick is
     /// left alone, so the model that was running is still the one offered —
     /// which is also what gives its device picker something to key on.
-    fn unload_stage(&mut self, stage: u32) -> Task<cosmic::Action<Message>> {
-        if stage == STT_STAGE {
+    fn unload_stage(&mut self, stage: Stage) -> Task<cosmic::Action<Message>> {
+        if stage == Stage::Transcription {
             self.clear_loaded_model();
         }
         self.model_operations.set_ready(stage);
         Task::perform(unload_stage_model(stage), move |result| match result {
             Ok(()) => {
-                if stage == STT_STAGE {
+                if stage == Stage::Transcription {
                     cosmic::Action::None
                 } else {
                     // Later stages have no identity event of their own, so the
@@ -565,7 +566,7 @@ impl AppModel {
     /// together: staging the model's own device means nothing until the list
     /// that has to contain it is known.
     fn load_staged_devices(
-        stage: u32,
+        stage: Stage,
         source: String,
         model: String,
     ) -> Task<cosmic::Action<Message>> {
@@ -605,7 +606,7 @@ impl AppModel {
     /// Both positions at once: the answer depends only on what is installed, so
     /// it is re-asked when the catalog changes rather than when a card opens.
     pub(in crate::core::app) fn load_stage_backends() -> Task<cosmic::Action<Message>> {
-        Task::batch([STT_STAGE, PP_STAGE].map(|stage| {
+        Task::batch([Stage::Transcription, Stage::PostProcessing].map(|stage| {
             Task::perform(list_stage_backends(stage), move |result| match result {
                 Ok(backends) => {
                     cosmic::Action::App(Message::Stage(StageMessage::StageBackendsLoaded {
@@ -623,7 +624,7 @@ impl AppModel {
 
     /// Ask the daemon which devices `stage`'s backend can run its models on.
     pub(in crate::core::app) fn load_backend_devices(
-        stage: u32,
+        stage: Stage,
         source: String,
     ) -> Task<cosmic::Action<Message>> {
         Task::perform(list_stage_devices(stage), move |result| match result {

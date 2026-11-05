@@ -5,7 +5,7 @@ use crate::daemon::client::{
     set_notification_method, set_preview_typing, set_recording_stop_mode, set_write_method,
     test_write_method,
 };
-use crate::state::device_offers::PP_STAGE;
+use crate::state::Stage;
 use crate::ui::messages::{
     Message, NotificationMethodMessage, PostProcessorMessage, PreviewTypingMessage,
     RecordingStopModeMessage, WriteMethodMessage,
@@ -69,7 +69,7 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         match message {
             PostProcessorMessage::ReloadRequested => Task::perform(
-                crate::daemon::client::get_stage_view(PP_STAGE),
+                crate::daemon::client::get_stage_view(Stage::PostProcessing),
                 Self::reloaded_post_processor,
             ),
 
@@ -87,12 +87,12 @@ impl AppModel {
                     // The card's device chips are the daemon's answer for the
                     // backend now selected, so every selection asks again.
                     source.map_or_else(Task::none, |source| {
-                        Self::load_backend_devices(PP_STAGE, source)
+                        Self::load_backend_devices(Stage::PostProcessing, source)
                     }),
                     // The model the daemon remembers is the one the card offers
                     // to load, so it is staged like any other pick.
                     selection.map_or_else(Task::none, |(model, source)| {
-                        self.stage_selection_if_unstaged(PP_STAGE, &model, &source)
+                        self.stage_selection_if_unstaged(Stage::PostProcessing, &model, &source)
                     }),
                 ])
             }
@@ -118,7 +118,7 @@ impl AppModel {
     /// the `download_progress` ticks that name its model. The write's own
     /// response is the end of it.
     pub(in crate::core::app) fn finish_post_processor_operation(&mut self) {
-        self.model_operations.set_ready(PP_STAGE);
+        self.model_operations.set_ready(Stage::PostProcessing);
     }
 
     /// Map a `GET /stt/pipeline/2` result into its message.

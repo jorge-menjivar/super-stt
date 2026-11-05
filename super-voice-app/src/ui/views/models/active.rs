@@ -7,7 +7,7 @@ use super_stt_shared::models::protocol::{DownloadProgress, LoadProgress, load_pr
 
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::backends::BackendInfo;
-use crate::state::device_offers::STT_STAGE;
+use crate::state::Stage;
 use crate::ui::icons;
 use crate::ui::messages::{DownloadMessage, Message, ModelsPageMessage, StageMessage};
 
@@ -110,7 +110,9 @@ pub(super) fn active_backend_card<'a>(
         )),
         super::surface::deselect_button(
             "Deselect this backend",
-            Message::Stage(StageMessage::DeselectBackend { stage: STT_STAGE }),
+            Message::Stage(StageMessage::DeselectBackend {
+                stage: Stage::Transcription
+            }),
         ),
     ]
     .spacing(spacing.space_xs)
@@ -136,7 +138,8 @@ pub(super) fn active_backend_card<'a>(
     });
     let mut chip_row = row![].spacing(spacing.space_xxs).align_y(Alignment::Center);
     let compute = stage_device_support(
-        app.device_offers.backend(STT_STAGE, &backend.source),
+        app.device_offers
+            .backend(Stage::Transcription, &backend.source),
         backend,
     );
     if let Some(chips) = capability_chips(compute.gpu, compute.cpu, egress, true) {
@@ -145,7 +148,10 @@ pub(super) fn active_backend_card<'a>(
     // Count what this stage can run, not everything the backend ships — a
     // backend serving two transcription models and a post-processor offers two
     // here, and the Library card is where the full inventory belongs.
-    let model_count = app.stage_catalog.models(STT_STAGE, &backend.source).len();
+    let model_count = app
+        .stage_catalog
+        .models(Stage::Transcription, &backend.source)
+        .len();
     if model_count > 0 {
         let label = if model_count == 1 {
             "1 model".to_string()
@@ -191,7 +197,7 @@ pub(super) fn active_backend_card<'a>(
     }
 
     // The model operation status, when it is this stage's.
-    if let Some(status) = operation_status(app, STT_STAGE) {
+    if let Some(status) = operation_status(app, Stage::Transcription) {
         card = card.push(status);
     }
 
@@ -211,7 +217,7 @@ pub(super) fn active_backend_card<'a>(
 /// model's `supported_devices` narrowed to what this install and host can do,
 /// so an online model and a GPU the install cannot use both fall out here.
 pub(super) fn device_dropdown<'a>(
-    stage: u32,
+    stage: Stage,
     source: &str,
     model: &str,
     app: &'a AppModel,
@@ -263,7 +269,10 @@ pub(super) fn loaded_model_summary<'a>(
     let label = text::body(format!(
         "Active: {}{}",
         app.current_model,
-        resolved_suffix(&app.current_device, app.staged_picks.device(STT_STAGE))
+        resolved_suffix(
+            &app.current_device,
+            app.staged_picks.device(Stage::Transcription)
+        )
     ))
     .class(cosmic::theme::Text::Accent)
     .width(Length::Fill);
@@ -273,11 +282,18 @@ pub(super) fn loaded_model_summary<'a>(
     // The same picker the unloaded card shows, in the same place. Changing it
     // now reloads the model onto the new device rather than staging a choice
     // for a Load that is not coming.
-    if let Some(devices) = device_dropdown(STT_STAGE, &backend.source, &app.current_model, app) {
+    if let Some(devices) = device_dropdown(
+        Stage::Transcription,
+        &backend.source,
+        &app.current_model,
+        app,
+    ) {
         summary = summary.push(devices);
     }
     // Per-model language trigger, inline before Unload, for a multilingual model.
-    if let Some(lang_button) = language_button(STT_STAGE, backend, &app.current_model, app) {
+    if let Some(lang_button) =
+        language_button(Stage::Transcription, backend, &app.current_model, app)
+    {
         summary = summary.push(lang_button);
     }
     // A leading stop glyph fronts the Unload label, mirroring the Load button's
@@ -286,7 +302,9 @@ pub(super) fn loaded_model_summary<'a>(
         .push(
             button::standard("Unload")
                 .leading_icon(icons::phosphor_handle(icons::STOP))
-                .on_press(Message::Stage(StageMessage::Unload { stage: STT_STAGE })),
+                .on_press(Message::Stage(StageMessage::Unload {
+                    stage: Stage::Transcription,
+                })),
         )
         .into()
 }
@@ -319,19 +337,22 @@ pub(super) fn vram_shortfall(
 /// that doesn't.
 pub(super) fn staged_vram_shortfall(backend: &BackendInfo, app: &AppModel) -> Option<(u64, u64)> {
     if matches!(
-        app.model_operations.get(STT_STAGE),
-        Some(ModelOperationState::Loading { .. })
+        app.model_operations.get(Stage::Transcription),
+        ModelOperationState::Loading { .. }
     ) {
         return None;
     }
-    let model_name = app.staged_picks.get(STT_STAGE).map(|p| p.model.as_str())?;
+    let model_name = app
+        .staged_picks
+        .get(Stage::Transcription)
+        .map(|p| p.model.as_str())?;
     let model = backend.models.iter().find(|m| m.name == model_name)?;
     let gpu_available = app
         .gpu_info
         .first()
         .map(|g| g.free_bytes.unwrap_or(g.total_bytes));
     vram_shortfall(
-        app.staged_picks.device(STT_STAGE),
+        app.staged_picks.device(Stage::Transcription),
         model.estimated_vram_bytes,
         gpu_available,
     )
@@ -354,18 +375,20 @@ pub(super) fn staged_model_picker<'a>(
     // Model dropdown — staged picks live in `app.models_page.staged_model`, not
     // loaded. Scoped to this stage's role: a post-processor here would be a
     // pick the daemon then refuses.
-    let model_names: Vec<String> = app.stage_catalog.models(STT_STAGE, &backend.source);
+    let model_names: Vec<String> = app
+        .stage_catalog
+        .models(Stage::Transcription, &backend.source);
     let staged_model = app
         .models_page
         .active_backend
         .as_deref()
-        .and_then(|source| app.staged_picks.model(STT_STAGE, source));
+        .and_then(|source| app.staged_picks.model(Stage::Transcription, source));
     let model_index = staged_model.and_then(|m| model_names.iter().position(|n| n == m));
     let model_names_pick = model_names.clone();
     // Model select takes twice the width of the device select (2:1 flex ratio).
     let model_dropdown = widget::dropdown(model_names, model_index, move |index| {
         Message::Stage(StageMessage::StageModel {
-            stage: STT_STAGE,
+            stage: Stage::Transcription,
             model: model_names_pick[index].clone(),
         })
     })
@@ -384,10 +407,12 @@ pub(super) fn staged_model_picker<'a>(
     // the install cannot use both fall out of the same check. No answer yet
     // renders no picker, which is also why the advisory below asks for an
     // answered-but-empty list rather than an absent one.
-    let staged_devices: Option<&[String]> =
-        staged_model.and_then(|m| app.device_offers.model(STT_STAGE, &backend.source, m));
+    let staged_devices: Option<&[String]> = staged_model.and_then(|m| {
+        app.device_offers
+            .model(Stage::Transcription, &backend.source, m)
+    });
     if let Some(model) = staged_model
-        && let Some(devices) = device_dropdown(STT_STAGE, &backend.source, model, app)
+        && let Some(devices) = device_dropdown(Stage::Transcription, &backend.source, model, app)
     {
         picker_row = picker_row.push(devices);
     }
@@ -395,7 +420,7 @@ pub(super) fn staged_model_picker<'a>(
     // Per-model language trigger, inline after the device dropdown — shown only
     // for a staged multilingual model.
     if let Some(model) = staged_model
-        && let Some(lang_button) = language_button(STT_STAGE, backend, model, app)
+        && let Some(lang_button) = language_button(Stage::Transcription, backend, model, app)
     {
         picker_row = picker_row.push(lang_button);
     }
@@ -411,13 +436,16 @@ pub(super) fn staged_model_picker<'a>(
     // be sent straight onto whatever device happens to already be current.
     let staged_online = staged_model.is_some_and(|m| model_is_online(backend, m));
     let no_viable_device = !staged_online && staged_devices.is_some_and(<[String]>::is_empty);
-    let staged_ok =
-        staged_model.is_some() && (app.staged_picks.device(STT_STAGE).is_some() || staged_online);
+    let staged_ok = staged_model.is_some()
+        && (app.staged_picks.device(Stage::Transcription).is_some() || staged_online);
     let load_button = button::suggested("Load model")
         .leading_icon(icons::phosphor_handle(icons::PLAY))
         .on_press_maybe(
-            (staged_ok && app.is_model_ready(STT_STAGE))
-                .then_some(Message::Stage(StageMessage::Load { stage: STT_STAGE })),
+            (staged_ok && app.is_model_ready(Stage::Transcription)).then_some(Message::Stage(
+                StageMessage::Load {
+                    stage: Stage::Transcription,
+                },
+            )),
         );
     picker_row = picker_row.push(load_button);
 
@@ -448,13 +476,13 @@ pub(super) fn staged_model_picker<'a>(
 /// The stages provision independently, so each card reads its own stage: a
 /// post-processor's download belongs off the transcription card, and a
 /// transcription model's off the post-processing one, even while both run.
-pub(super) fn operation_status(app: &AppModel, stage: u32) -> Option<Element<'_, Message>> {
-    match app.model_operations.get(stage)? {
+pub(super) fn operation_status(app: &AppModel, stage: Stage) -> Option<Element<'_, Message>> {
+    match app.model_operations.get(stage) {
         ModelOperationState::Ready => None,
         ModelOperationState::Provisioning {
             target_model,
             progress,
-        } => Some(card_provisioning_progress(target_model, progress)),
+        } => Some(card_provisioning_progress(stage, target_model, progress)),
         ModelOperationState::Loading {
             target_model,
             status_message,
@@ -493,6 +521,7 @@ fn provisioning_verb(status: &str) -> &'static str {
 // reason: display-only; the imprecision is cosmetic
 #[allow(clippy::cast_precision_loss)]
 pub(super) fn card_provisioning_progress<'a>(
+    stage: Stage,
     target_model: &'a str,
     progress: &'a DownloadProgress,
 ) -> Element<'a, Message> {
@@ -522,11 +551,9 @@ pub(super) fn card_provisioning_progress<'a>(
         row![
             text::caption(bytes).width(Length::Fill),
             widget::button::destructive("Cancel")
-                // The stage the daemon reported this download under, so the
-                // cancel reaches the stage whose card the button is on.
-                .on_press(Message::Download(DownloadMessage::CancelDownload(
-                    progress.stage,
-                ))),
+                // The card's own stage, so the cancel reaches the download
+                // this card is showing.
+                .on_press(Message::Download(DownloadMessage::CancelDownload(stage))),
         ]
         .align_y(Alignment::Center),
     ]

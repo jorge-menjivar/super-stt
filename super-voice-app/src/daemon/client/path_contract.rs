@@ -101,6 +101,25 @@ fn literals_in_client_sources() -> Vec<(String, String)> {
     out
 }
 
+/// The paths one literal stands for: itself, or, for a pipeline route built
+/// from a stage (`/{feature}/pipeline/{number}/...`, see `Stage::route`), the
+/// route in every feature a stage belongs to. Each must be served: a stage's
+/// routes are the same in every feature.
+fn paths_of(literal: &str) -> Vec<String> {
+    let Some(rest) = literal.strip_prefix("/{feature}/") else {
+        return vec![normalize(literal)];
+    };
+    let mut features: Vec<&str> = crate::state::Stage::ALL
+        .iter()
+        .map(|stage| stage.route().0)
+        .collect();
+    features.dedup();
+    features
+        .into_iter()
+        .map(|feature| normalize(&format!("/{feature}/{rest}")))
+        .collect()
+}
+
 /// The double-quoted literals on one line. Escapes do not appear in paths, so
 /// the naive split is enough and stays readable.
 fn string_literals(line: &str) -> Vec<String> {
@@ -120,8 +139,13 @@ fn every_path_the_client_calls_is_one_the_daemon_serves() {
     let documented = documented();
     let unknown: Vec<String> = literals_in_client_sources()
         .into_iter()
-        .filter(|(lit, _)| !documented.contains(&normalize(lit)))
-        .map(|(lit, file)| format!("{lit:?} in {file}"))
+        .flat_map(|(lit, file)| {
+            paths_of(&lit)
+                .into_iter()
+                .map(move |path| (path, file.clone()))
+        })
+        .filter(|(path, _)| !documented.contains(path))
+        .map(|(path, file)| format!("{path:?} in {file}"))
         .collect();
 
     assert!(
@@ -141,7 +165,7 @@ fn every_path_the_client_calls_is_one_the_daemon_serves() {
 fn the_scan_finds_the_paths_the_app_depends_on() {
     let found: BTreeSet<String> = literals_in_client_sources()
         .into_iter()
-        .map(|(lit, _)| normalize(&lit))
+        .flat_map(|(lit, _)| paths_of(&lit))
         .collect();
     for required in [
         "/backend/list",

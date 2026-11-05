@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, DeviceState};
-use crate::state::device_offers::{PP_STAGE, STT_STAGE};
+use crate::state::Stage;
 use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message, UpdateMessage};
 use cosmic::prelude::*;
 use log::{debug, info, warn};
@@ -99,7 +99,7 @@ impl AppModel {
             // that acts on a stage's model checks whose it is first: reading a
             // post-processor's load as the transcription model's would clear
             // the wrong card and report the wrong device.
-            DaemonStatusEvent::Ready { stage, .. } if stage == PP_STAGE => {
+            DaemonStatusEvent::Ready { stage, .. } if is_post_processing(stage) => {
                 self.finish_post_processor_operation();
                 // The daemon is authoritative about what stage 2 is running,
                 // and this is the only notice of a load it started itself (at
@@ -120,7 +120,7 @@ impl AppModel {
             // Stage 2's identity change needs no separate handling: the
             // `ready` that follows it re-reads the post-processor block, which
             // is where the app keeps that stage's identity.
-            DaemonStatusEvent::ModelSwitched { stage, .. } if stage == PP_STAGE => None,
+            DaemonStatusEvent::ModelSwitched { stage, .. } if is_post_processing(stage) => None,
             DaemonStatusEvent::ModelSwitched {
                 model_name, source, ..
             } => Some(self.handle_daemon_model_switched(&model_name, &source)),
@@ -159,7 +159,7 @@ impl AppModel {
                         // Every pair answered for, not just one: both stages
                         // show a language control, and a block that follows the
                         // global value goes stale on either card.
-                        let pairs: Vec<(u32, String, String)> =
+                        let pairs: Vec<(Stage, String, String)> =
                             self.language.model_languages.pairs().collect();
                         let mut tasks = vec![self.load_primary_language()];
                         tasks.extend(pairs.into_iter().map(|(stage, source, model)| {
@@ -208,8 +208,12 @@ impl AppModel {
             }
             // Stage 2's load-start is the card's only cue for a load with
             // nothing to download, and for one this app did not ask for.
-            DaemonStatusEvent::LoadingModel { new_model, stage } if stage == PP_STAGE => {
-                self.set_model_loading(new_model, "Loading model...".to_string(), PP_STAGE);
+            DaemonStatusEvent::LoadingModel { new_model, stage } if is_post_processing(stage) => {
+                self.set_model_loading(
+                    new_model,
+                    "Loading model...".to_string(),
+                    Stage::PostProcessing,
+                );
                 None
             }
             // Stage 1's is still ignored: its own Load click already set the
@@ -255,9 +259,9 @@ impl AppModel {
             // stage 1's.
             info!(
                 "Stage 1 model state before ready event: {:?}",
-                self.model_operations.get(STT_STAGE)
+                self.model_operations.get(Stage::Transcription)
             );
-            self.model_operations.set_ready(STT_STAGE);
+            self.model_operations.set_ready(Stage::Transcription);
         }
     }
 
@@ -294,7 +298,7 @@ impl AppModel {
         self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
         self.current_model.clone_from(&model);
         self.current_source.clone_from(&source);
-        self.model_operations.set_ready(STT_STAGE);
+        self.model_operations.set_ready(Stage::Transcription);
         info!("Stage 1 model state updated to Ready after model_switched event");
         // Mirror CurrentModelLoaded/ModelChanged: fetch the per-model language
         // block so the active-backend card's language button shows the model's
@@ -302,7 +306,7 @@ impl AppModel {
         // learns the active model only via this broadcast — e.g. the settings app
         // reconnecting after a daemon restart, where the startup load now emits
         // model_switched — would otherwise leave model_language_for unset.
-        self.load_model_language(STT_STAGE, &source, model)
+        self.load_model_language(Stage::Transcription, &source, model)
     }
 
     pub(in crate::core::app) fn process_download_progress_event(
@@ -320,7 +324,11 @@ impl AppModel {
             "Received download progress event: {}% for {}",
             progress.percentage, progress.model_name
         );
-        self.apply_download_progress(&progress);
+        // The daemon says which stage it is provisioning for, so the progress
+        // lands on the card that started it rather than on whichever card
+        // happens to render the operation.
+        let stage = Stage::speech_to_text(progress.stage)?;
+        self.apply_download_progress(stage, &progress);
 
         // Handle download completion/failure. The `error` case is fully
         // handled by `apply_download_progress` above (it sets the Error banner
@@ -334,7 +342,7 @@ impl AppModel {
                 cosmic::Action::App(Message::Download(DownloadMessage::DownloadCompleted(model)))
             }));
         } else if progress.status == "cancelled" {
-            let (model, stage) = (progress.model_name, progress.stage);
+            let model = progress.model_name;
             return Some(Task::perform(
                 async move { (model, stage) },
                 |(model, stage)| {
@@ -347,6 +355,12 @@ impl AppModel {
         }
         None
     }
+}
+
+/// Whether an event's stage number is post-processing's. Stage 2 reports its
+/// own lifecycle on the same topic as stage 1.
+fn is_post_processing(stage: u32) -> bool {
+    Stage::speech_to_text(stage) == Some(Stage::PostProcessing)
 }
 
 #[cfg(test)]

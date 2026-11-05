@@ -4,7 +4,7 @@ use crate::ui::messages::Message;
 use cosmic::prelude::*;
 
 use super::{AppModel, DeviceState, ModelOperationState};
-use crate::state::device_offers::STT_STAGE;
+use crate::state::Stage;
 
 /// Stall threshold for the model-switch watchdog. If a switch makes no
 /// progress for this long, the UI flips to an error instead of spinning
@@ -18,7 +18,7 @@ impl AppModel {
     /// Whether `stage` is free to start a model operation. Asked per stage:
     /// the daemon runs the stages independently, so a post-processor download
     /// must leave the transcription card's Load button live.
-    pub fn is_model_ready(&self, stage: u32) -> bool {
+    pub fn is_model_ready(&self, stage: Stage) -> bool {
         self.model_operations.is_ready(stage)
     }
 
@@ -40,7 +40,7 @@ impl AppModel {
         &mut self,
         target_model: String,
         progress: super_stt_shared::models::protocol::DownloadProgress,
-        stage: u32,
+        stage: Stage,
     ) {
         // A tick is progress, so it restarts that stage's stall clock.
         self.model_operations.start(
@@ -57,7 +57,7 @@ impl AppModel {
         &mut self,
         target_model: String,
         status_message: String,
-        stage: u32,
+        stage: Stage,
     ) {
         self.set_model_loading_with(target_model, status_message, stage, None);
     }
@@ -67,7 +67,7 @@ impl AppModel {
         &mut self,
         target_model: String,
         status_message: String,
-        stage: u32,
+        stage: Stage,
         load: Option<super_stt_shared::models::protocol::LoadProgress>,
     ) {
         // Entering a switch starts that stage's stall clock (see PingTimeout).
@@ -111,13 +111,10 @@ impl AppModel {
     /// Any progress event also resets the stall watchdog (see `PingTimeout`).
     pub(in crate::core::app) fn apply_download_progress(
         &mut self,
+        stage: Stage,
         progress: &super_stt_shared::models::protocol::DownloadProgress,
     ) {
         let target_model = progress.model_name.clone();
-        // The daemon says which stage it is provisioning for, so the progress
-        // lands on the card that started it rather than on whichever card
-        // happens to render the operation.
-        let stage = progress.stage;
         match progress.status.as_str() {
             "loading_model" => {
                 self.set_model_loading_with(
@@ -143,7 +140,7 @@ impl AppModel {
                 // so the UI doesn't show a model that isn't loaded (mirrors the
                 // `ModelError` handler). Only stage 1's identity is kept here,
                 // so a post-processor's failure must not clear it.
-                if stage == STT_STAGE {
+                if stage == Stage::Transcription {
                     self.clear_loaded_model();
                 }
             }

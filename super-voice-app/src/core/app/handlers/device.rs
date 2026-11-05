@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, DeviceState, ModelOperationState};
-use crate::state::device_offers::STT_STAGE;
+use crate::state::Stage;
 use crate::ui::messages::{DeviceMessage, Message};
 use cosmic::prelude::*;
 use log::info;
@@ -36,7 +36,7 @@ impl AppModel {
                 // Device switching is the transcription card's control, so its
                 // failure belongs on that card.
                 self.model_operations.set(
-                    STT_STAGE,
+                    Stage::Transcription,
                     ModelOperationState::Error {
                         message: format!("Device error: {err}"),
                     },

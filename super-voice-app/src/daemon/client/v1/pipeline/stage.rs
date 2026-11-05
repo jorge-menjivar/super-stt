@@ -17,6 +17,7 @@ use serde::Deserialize;
 
 use crate::daemon::client::internal::response::{require_success, require_unit};
 use crate::daemon::client::internal::session::with_settings_token;
+use crate::state::Stage;
 use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 
@@ -45,12 +46,13 @@ pub struct StageBackend {
 
 /// The path a stage answers on. Its model answers one level down, in
 /// [`super::model`].
-fn stage_path(stage: u32) -> String {
-    format!("/stt/pipeline/{stage}")
+fn stage_path(stage: Stage) -> String {
+    let (feature, number) = stage.route();
+    format!("/{feature}/pipeline/{number}")
 }
 
 /// Read `stage`'s backend (HTTP `GET /stt/pipeline/{stage}`).
-pub async fn get_stage(stage: u32) -> HttpResult<StageBackend> {
+pub async fn get_stage(stage: Stage) -> HttpResult<StageBackend> {
     with_settings_token(move |socket, token| async move {
         let resp = require_success(
             transport::settings_get(socket, &token, &stage_path(stage)).await?,
@@ -74,7 +76,7 @@ pub async fn get_stage(stage: u32) -> HttpResult<StageBackend> {
 ///
 /// Records which backend fills the stage and unloads a foreign model — it does
 /// NOT load one. Pair with [`super::model::set_stage_model`] to also run a model.
-pub async fn set_stage_backend(stage: u32, source: String) -> HttpResult<()> {
+pub async fn set_stage_backend(stage: Stage, source: String) -> HttpResult<()> {
     with_settings_token(move |socket, token| {
         let source = source.clone();
         async move {
@@ -96,7 +98,7 @@ pub async fn set_stage_backend(stage: u32, source: String) -> HttpResult<()> {
 ///
 /// This is a card's Deselect. [`super::model::unload_stage_model`] is the softer
 /// one that keeps the backend *and* the model it was pointed at.
-pub async fn clear_stage_backend(stage: u32) -> HttpResult<()> {
+pub async fn clear_stage_backend(stage: Stage) -> HttpResult<()> {
     with_settings_token(move |socket, token| async move {
         let resp = transport::settings_delete(socket, &token, &stage_path(stage)).await?;
         require_unit(resp, "clear_stage_backend")

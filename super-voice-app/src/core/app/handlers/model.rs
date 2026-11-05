@@ -2,7 +2,7 @@
 
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::client::{get_gpu_info, get_stage_model, get_stage_view};
-use crate::state::device_offers::STT_STAGE;
+use crate::state::Stage;
 use crate::ui::messages::{DeviceMessage, Message, ModelMessage, ModelsPageMessage, StageMessage};
 use cosmic::prelude::*;
 use log::info;
@@ -31,25 +31,32 @@ impl AppModel {
             // The accelerator stage 1 is actually on, which is a property of
             // the model it is running rather than of the backend filling the
             // stage — so it comes off the model slot, not off `/stt/pipeline/1`.
-            Task::perform(get_stage_model(STT_STAGE), |result| match result {
-                Ok(slot) => {
-                    let device = slot.running_device().map(ToString::to_string);
-                    info!("Initial device load successful: device={device:?}");
-                    cosmic::Action::App(Message::Device(DeviceMessage::DeviceInfoLoaded(device)))
-                }
-                Err(e) => {
-                    warn!("Initial device load failed: {e}");
-                    cosmic::Action::App(Message::Device(DeviceMessage::DeviceError(e.to_string())))
-                }
-            }),
+            Task::perform(
+                get_stage_model(Stage::Transcription),
+                |result| match result {
+                    Ok(slot) => {
+                        let device = slot.running_device().map(ToString::to_string);
+                        info!("Initial device load successful: device={device:?}");
+                        cosmic::Action::App(Message::Device(DeviceMessage::DeviceInfoLoaded(
+                            device,
+                        )))
+                    }
+                    Err(e) => {
+                        warn!("Initial device load failed: {e}");
+                        cosmic::Action::App(Message::Device(DeviceMessage::DeviceError(
+                            e.to_string(),
+                        )))
+                    }
+                },
+            ),
             crate::core::app::handlers::tasks::reload_backends(),
             // Backend *and* the model it remembers, in one read: a stage keeps
             // its selection through an unload, so the card comes back offering
             // that model instead of empty.
-            Task::perform(get_stage_view(STT_STAGE), |result| {
+            Task::perform(get_stage_view(Stage::Transcription), |result| {
                 let stage = result.unwrap_or_default();
                 cosmic::Action::App(Message::Stage(StageMessage::BackendSelected {
-                    stage: STT_STAGE,
+                    stage: Stage::Transcription,
                     source: stage.source,
                     model: stage.model,
                 }))
@@ -78,10 +85,10 @@ impl AppModel {
                 }
                 self.current_model.clone_from(&model);
                 self.current_source.clone_from(&source);
-                self.model_operations.set_ready(STT_STAGE);
+                self.model_operations.set_ready(Stage::Transcription);
                 // Fetch the per-model language block now that a model is loaded.
                 // Wire point 1: model loaded (CurrentModelLoaded).
-                self.load_model_language(STT_STAGE, &source, model)
+                self.load_model_language(Stage::Transcription, &source, model)
             }
 
             ModelMessage::ModelChanged { model, source } => {
@@ -91,10 +98,10 @@ impl AppModel {
                 self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
                 self.current_model.clone_from(&model);
                 self.current_source.clone_from(&source);
-                self.model_operations.set_ready(STT_STAGE);
+                self.model_operations.set_ready(Stage::Transcription);
                 // Fetch the per-model language block now that a model is loaded.
                 // Wire point 1: model loaded (ModelChanged).
-                self.load_model_language(STT_STAGE, &source, model)
+                self.load_model_language(Stage::Transcription, &source, model)
             }
 
             ModelMessage::CurrentModelFetchFailed { epoch, error } => {
@@ -128,8 +135,10 @@ impl AppModel {
         warn!("Model operation failed: {err}");
         let home = std::env::var("HOME").unwrap_or_default();
         let sanitized = sanitize_home(err, &home);
-        self.model_operations
-            .set(STT_STAGE, ModelOperationState::Error { message: sanitized });
+        self.model_operations.set(
+            Stage::Transcription,
+            ModelOperationState::Error { message: sanitized },
+        );
         // A failed switch leaves stage 1 idle (no model) — the backend stays
         // selected, but no model is loaded.
         self.clear_loaded_model();
@@ -143,31 +152,36 @@ impl AppModel {
     /// (re)subscribe to resync robustly against reconnect/restart ordering.
     pub(in crate::core::app) fn fetch_current_model(&self) -> Task<cosmic::Action<Message>> {
         let epoch = self.current_model_epoch;
-        Task::perform(get_stage_view(STT_STAGE), move |result| match result {
-            Ok(stage) => {
-                // An idle daemon is a valid state, not an error: report an
-                // empty selection rather than a backend with no model, which is
-                // what the identity handler reads as "nothing loaded".
-                //
-                // The *loaded* model, not the selection: a stage remembers what
-                // it was pointed at through an unload, and reporting that as
-                // the current model would tell the Recording page a model is up
-                // when none is.
-                let (model, source) = match stage.model.filter(|_| stage.loaded) {
-                    Some(model) => (model, stage.source.unwrap_or_default()),
-                    None => (String::new(), String::new()),
-                };
-                cosmic::Action::App(Message::Model(ModelMessage::CurrentModelLoaded {
-                    model,
-                    source,
-                    epoch,
-                }))
-            }
-            Err(e) => cosmic::Action::App(Message::Model(ModelMessage::CurrentModelFetchFailed {
-                epoch,
-                error: e.to_string(),
-            })),
-        })
+        Task::perform(
+            get_stage_view(Stage::Transcription),
+            move |result| match result {
+                Ok(stage) => {
+                    // An idle daemon is a valid state, not an error: report an
+                    // empty selection rather than a backend with no model, which is
+                    // what the identity handler reads as "nothing loaded".
+                    //
+                    // The *loaded* model, not the selection: a stage remembers what
+                    // it was pointed at through an unload, and reporting that as
+                    // the current model would tell the Recording page a model is up
+                    // when none is.
+                    let (model, source) = match stage.model.filter(|_| stage.loaded) {
+                        Some(model) => (model, stage.source.unwrap_or_default()),
+                        None => (String::new(), String::new()),
+                    };
+                    cosmic::Action::App(Message::Model(ModelMessage::CurrentModelLoaded {
+                        model,
+                        source,
+                        epoch,
+                    }))
+                }
+                Err(e) => {
+                    cosmic::Action::App(Message::Model(ModelMessage::CurrentModelFetchFailed {
+                        epoch,
+                        error: e.to_string(),
+                    }))
+                }
+            },
+        )
     }
 }
 

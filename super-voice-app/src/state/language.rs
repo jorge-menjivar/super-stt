@@ -4,6 +4,7 @@
 //! `RegistryState` template (App Tier 3 #15).
 
 use crate::state::LanguageResolution;
+use crate::state::Stage;
 
 /// The resolution blocks the daemon has answered for, keyed by
 /// `(source, model)` — the blocks behind
@@ -20,7 +21,7 @@ use crate::state::LanguageResolution;
 /// own answer arrives.
 #[derive(Debug, Clone, Default)]
 pub struct ModelLanguages {
-    blocks: Vec<((u32, String, String), LanguageResolution)>,
+    blocks: Vec<((Stage, String, String), LanguageResolution)>,
     /// The tags each answered-for model can be pinned to — what
     /// `GET /stt/pipeline/{stage}/model/{model}/language/list` returns.
     ///
@@ -29,14 +30,14 @@ pub struct ModelLanguages {
     /// every time the user picks a language, the offer never changes for a
     /// given model. A single record would make every pick re-fetch a list that
     /// cannot have moved.
-    offers: Vec<((u32, String, String), Vec<String>)>,
+    offers: Vec<((Stage, String, String), Vec<String>)>,
 }
 
 impl ModelLanguages {
     /// The block for `(stage, source, model)`, or `None` if the daemon hasn't
     /// answered for it.
     #[must_use]
-    pub fn get(&self, stage: u32, source: &str, model: &str) -> Option<&LanguageResolution> {
+    pub fn get(&self, stage: Stage, source: &str, model: &str) -> Option<&LanguageResolution> {
         self.blocks
             .iter()
             .find(|((st, s, m), _)| *st == stage && s == source && m == model)
@@ -44,7 +45,13 @@ impl ModelLanguages {
     }
 
     /// Record an answer, replacing any it supersedes.
-    pub fn record(&mut self, stage: u32, source: String, model: String, block: LanguageResolution) {
+    pub fn record(
+        &mut self,
+        stage: Stage,
+        source: String,
+        model: String,
+        block: LanguageResolution,
+    ) {
         let key = (stage, source, model);
         if let Some(existing) = self.blocks.iter_mut().find(|(k, _)| *k == key) {
             existing.1 = block;
@@ -56,7 +63,7 @@ impl ModelLanguages {
     /// Every pair answered for, so a global language change can refresh all of
     /// them: a per-model block that follows the global value goes stale the
     /// moment that value changes, whichever card is showing it.
-    pub fn pairs(&self) -> impl Iterator<Item = (u32, String, String)> + '_ {
+    pub fn pairs(&self) -> impl Iterator<Item = (Stage, String, String)> + '_ {
         self.blocks.iter().map(|(key, _)| key.clone())
     }
 
@@ -67,7 +74,7 @@ impl ModelLanguages {
     /// differently: not asked yet is a control still loading, while an empty
     /// offer is a monolingual model with nothing to choose.
     #[must_use]
-    pub fn offered(&self, stage: u32, source: &str, model: &str) -> Option<&[String]> {
+    pub fn offered(&self, stage: Stage, source: &str, model: &str) -> Option<&[String]> {
         self.offers
             .iter()
             .find(|((st, s, m), _)| *st == stage && s == source && m == model)
@@ -75,7 +82,7 @@ impl ModelLanguages {
     }
 
     /// Record what a model can be pinned to.
-    pub fn record_offer(&mut self, stage: u32, source: String, model: String, tags: Vec<String>) {
+    pub fn record_offer(&mut self, stage: Stage, source: String, model: String, tags: Vec<String>) {
         let key = (stage, source, model);
         if let Some(existing) = self.offers.iter_mut().find(|(k, _)| *k == key) {
             existing.1 = tags;
@@ -102,7 +109,7 @@ pub struct LanguageState {
     pub model_languages: ModelLanguages,
     /// The `(source, model)` pair the open per-model language sheet configures.
     /// `None` when the sheet is in global mode.
-    pub language_picker_target: Option<(u32, String, String)>,
+    pub language_picker_target: Option<(Stage, String, String)>,
     /// Live query text for the language search sheet.
     pub language_picker_query: String,
 }
@@ -110,7 +117,7 @@ pub struct LanguageState {
 #[cfg(test)]
 mod tests {
     use super::ModelLanguages;
-    use crate::state::LanguageResolution;
+    use crate::state::{LanguageResolution, Stage};
 
     fn block(primary: &str) -> LanguageResolution {
         LanguageResolution {
@@ -127,11 +134,33 @@ mod tests {
     #[test]
     fn two_models_are_held_at_once() {
         let mut langs = ModelLanguages::default();
-        langs.record(1, "src/a".into(), "whisper".into(), block("es"));
-        langs.record(2, "src/b".into(), "s1-mini".into(), block("en"));
+        langs.record(
+            Stage::Transcription,
+            "src/a".into(),
+            "whisper".into(),
+            block("es"),
+        );
+        langs.record(
+            Stage::PostProcessing,
+            "src/b".into(),
+            "s1-mini".into(),
+            block("en"),
+        );
 
-        assert_eq!(langs.get(1, "src/a", "whisper").unwrap().primary, "es");
-        assert_eq!(langs.get(2, "src/b", "s1-mini").unwrap().primary, "en");
+        assert_eq!(
+            langs
+                .get(Stage::Transcription, "src/a", "whisper")
+                .unwrap()
+                .primary,
+            "es"
+        );
+        assert_eq!(
+            langs
+                .get(Stage::PostProcessing, "src/b", "s1-mini")
+                .unwrap()
+                .primary,
+            "en"
+        );
     }
 
     /// The same `(source, model)` in two stages is two entries, not one.
@@ -142,11 +171,33 @@ mod tests {
     #[test]
     fn one_pair_in_two_stages_is_two_entries() {
         let mut langs = ModelLanguages::default();
-        langs.record(1, "src/a".into(), "shared".into(), block("es"));
-        langs.record(2, "src/a".into(), "shared".into(), block("en"));
+        langs.record(
+            Stage::Transcription,
+            "src/a".into(),
+            "shared".into(),
+            block("es"),
+        );
+        langs.record(
+            Stage::PostProcessing,
+            "src/a".into(),
+            "shared".into(),
+            block("en"),
+        );
 
-        assert_eq!(langs.get(1, "src/a", "shared").unwrap().primary, "es");
-        assert_eq!(langs.get(2, "src/a", "shared").unwrap().primary, "en");
+        assert_eq!(
+            langs
+                .get(Stage::Transcription, "src/a", "shared")
+                .unwrap()
+                .primary,
+            "es"
+        );
+        assert_eq!(
+            langs
+                .get(Stage::PostProcessing, "src/a", "shared")
+                .unwrap()
+                .primary,
+            "en"
+        );
         assert_eq!(langs.pairs().count(), 2);
     }
 
@@ -155,10 +206,26 @@ mod tests {
     #[test]
     fn a_new_answer_replaces_the_pairs_old_one() {
         let mut langs = ModelLanguages::default();
-        langs.record(1, "src/a".into(), "whisper".into(), block("es"));
-        langs.record(1, "src/a".into(), "whisper".into(), block("de"));
+        langs.record(
+            Stage::Transcription,
+            "src/a".into(),
+            "whisper".into(),
+            block("es"),
+        );
+        langs.record(
+            Stage::Transcription,
+            "src/a".into(),
+            "whisper".into(),
+            block("de"),
+        );
 
-        assert_eq!(langs.get(1, "src/a", "whisper").unwrap().primary, "de");
+        assert_eq!(
+            langs
+                .get(Stage::Transcription, "src/a", "whisper")
+                .unwrap()
+                .primary,
+            "de"
+        );
         assert_eq!(langs.pairs().count(), 1);
     }
 
@@ -167,7 +234,11 @@ mod tests {
     #[test]
     fn an_unasked_pair_misses() {
         let langs = ModelLanguages::default();
-        assert!(langs.get(1, "src/a", "whisper").is_none());
+        assert!(
+            langs
+                .get(Stage::Transcription, "src/a", "whisper")
+                .is_none()
+        );
     }
 
     /// An offer of nothing is not the same as no offer, and the picker draws
@@ -176,10 +247,22 @@ mod tests {
     #[test]
     fn an_empty_offer_is_not_a_missing_one() {
         let mut langs = ModelLanguages::default();
-        assert!(langs.offered(1, "src/a", "mono").is_none());
+        assert!(
+            langs
+                .offered(Stage::Transcription, "src/a", "mono")
+                .is_none()
+        );
 
-        langs.record_offer(1, "src/a".into(), "mono".into(), Vec::new());
-        assert_eq!(langs.offered(1, "src/a", "mono"), Some(&[][..]));
+        langs.record_offer(
+            Stage::Transcription,
+            "src/a".into(),
+            "mono".into(),
+            Vec::new(),
+        );
+        assert_eq!(
+            langs.offered(Stage::Transcription, "src/a", "mono"),
+            Some(&[][..])
+        );
     }
 
     /// Offers are keyed like blocks, so two stages showing the same model do
@@ -187,15 +270,29 @@ mod tests {
     #[test]
     fn offers_are_keyed_by_stage_too() {
         let mut langs = ModelLanguages::default();
-        langs.record_offer(1, "src/a".into(), "shared".into(), vec!["auto".into()]);
-        langs.record_offer(2, "src/a".into(), "shared".into(), Vec::new());
+        langs.record_offer(
+            Stage::Transcription,
+            "src/a".into(),
+            "shared".into(),
+            vec!["auto".into()],
+        );
+        langs.record_offer(
+            Stage::PostProcessing,
+            "src/a".into(),
+            "shared".into(),
+            Vec::new(),
+        );
 
         assert_eq!(
-            langs.offered(1, "src/a", "shared").map(<[String]>::len),
+            langs
+                .offered(Stage::Transcription, "src/a", "shared")
+                .map(<[String]>::len),
             Some(1)
         );
         assert_eq!(
-            langs.offered(2, "src/a", "shared").map(<[String]>::len),
+            langs
+                .offered(Stage::PostProcessing, "src/a", "shared")
+                .map(<[String]>::len),
             Some(0)
         );
     }

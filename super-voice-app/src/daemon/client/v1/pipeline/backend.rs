@@ -16,15 +16,17 @@ use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 
 use crate::daemon::backends::BackendInfo;
+use crate::state::Stage;
 
 /// The backends that can fill `stage`, each carrying only the models it can run
 /// there (HTTP `GET /stt/pipeline/{stage}/backend/list`).
 ///
 /// Narrowed on both axes by the daemon, so a picker renders straight from it:
 /// which backends, and which of their models.
-pub async fn list_stage_backends(stage: u32) -> HttpResult<Vec<BackendInfo>> {
+pub async fn list_stage_backends(stage: Stage) -> HttpResult<Vec<BackendInfo>> {
     with_settings_token(move |socket, token| async move {
-        let path = format!("/stt/pipeline/{stage}/backend/list");
+        let (feature, number) = stage.route();
+        let path = format!("/{feature}/pipeline/{number}/backend/list");
         let resp = require_success(
             transport::settings_get(socket, &token, &path).await?,
             "list_stage_backends",

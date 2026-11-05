@@ -12,6 +12,7 @@ use cosmic::widget;
 
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
+use crate::state::Stage;
 use crate::ui::languages::friendly_name;
 use crate::ui::messages::{LanguageMessage, Message};
 
@@ -28,7 +29,7 @@ use crate::ui::messages::{LanguageMessage, Message};
 /// `None` only when the model is not in this backend's catalog, or when nothing
 /// is known about its language yet.
 pub(super) fn language_button<'a>(
-    stage: u32,
+    stage: Stage,
     backend: &'a BackendInfo,
     selected_model: &str,
     app: &'a AppModel,

@@ -18,6 +18,7 @@ use cosmic::widget::segmented_button;
 use super_stt_shared::models::contexts::DictationContext;
 
 use crate::daemon::backends::BackendInfo;
+use crate::state::Stage;
 use crate::state::{AudioTheme, ContextPage};
 
 /// Messages emitted by the application and its widgets.
@@ -276,28 +277,31 @@ pub enum DeviceMessage {
 /// Model-download progress lifecycle.
 #[derive(Debug, Clone)]
 pub enum DownloadMessage {
-    /// A progress snapshot, from a `download_progress` event or a poll. The
-    /// stage it belongs to travels inside it.
-    DownloadProgressUpdate(Box<super_stt_shared::models::protocol::DownloadProgress>),
+    /// A progress snapshot for `stage`, from a `download_progress` event or a
+    /// poll.
+    DownloadProgressUpdate {
+        stage: Stage,
+        progress: Box<super_stt_shared::models::protocol::DownloadProgress>,
+    },
     /// Abandon the download the named stage has in flight. Every variant below
     /// that settles a stage's card carries its stage for the same reason: the
     /// two stages download independently, so an outcome that did not say whose
     /// it was would settle whichever card happened to be showing.
-    CancelDownload(u32),
+    CancelDownload(Stage),
     DownloadCompleted(String), // model name
     DownloadCancelled {
         model: String,
-        stage: u32,
+        stage: Stage,
     },
     DownloadError {
         model: String,
         error: String,
-        stage: u32,
+        stage: Stage,
     },
     /// Ask every stage still owed an outcome for its progress.
     CheckDownloadStatus,
     /// The named stage has no download in flight after all.
-    NoDownloadInProgress(u32),
+    NoDownloadInProgress(Stage),
 }
 
 /// Preview-typing setting.
@@ -316,19 +320,19 @@ pub enum PreviewTypingMessage {
 /// copies drifted — the newer one lost the re-entrancy guard, the stale-catalog
 /// check, the device rollback, and the check that a device was staged at all.
 ///
-/// `stage` values come from `state::device_offers::{STT_STAGE, PP_STAGE}`,
+/// `stage` values come from `state::device_offers::{Stage::Transcription, Stage::PostProcessing}`,
 /// which are the daemon's own pipeline positions.
 #[derive(Debug, Clone)]
 pub enum StageMessage {
     /// Select the backend filling this stage, without loading a model. Any
     /// model from a different backend is unloaded.
-    SelectBackend { stage: u32, source: String },
+    SelectBackend { stage: Stage, source: String },
     /// Empty the stage, forgetting its model with it.
-    DeselectBackend { stage: u32 },
+    DeselectBackend { stage: Stage },
     /// The daemon took the selection (`None` = the stage is empty). Re-announced
     /// after a successful select, which is what asks for the backend's devices.
     BackendSelected {
-        stage: u32,
+        stage: Stage,
         source: Option<String>,
         /// The model the daemon remembers for the stage, running or not.
         ///
@@ -341,28 +345,28 @@ pub enum StageMessage {
     /// A select or deselect was refused: restore `prev` and report it on the
     /// stage's card.
     BackendSelectFailed {
-        stage: u32,
+        stage: Stage,
         prev: Option<String>,
         message: String,
     },
     /// User picked a model in the card's dropdown. Staged for the Load button —
     /// does *not* load. The device waits on the daemon, which is asked what the
     /// model can run on here and which device it already has.
-    StageModel { stage: u32, model: String },
+    StageModel { stage: Stage, model: String },
     /// User picked a device in the card's device dropdown.
     ///
     /// Staged locally while the model is not up. Once it is running the choice
     /// is sent straight through: the daemon reloads the model onto the new
     /// device in place, so switching device no longer means unload, re-pick,
     /// load.
-    StageDevice { stage: u32, device: String },
+    StageDevice { stage: Stage, device: String },
     /// A device change the daemon refused or could not apply.
     ///
     /// Distinct from [`StageMessage::LoadFailed`]: the model is still up, on
     /// the device it had, so this rolls the picker back and reports the failure
     /// without dropping the stage's identity the way a failed load does.
     DeviceChangeFailed {
-        stage: u32,
+        stage: Stage,
         prev_device: Option<String>,
         message: String,
     },
@@ -373,7 +377,7 @@ pub enum StageMessage {
     /// uninstalling a backend changes the answer — and never on selection,
     /// because the answer does not depend on what is selected.
     StageBackendsLoaded {
-        stage: u32,
+        stage: Stage,
         backends: Vec<BackendInfo>,
     },
     /// The daemon answered for the staged `model` of `source`: `devices` is what
@@ -381,7 +385,7 @@ pub enum StageMessage {
     /// is the backend selected when the question was asked, so an answer a
     /// switch has overtaken can be dropped.
     StagedDevicesLoaded {
-        stage: u32,
+        stage: Stage,
         source: String,
         model: String,
         devices: Vec<String>,
@@ -390,22 +394,22 @@ pub enum StageMessage {
     /// The daemon answered which devices this stage's backend can run its
     /// models on — the union over the models it serves in this stage's role.
     BackendDevicesLoaded {
-        stage: u32,
+        stage: Stage,
         source: String,
         devices: Vec<String>,
     },
     /// User clicked Load. Sets the staged model's device, then runs it. A no-op
     /// when nothing is staged or this stage already has an operation in flight.
-    Load { stage: u32 },
+    Load { stage: Stage },
     /// A load or unload failed: restore `prev_device` and report it on the
     /// stage's card.
     LoadFailed {
-        stage: u32,
+        stage: Stage,
         prev_device: String,
         message: String,
     },
     /// User clicked Unload. Drops the model but keeps the backend selected.
-    Unload { stage: u32 },
+    Unload { stage: Stage },
 }
 
 /// Post-processor state, read back from the daemon.
@@ -539,7 +543,7 @@ pub enum LanguageMessage {
     OpenLanguagePicker {
         /// `(stage, source, model)` for a per-model override, `None` for the
         /// global setting. The stage is what resolves the bare model name.
-        model: Option<(u32, String, String)>,
+        model: Option<(Stage, String, String)>,
     },
     CloseLanguagePicker,
     LanguagePickerQueryChanged(String),
@@ -558,14 +562,14 @@ pub enum LanguageMessage {
     /// the offer cannot change for a given model, so a pick does not re-fetch
     /// a list that has not moved.
     ModelLanguagesLoaded {
-        stage: u32,
+        stage: Stage,
         source: String,
         model: String,
         languages: Vec<String>,
     },
     ModelLanguageLoaded {
         /// The stage the block was read through.
-        stage: u32,
+        stage: Stage,
         source: String,
         model: String,
         block: crate::state::LanguageResolution,
@@ -577,7 +581,7 @@ pub enum LanguageMessage {
     ModelLanguageSelected {
         /// The stage the model is addressed through: it resolves the bare
         /// model name against the backend filling it.
-        stage: u32,
+        stage: Stage,
         source: String,
         model: String,
         choice: Option<String>,

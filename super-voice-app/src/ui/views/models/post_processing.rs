@@ -24,7 +24,7 @@ use super::language::language_button;
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
 use crate::state::ContextPage;
-use crate::state::device_offers::PP_STAGE;
+use crate::state::Stage;
 use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage, StageMessage};
 
@@ -45,12 +45,13 @@ use super::surface::{
 /// `None` while the answer is in flight, which the sheet draws differently from
 /// an empty answer: one is loading, the other is "install one".
 pub(crate) fn post_processor_backends(app: &AppModel) -> Option<&[BackendInfo]> {
-    app.stage_catalog.backends(PP_STAGE)
+    app.stage_catalog.backends(Stage::PostProcessing)
 }
 
 /// The post-processor model names one backend serves, in manifest order.
 fn post_processor_models(app: &AppModel, backend: &BackendInfo) -> Vec<String> {
-    app.stage_catalog.models(PP_STAGE, &backend.source)
+    app.stage_catalog
+        .models(Stage::PostProcessing, &backend.source)
 }
 
 /// The backend the card is about: the one the daemon has selected.
@@ -99,7 +100,7 @@ pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
     // Downloading, loading, or the failure that ended it — shown here when the
     // operation is this stage's, so a post-processor's progress is on the card
     // that started it rather than on the transcription card below the models.
-    if let Some(status) = super::active::operation_status(app, PP_STAGE) {
+    if let Some(status) = super::active::operation_status(app, Stage::PostProcessing) {
         card = card.push(status);
     }
 
@@ -138,7 +139,9 @@ fn header<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, Messag
         )),
         super::surface::deselect_button(
             "Deselect this backend",
-            Message::Stage(StageMessage::DeselectBackend { stage: PP_STAGE }),
+            Message::Stage(StageMessage::DeselectBackend {
+                stage: Stage::PostProcessing
+            }),
         ),
     ]
     .spacing(spacing.space_xs)
@@ -168,7 +171,8 @@ fn chip_row<'a>(backend: &'a BackendInfo, app: &AppModel) -> Option<Element<'a, 
         user_url: backend_has_user_url(backend),
     });
     let compute = stage_device_support(
-        app.device_offers.backend(PP_STAGE, &backend.source),
+        app.device_offers
+            .backend(Stage::PostProcessing, &backend.source),
         backend,
     );
     let caps = capability_chips(compute.gpu, compute.cpu, egress, true);
@@ -230,7 +234,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         // device the picker beside it already shows.
         let device_suffix = super::active::resolved_suffix(
             app.post_processor.running_device().unwrap_or_default(),
-            app.staged_picks.device(PP_STAGE),
+            app.staged_picks.device(Stage::PostProcessing),
         );
         let label = text::body(format!("Active: {model}{device_suffix}"))
             .class(cosmic::theme::Text::Accent)
@@ -241,27 +245,30 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         // The same picker the disabled card shows, in the same place: a running
         // post-processor's device can be changed in place too.
         if let Some(devices) =
-            super::active::device_dropdown(PP_STAGE, &backend.source, &model, app)
+            super::active::device_dropdown(Stage::PostProcessing, &backend.source, &model, app)
         {
             summary = summary.push(devices);
         }
         // The same control the transcription card shows beside its active
         // model, from the same function.
-        if let Some(lang_button) = language_button(PP_STAGE, backend, &model, app) {
+        if let Some(lang_button) = language_button(Stage::PostProcessing, backend, &model, app) {
             summary = summary.push(lang_button);
         }
         return summary
             .push(
                 button::standard("Unload")
                     .leading_icon(icons::phosphor_handle(icons::STOP))
-                    .on_press(Message::Stage(StageMessage::Unload { stage: PP_STAGE })),
+                    .on_press(Message::Stage(StageMessage::Unload {
+                        stage: Stage::PostProcessing,
+                    })),
             )
             .into();
     }
 
     let models = post_processor_models(app, backend);
     let shown = shown_model(
-        app.staged_picks.for_backend(PP_STAGE, &backend.source),
+        app.staged_picks
+            .for_backend(Stage::PostProcessing, &backend.source),
         app.post_processor.model.as_deref(),
     );
     let selected = shown
@@ -272,7 +279,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     let models_pick = models.clone();
     let dropdown = widget::dropdown(models, selected, move |index| {
         Message::Stage(StageMessage::StageModel {
-            stage: PP_STAGE,
+            stage: Stage::PostProcessing,
             model: models_pick[index].clone(),
         })
     })
@@ -291,7 +298,8 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     // model's declared devices narrowed to what this install and host can do,
     // so an online model (offering nothing) shows no picker.
     if let Some(model) = shown.as_deref()
-        && let Some(devices) = super::active::device_dropdown(PP_STAGE, &backend.source, model, app)
+        && let Some(devices) =
+            super::active::device_dropdown(Stage::PostProcessing, &backend.source, model, app)
     {
         picker_row = picker_row.push(devices);
     }
@@ -299,7 +307,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     // Per-model language, inline after the device dropdown — the same position
     // and the same function as the transcription card's staged picker.
     if let Some(model) = shown.as_deref()
-        && let Some(lang_button) = language_button(PP_STAGE, backend, model, app)
+        && let Some(lang_button) = language_button(Stage::PostProcessing, backend, model, app)
     {
         picker_row = picker_row.push(lang_button);
     }
@@ -311,15 +319,18 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     let staged_online = shown
         .as_deref()
         .is_some_and(|m| model_is_online(backend, m));
-    let staged_ok =
-        selected.is_some() && (app.staged_picks.device(PP_STAGE).is_some() || staged_online);
+    let staged_ok = selected.is_some()
+        && (app.staged_picks.device(Stage::PostProcessing).is_some() || staged_online);
     picker_row
         .push(
             button::suggested("Load model")
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
                 .on_press_maybe(
-                    (staged_ok && app.is_model_ready(PP_STAGE))
-                        .then_some(Message::Stage(StageMessage::Load { stage: PP_STAGE })),
+                    (staged_ok && app.is_model_ready(Stage::PostProcessing)).then_some(
+                        Message::Stage(StageMessage::Load {
+                            stage: Stage::PostProcessing,
+                        }),
+                    ),
                 ),
         )
         .into()
@@ -446,7 +457,7 @@ fn sheet_row(backend: &BackendInfo, is_selected: bool) -> Element<'static, Messa
     } else {
         button::suggested("Select")
             .on_press(Message::Stage(StageMessage::SelectBackend {
-                stage: PP_STAGE,
+                stage: Stage::PostProcessing,
                 source: backend.source.clone(),
             }))
             .into()

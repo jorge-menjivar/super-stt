@@ -2,7 +2,7 @@
 
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::client::{cancel_download, get_download_status};
-use crate::state::device_offers::STT_STAGE;
+use crate::state::Stage;
 use crate::ui::messages::{DownloadMessage, Message};
 use cosmic::prelude::*;
 use log::info;
@@ -15,7 +15,7 @@ impl AppModel {
         message: DownloadMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            DownloadMessage::DownloadProgressUpdate(_)
+            DownloadMessage::DownloadProgressUpdate { .. }
             | DownloadMessage::CancelDownload(_)
             | DownloadMessage::CheckDownloadStatus
             | DownloadMessage::NoDownloadInProgress(_) => self.handle_download_progress(message),
@@ -33,9 +33,9 @@ impl AppModel {
         message: DownloadMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            DownloadMessage::DownloadProgressUpdate(progress) => {
+            DownloadMessage::DownloadProgressUpdate { stage, progress } => {
                 // We have an actual download in progress
-                self.apply_download_progress(&progress);
+                self.apply_download_progress(stage, &progress);
                 Task::none()
             }
 
@@ -75,7 +75,10 @@ impl AppModel {
                                 Ok(Some(progress)) => {
                                     // Download is actually happening
                                     cosmic::Action::App(Message::Download(
-                                        DownloadMessage::DownloadProgressUpdate(Box::new(progress)),
+                                        DownloadMessage::DownloadProgressUpdate {
+                                            stage,
+                                            progress: Box::new(progress),
+                                        },
                                     ))
                                 }
                                 // No download in progress (loaded from cache, or
@@ -103,7 +106,7 @@ impl AppModel {
                 // contract (see `ModelError` handler).
                 if matches!(
                     self.model_operations.get(stage),
-                    Some(ModelOperationState::Provisioning { .. })
+                    ModelOperationState::Provisioning { .. }
                 ) {
                     self.model_operations.set_ready(stage);
                 }
@@ -120,8 +123,8 @@ impl AppModel {
     /// daemon re-reports, so there is nothing to clear for it here. Clearing
     /// unconditionally is what used to blank the transcription card when a
     /// post-processor download failed.
-    fn forget_stage_model(&mut self, stage: u32) {
-        if stage == STT_STAGE {
+    fn forget_stage_model(&mut self, stage: Stage) {
+        if stage == Stage::Transcription {
             self.clear_loaded_model();
         }
     }

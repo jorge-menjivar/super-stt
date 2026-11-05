@@ -6,6 +6,7 @@ use serde_json::json;
 
 use super::fake_daemon::{FakeDaemon, Reply};
 use crate::daemon::client::v1::pipeline::{self, backend, device, language, model, stage};
+use crate::state::Stage;
 
 const SOURCE: &str = "github.com/super-stt/openai";
 
@@ -29,7 +30,9 @@ async fn reading_a_stage_reports_the_backend_filling_it() {
     let daemon = FakeDaemon::start().await;
     daemon.reply(Reply::json(&stage_envelope(Some(SOURCE), true)));
 
-    let filled = stage::get_stage(1).await.expect("stage read");
+    let filled = stage::get_stage(Stage::Transcription)
+        .await
+        .expect("stage read");
 
     let request = daemon.request();
     assert_eq!(request.method, "GET");
@@ -49,8 +52,12 @@ async fn each_stage_is_addressed_by_its_position() {
         .reply(Reply::json(&stage_envelope(Some(SOURCE), true)))
         .reply(Reply::json(&stage_envelope(None, false)));
 
-    stage::get_stage(1).await.expect("stage 1 read");
-    stage::get_stage(2).await.expect("stage 2 read");
+    stage::get_stage(Stage::Transcription)
+        .await
+        .expect("stage 1 read");
+    stage::get_stage(Stage::PostProcessing)
+        .await
+        .expect("stage 2 read");
 
     let requests = daemon.requests();
     assert_eq!(requests[0].path(), "/stt/pipeline/1");
@@ -65,7 +72,9 @@ async fn a_stage_missing_from_the_envelope_reads_as_empty() {
     let daemon = FakeDaemon::start().await;
     daemon.reply(Reply::json(&json!({ "status": "success" })));
 
-    let filled = stage::get_stage(1).await.expect("stage read");
+    let filled = stage::get_stage(Stage::Transcription)
+        .await
+        .expect("stage read");
 
     assert_eq!(filled, stage::StageBackend::default());
 }
@@ -74,7 +83,7 @@ async fn a_stage_missing_from_the_envelope_reads_as_empty() {
 async fn selecting_a_backend_posts_the_source_to_the_stage() {
     let daemon = FakeDaemon::start().await;
 
-    stage::set_stage_backend(2, SOURCE.to_string())
+    stage::set_stage_backend(Stage::PostProcessing, SOURCE.to_string())
         .await
         .expect("backend selected");
 
@@ -88,7 +97,9 @@ async fn selecting_a_backend_posts_the_source_to_the_stage() {
 async fn deselecting_a_backend_deletes_the_stage() {
     let daemon = FakeDaemon::start().await;
 
-    stage::clear_stage_backend(2).await.expect("stage emptied");
+    stage::clear_stage_backend(Stage::PostProcessing)
+        .await
+        .expect("stage emptied");
 
     let request = daemon.request();
     assert_eq!(request.method, "DELETE");
@@ -109,7 +120,9 @@ async fn the_backends_offered_for_a_stage_come_from_the_daemon() {
         }],
     })));
 
-    let offered = backend::list_stage_backends(2).await.expect("menu read");
+    let offered = backend::list_stage_backends(Stage::PostProcessing)
+        .await
+        .expect("menu read");
 
     let request = daemon.request();
     assert_eq!(request.path(), "/stt/pipeline/2/backend/list");
@@ -128,7 +141,9 @@ async fn a_stage_menu_that_cannot_be_parsed_offers_nothing() {
         "backends": [{ "source": SOURCE }],
     })));
 
-    let offered = backend::list_stage_backends(2).await.expect("menu read");
+    let offered = backend::list_stage_backends(Stage::PostProcessing)
+        .await
+        .expect("menu read");
 
     assert!(offered.is_empty());
 }
@@ -145,7 +160,7 @@ async fn a_language_block_in_an_unknown_shape_reads_as_unset() {
         "language": "en",
     })));
 
-    let resolution = language::get_model_language(1, "whisper".to_string())
+    let resolution = language::get_model_language(Stage::Transcription, "whisper".to_string())
         .await
         .expect("language read");
 
@@ -171,7 +186,9 @@ async fn the_model_slot_is_read_from_the_envelopes_own_key() {
         },
     })));
 
-    let slot = model::get_stage_model(1).await.expect("slot read");
+    let slot = model::get_stage_model(Stage::Transcription)
+        .await
+        .expect("slot read");
 
     let request = daemon.request();
     assert_eq!(request.method, "GET");
@@ -196,7 +213,9 @@ async fn an_unloaded_model_keeps_its_selection_and_reports_no_device() {
         },
     })));
 
-    let slot = model::get_stage_model(1).await.expect("slot read");
+    let slot = model::get_stage_model(Stage::Transcription)
+        .await
+        .expect("slot read");
 
     assert_eq!(slot.model.as_deref(), Some("whisper-large-v3"));
     assert!(!slot.loaded);
@@ -208,7 +227,7 @@ async fn a_slot_read_that_the_daemon_did_not_call_a_success_is_an_error() {
     let daemon = FakeDaemon::start().await;
     daemon.reply(Reply::json(&json!({ "status": "error", "model": {} })));
 
-    let error = model::get_stage_model(1)
+    let error = model::get_stage_model(Stage::Transcription)
         .await
         .expect_err("slot read failed");
 
@@ -225,10 +244,14 @@ async fn a_slot_read_that_the_daemon_did_not_call_a_success_is_an_error() {
 async fn loading_a_model_sends_the_source_only_when_there_is_one() {
     let daemon = FakeDaemon::start().await;
 
-    model::set_stage_model(1, "whisper-large-v3".to_string(), Some(SOURCE.to_string()))
-        .await
-        .expect("model loaded");
-    model::set_stage_model(2, "qwen3".to_string(), None)
+    model::set_stage_model(
+        Stage::Transcription,
+        "whisper-large-v3".to_string(),
+        Some(SOURCE.to_string()),
+    )
+    .await
+    .expect("model loaded");
+    model::set_stage_model(Stage::PostProcessing, "qwen3".to_string(), None)
         .await
         .expect("model loaded");
 
@@ -247,8 +270,12 @@ async fn loading_a_model_sends_the_source_only_when_there_is_one() {
 async fn unloading_keeps_the_stage_and_cancel_is_addressed_to_it() {
     let daemon = FakeDaemon::start().await;
 
-    model::unload_stage_model(2).await.expect("model unloaded");
-    model::cancel_download(2).await.expect("download cancelled");
+    model::unload_stage_model(Stage::PostProcessing)
+        .await
+        .expect("model unloaded");
+    model::cancel_download(Stage::PostProcessing)
+        .await
+        .expect("download cancelled");
 
     let requests = daemon.requests();
     assert_eq!(requests[0].method, "DELETE");
@@ -287,7 +314,7 @@ async fn a_polled_download_is_attributed_to_the_stage_that_was_asked() {
         },
     })));
 
-    let progress = model::get_download_status(2)
+    let progress = model::get_download_status(Stage::PostProcessing)
         .await
         .expect("status read")
         .expect("a download is in flight");
@@ -325,13 +352,13 @@ async fn no_switch_and_no_download_both_report_nothing_in_flight() {
         })));
 
     assert!(
-        model::get_download_status(1)
+        model::get_download_status(Stage::Transcription)
             .await
             .expect("status read")
             .is_none()
     );
     assert!(
-        model::get_download_status(1)
+        model::get_download_status(Stage::Transcription)
             .await
             .expect("status read")
             .is_none()
@@ -348,7 +375,7 @@ async fn reading_a_models_device_addresses_it_through_the_stage() {
         "available_devices": ["cpu", "gpu"],
     })));
 
-    let read = device::get_model_device(1, "whisper-large-v3".to_string())
+    let read = device::get_model_device(Stage::Transcription, "whisper-large-v3".to_string())
         .await
         .expect("device read");
 
@@ -367,9 +394,13 @@ async fn reading_a_models_device_addresses_it_through_the_stage() {
 async fn setting_a_models_device_posts_the_preference() {
     let daemon = FakeDaemon::start().await;
 
-    device::set_model_device(1, "whisper-large-v3".to_string(), "cpu".to_string())
-        .await
-        .expect("device set");
+    device::set_model_device(
+        Stage::Transcription,
+        "whisper-large-v3".to_string(),
+        "cpu".to_string(),
+    )
+    .await
+    .expect("device set");
 
     let request = daemon.request();
     assert_eq!(request.method, "POST");
@@ -397,10 +428,11 @@ async fn the_two_device_lists_are_separate_paths() {
             "available_devices": ["cpu", "gpu"],
         })));
 
-    let for_model = device::list_model_devices(1, "whisper-large-v3".to_string())
-        .await
-        .expect("model devices listed");
-    let for_stage = device::list_stage_devices(1)
+    let for_model =
+        device::list_model_devices(Stage::Transcription, "whisper-large-v3".to_string())
+            .await
+            .expect("model devices listed");
+    let for_stage = device::list_stage_devices(Stage::Transcription)
         .await
         .expect("stage devices listed");
 
@@ -421,7 +453,7 @@ async fn a_model_with_no_devices_lists_none() {
     let daemon = FakeDaemon::start().await;
     daemon.reply(Reply::json(&json!({ "status": "success" })));
 
-    let listed = device::list_model_devices(1, "gpt-4o-transcribe".to_string())
+    let listed = device::list_model_devices(Stage::Transcription, "gpt-4o-transcribe".to_string())
         .await
         .expect("devices listed");
 
@@ -438,9 +470,10 @@ async fn a_model_name_with_a_slash_is_encoded_into_the_language_path() {
         "language": { "effective": "en", "source": "override", "primary": "en" },
     })));
 
-    let resolution = language::get_model_language(1, "openai/whisper-large-v3".to_string())
-        .await
-        .expect("language read");
+    let resolution =
+        language::get_model_language(Stage::Transcription, "openai/whisper-large-v3".to_string())
+            .await
+            .expect("language read");
 
     let request = daemon.request();
     assert_eq!(
@@ -466,10 +499,14 @@ async fn setting_and_clearing_a_language_override_share_the_path() {
         .reply(Reply::json(&resolved))
         .reply(Reply::json(&cleared));
 
-    let after_set = language::set_model_language(1, "whisper".to_string(), "es".to_string())
-        .await
-        .expect("override set");
-    let after_clear = language::clear_model_language(1, "whisper".to_string())
+    let after_set = language::set_model_language(
+        Stage::Transcription,
+        "whisper".to_string(),
+        "es".to_string(),
+    )
+    .await
+    .expect("override set");
+    let after_clear = language::clear_model_language(Stage::Transcription, "whisper".to_string())
         .await
         .expect("override cleared");
 
@@ -495,10 +532,10 @@ async fn the_languages_on_offer_are_a_separate_list() {
         })))
         .reply(Reply::json(&json!({ "status": "success" })));
 
-    let multilingual = language::list_model_languages(1, "whisper".to_string())
+    let multilingual = language::list_model_languages(Stage::Transcription, "whisper".to_string())
         .await
         .expect("languages listed");
-    let monolingual = language::list_model_languages(1, "parakeet".to_string())
+    let monolingual = language::list_model_languages(Stage::Transcription, "parakeet".to_string())
         .await
         .expect("languages listed");
 
@@ -526,7 +563,9 @@ async fn a_stage_view_joins_the_backend_and_the_model_slot() {
             },
         })));
 
-    let view = pipeline::get_stage_view(1).await.expect("stage view read");
+    let view = pipeline::get_stage_view(Stage::Transcription)
+        .await
+        .expect("stage view read");
 
     let requests = daemon.requests();
     assert_eq!(requests.len(), 2);
@@ -553,7 +592,7 @@ async fn a_stage_view_fails_whole_when_its_first_half_fails() {
         "message": "no such stage",
     })));
 
-    let error = pipeline::get_stage_view(9)
+    let error = pipeline::get_stage_view(Stage::PostProcessing)
         .await
         .expect_err("stage view failed");
 

@@ -14,18 +14,12 @@
 //! in the key is what makes a stale answer harmless: after a backend switch a
 //! lookup for the new one simply misses until its own answer lands.
 
-/// The pipeline positions, under the names the app addresses them by:
-/// transcription is stage 1, post-processing stage 2. The numbers are the
-/// daemon's — the same ones `/stt/pipeline/{stage}` takes and the `stage` field of
-/// its events carries — so they are re-exported rather than restated.
-pub use super_stt_shared::models::protocol::{
-    POST_PROCESSOR_STAGE as PP_STAGE, TRANSCRIPTION_STAGE as STT_STAGE,
-};
-
 /// One answer from the daemon: the devices available for a stage's backend, or
 /// for one model of it.
+use super::Stage;
+
 struct Offer {
-    stage: u32,
+    stage: Stage,
     source: String,
     /// `None` for the backend-wide list — the union over the models that
     /// backend serves in the stage's role.
@@ -47,13 +41,13 @@ pub struct DeviceOffers {
 impl DeviceOffers {
     /// The devices `source` can run a stage's models on, or `None` if the
     /// daemon hasn't answered for it.
-    pub fn backend(&self, stage: u32, source: &str) -> Option<&[String]> {
+    pub fn backend(&self, stage: Stage, source: &str) -> Option<&[String]> {
         self.find(stage, source, None)
     }
 
     /// The devices `model` can be loaded onto in this stage, or `None` if the
     /// daemon hasn't answered for it.
-    pub fn model(&self, stage: u32, source: &str, model: &str) -> Option<&[String]> {
+    pub fn model(&self, stage: Stage, source: &str, model: &str) -> Option<&[String]> {
         self.find(stage, source, Some(model))
     }
 
@@ -64,7 +58,7 @@ impl DeviceOffers {
     /// source the rest are about a selection that is no longer current.
     pub fn record(
         &mut self,
-        stage: u32,
+        stage: Stage,
         source: String,
         model: Option<String>,
         devices: Vec<String>,
@@ -87,7 +81,7 @@ impl DeviceOffers {
         });
     }
 
-    fn find(&self, stage: u32, source: &str, model: Option<&str>) -> Option<&[String]> {
+    fn find(&self, stage: Stage, source: &str, model: Option<&str>) -> Option<&[String]> {
         self.offers
             .iter()
             .find(|o| o.stage == stage && o.source == source && o.model.as_deref() == model)
@@ -114,7 +108,7 @@ pub fn staged_device(devices: &[String], current: Option<String>) -> Option<Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{DeviceOffers, staged_device};
+    use super::{DeviceOffers, Stage, staged_device};
 
     /// A stage keeps only the selected backend's answers: switching backends
     /// must not leave the previous one's devices readable under the new
@@ -122,13 +116,21 @@ mod tests {
     #[test]
     fn a_new_backends_answer_drops_the_previous_ones() {
         let mut offers = DeviceOffers::default();
-        offers.record(1, "a".into(), None, vec!["gpu".into()]);
-        offers.record(1, "a".into(), Some("m".into()), vec!["gpu".into()]);
-        offers.record(1, "b".into(), None, vec!["cpu".into()]);
+        offers.record(Stage::Transcription, "a".into(), None, vec!["gpu".into()]);
+        offers.record(
+            Stage::Transcription,
+            "a".into(),
+            Some("m".into()),
+            vec!["gpu".into()],
+        );
+        offers.record(Stage::Transcription, "b".into(), None, vec!["cpu".into()]);
 
-        assert_eq!(offers.backend(1, "b"), Some(["cpu".to_string()].as_slice()));
-        assert_eq!(offers.backend(1, "a"), None);
-        assert_eq!(offers.model(1, "a", "m"), None);
+        assert_eq!(
+            offers.backend(Stage::Transcription, "b"),
+            Some(["cpu".to_string()].as_slice())
+        );
+        assert_eq!(offers.backend(Stage::Transcription, "a"), None);
+        assert_eq!(offers.model(Stage::Transcription, "a", "m"), None);
     }
 
     /// The two stages answer independently — the same backend serving both
@@ -137,11 +139,17 @@ mod tests {
     #[test]
     fn the_stages_do_not_overwrite_each_other() {
         let mut offers = DeviceOffers::default();
-        offers.record(1, "a".into(), None, vec!["gpu".into()]);
-        offers.record(2, "a".into(), None, vec!["cpu".into()]);
+        offers.record(Stage::Transcription, "a".into(), None, vec!["gpu".into()]);
+        offers.record(Stage::PostProcessing, "a".into(), None, vec!["cpu".into()]);
 
-        assert_eq!(offers.backend(1, "a"), Some(["gpu".to_string()].as_slice()));
-        assert_eq!(offers.backend(2, "a"), Some(["cpu".to_string()].as_slice()));
+        assert_eq!(
+            offers.backend(Stage::Transcription, "a"),
+            Some(["gpu".to_string()].as_slice())
+        );
+        assert_eq!(
+            offers.backend(Stage::PostProcessing, "a"),
+            Some(["cpu".to_string()].as_slice())
+        );
     }
 
     /// An empty answer is an answer — "this install can run it on nothing" —
@@ -149,10 +157,18 @@ mod tests {
     #[test]
     fn an_empty_list_is_not_a_miss() {
         let mut offers = DeviceOffers::default();
-        offers.record(1, "a".into(), Some("m".into()), Vec::new());
+        offers.record(
+            Stage::Transcription,
+            "a".into(),
+            Some("m".into()),
+            Vec::new(),
+        );
 
-        assert_eq!(offers.model(1, "a", "m"), Some([].as_slice()));
-        assert_eq!(offers.model(1, "a", "other"), None);
+        assert_eq!(
+            offers.model(Stage::Transcription, "a", "m"),
+            Some([].as_slice())
+        );
+        assert_eq!(offers.model(Stage::Transcription, "a", "other"), None);
     }
 
     /// A second answer for the same key replaces the first rather than
@@ -160,16 +176,21 @@ mod tests {
     #[test]
     fn a_repeat_answer_replaces_the_earlier_one() {
         let mut offers = DeviceOffers::default();
-        offers.record(1, "a".into(), Some("m".into()), vec!["cpu".into()]);
         offers.record(
-            1,
+            Stage::Transcription,
+            "a".into(),
+            Some("m".into()),
+            vec!["cpu".into()],
+        );
+        offers.record(
+            Stage::Transcription,
             "a".into(),
             Some("m".into()),
             vec!["cpu".into(), "gpu".into()],
         );
 
         assert_eq!(
-            offers.model(1, "a", "m"),
+            offers.model(Stage::Transcription, "a", "m"),
             Some(["cpu".to_string(), "gpu".to_string()].as_slice())
         );
     }

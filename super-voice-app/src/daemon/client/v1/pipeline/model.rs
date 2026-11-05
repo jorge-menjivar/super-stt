@@ -13,6 +13,7 @@ use serde::Deserialize;
 
 use crate::daemon::client::internal::response::require_unit;
 use crate::daemon::client::internal::session::with_settings_token;
+use crate::state::Stage;
 use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 
@@ -115,12 +116,13 @@ struct StageDownload {
     eta_seconds: Option<u64>,
 }
 
-fn model_path(stage: u32) -> String {
-    format!("/stt/pipeline/{stage}/model")
+fn model_path(stage: Stage) -> String {
+    let (feature, number) = stage.route();
+    format!("/{feature}/pipeline/{number}/model")
 }
 
 /// Read `stage`'s model slot (HTTP `GET /stt/pipeline/{stage}/model`).
-pub async fn get_stage_model(stage: u32) -> HttpResult<StageModel> {
+pub async fn get_stage_model(stage: Stage) -> HttpResult<StageModel> {
     with_settings_token(move |socket, token| async move {
         let envelope =
             transport::get_json::<ModelEnvelope>(socket, &token, &model_path(stage)).await?;
@@ -142,7 +144,7 @@ pub async fn get_stage_model(stage: u32) -> HttpResult<StageModel> {
 /// `switch.download` sub-object. The polled counterpart of the
 /// `download_progress` event, for the ticks a client may have missed.
 pub async fn get_download_status(
-    stage: u32,
+    stage: Stage,
 ) -> HttpResult<Option<super_stt_shared::models::protocol::DownloadProgress>> {
     with_settings_token(move |socket, token| async move {
         let status =
@@ -166,7 +168,7 @@ pub async fn get_download_status(
             source: target_field("source"),
             // The stage that was asked: the slot reports only its own stage's
             // switch, so the answer belongs to the stage in the path.
-            stage,
+            stage: stage.number(),
             current_file: download.current_file,
             file_index: download.file_index,
             total_files: download.total_files,
@@ -189,7 +191,11 @@ pub async fn get_download_status(
 ///
 /// `source` is optional: omitted, the daemon resolves the model against the
 /// backend already filling the stage.
-pub async fn set_stage_model(stage: u32, model: String, source: Option<String>) -> HttpResult<()> {
+pub async fn set_stage_model(
+    stage: Stage,
+    model: String,
+    source: Option<String>,
+) -> HttpResult<()> {
     let mut body = serde_json::json!({ "model": model });
     if let Some(source) = source {
         body["source"] = serde_json::Value::String(source);
@@ -218,7 +224,7 @@ pub async fn set_stage_model(stage: u32, model: String, source: Option<String>) 
 /// loading it again — onto another device, say — is one click rather than a
 /// re-pick. [`super::stage::clear_stage_backend`] is the one that forgets the
 /// selection.
-pub async fn unload_stage_model(stage: u32) -> HttpResult<()> {
+pub async fn unload_stage_model(stage: Stage) -> HttpResult<()> {
     with_settings_token(move |socket, token| async move {
         let resp = transport::settings_delete(socket, &token, &model_path(stage)).await?;
         require_unit(resp, "unload_stage_model")
@@ -232,8 +238,9 @@ pub async fn unload_stage_model(stage: u32) -> HttpResult<()> {
 /// Addressed to a stage because the stages provision independently: the Cancel
 /// button under a post-processor's progress must not abandon a transcription
 /// model's download.
-pub async fn cancel_download(stage: u32) -> HttpResult<()> {
-    let path = format!("/stt/pipeline/{stage}/model/cancel");
+pub async fn cancel_download(stage: Stage) -> HttpResult<()> {
+    let (feature, number) = stage.route();
+    let path = format!("/{feature}/pipeline/{number}/model/cancel");
     with_settings_token(move |socket, token| {
         let path = path.clone();
         async move {

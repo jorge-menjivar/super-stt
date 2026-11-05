@@ -23,19 +23,20 @@
 //! flight, `Some(&[])` means the daemon says there is nothing — which a picker
 //! draws as "install one" rather than as a list still loading.
 
+use super::Stage;
 use crate::daemon::backends::BackendInfo;
 
 /// The stage-scoped catalog the daemon has answered with, per stage.
 #[derive(Debug, Default)]
 pub struct StageCatalog {
-    stages: Vec<(u32, Vec<BackendInfo>)>,
+    stages: Vec<(Stage, Vec<BackendInfo>)>,
 }
 
 impl StageCatalog {
     /// The backends that can fill `stage`, each carrying only the models it can
     /// run there — or `None` if the daemon has not answered yet.
     #[must_use]
-    pub fn backends(&self, stage: u32) -> Option<&[BackendInfo]> {
+    pub fn backends(&self, stage: Stage) -> Option<&[BackendInfo]> {
         self.stages
             .iter()
             .find(|(s, _)| *s == stage)
@@ -44,7 +45,7 @@ impl StageCatalog {
 
     /// One of them by repo id, when the stage can use it at all.
     #[must_use]
-    pub fn backend(&self, stage: u32, source: &str) -> Option<&BackendInfo> {
+    pub fn backend(&self, stage: Stage, source: &str) -> Option<&BackendInfo> {
         self.backends(stage)?.iter().find(|b| b.source == source)
     }
 
@@ -54,14 +55,14 @@ impl StageCatalog {
     /// so the view and the handler must read the same one — which they do,
     /// because there is only this one.
     #[must_use]
-    pub fn models(&self, stage: u32, source: &str) -> Vec<String> {
+    pub fn models(&self, stage: Stage, source: &str) -> Vec<String> {
         self.backend(stage, source)
             .map(|b| b.models.iter().map(|m| m.name.clone()).collect())
             .unwrap_or_default()
     }
 
     /// Record what a stage can be filled with.
-    pub fn record(&mut self, stage: u32, backends: Vec<BackendInfo>) {
+    pub fn record(&mut self, stage: Stage, backends: Vec<BackendInfo>) {
         match self.stages.iter_mut().find(|(s, _)| *s == stage) {
             Some(slot) => slot.1 = backends,
             None => self.stages.push((stage, backends)),
@@ -73,7 +74,7 @@ impl StageCatalog {
 mod tests {
     use super::StageCatalog;
     use crate::daemon::backends::{BackendInfo, BackendModel};
-    use crate::state::device_offers::{PP_STAGE, STT_STAGE};
+    use crate::state::Stage;
 
     fn model(name: &str) -> BackendModel {
         BackendModel {
@@ -112,11 +113,13 @@ mod tests {
     #[test]
     fn a_miss_is_not_an_empty_answer() {
         let mut catalog = StageCatalog::default();
-        assert!(catalog.backends(STT_STAGE).is_none());
+        assert!(catalog.backends(Stage::Transcription).is_none());
 
-        catalog.record(STT_STAGE, Vec::new());
+        catalog.record(Stage::Transcription, Vec::new());
         assert_eq!(
-            catalog.backends(STT_STAGE).map(<[BackendInfo]>::len),
+            catalog
+                .backends(Stage::Transcription)
+                .map(<[BackendInfo]>::len),
             Some(0)
         );
     }
@@ -127,11 +130,23 @@ mod tests {
     #[test]
     fn each_stage_holds_its_own_view_of_a_shared_backend() {
         let mut catalog = StageCatalog::default();
-        catalog.record(STT_STAGE, vec![backend("src/both", vec![model("whisper")])]);
-        catalog.record(PP_STAGE, vec![backend("src/both", vec![model("tidy")])]);
+        catalog.record(
+            Stage::Transcription,
+            vec![backend("src/both", vec![model("whisper")])],
+        );
+        catalog.record(
+            Stage::PostProcessing,
+            vec![backend("src/both", vec![model("tidy")])],
+        );
 
-        assert_eq!(catalog.models(STT_STAGE, "src/both"), vec!["whisper"]);
-        assert_eq!(catalog.models(PP_STAGE, "src/both"), vec!["tidy"]);
+        assert_eq!(
+            catalog.models(Stage::Transcription, "src/both"),
+            vec!["whisper"]
+        );
+        assert_eq!(
+            catalog.models(Stage::PostProcessing, "src/both"),
+            vec!["tidy"]
+        );
     }
 
     /// A backend the stage cannot use has no models for it, rather than the
@@ -139,10 +154,13 @@ mod tests {
     #[test]
     fn a_backend_this_stage_cannot_use_offers_nothing() {
         let mut catalog = StageCatalog::default();
-        catalog.record(STT_STAGE, vec![backend("src/stt", vec![model("whisper")])]);
+        catalog.record(
+            Stage::Transcription,
+            vec![backend("src/stt", vec![model("whisper")])],
+        );
 
-        assert!(catalog.backend(STT_STAGE, "src/clean").is_none());
-        assert!(catalog.models(STT_STAGE, "src/clean").is_empty());
+        assert!(catalog.backend(Stage::Transcription, "src/clean").is_none());
+        assert!(catalog.models(Stage::Transcription, "src/clean").is_empty());
     }
 
     /// A re-answer replaces rather than stacks: manifest order is the dropdown
@@ -151,18 +169,23 @@ mod tests {
     fn a_new_answer_replaces_the_old_one() {
         let mut catalog = StageCatalog::default();
         catalog.record(
-            STT_STAGE,
+            Stage::Transcription,
             vec![backend("src/a", vec![model("zeta"), model("alpha")])],
         );
         catalog.record(
-            STT_STAGE,
+            Stage::Transcription,
             vec![backend("src/a", vec![model("zeta"), model("beta")])],
         );
 
         assert_eq!(
-            catalog.backends(STT_STAGE).map(<[BackendInfo]>::len),
+            catalog
+                .backends(Stage::Transcription)
+                .map(<[BackendInfo]>::len),
             Some(1)
         );
-        assert_eq!(catalog.models(STT_STAGE, "src/a"), vec!["zeta", "beta"]);
+        assert_eq!(
+            catalog.models(Stage::Transcription, "src/a"),
+            vec!["zeta", "beta"]
+        );
     }
 }

@@ -13,6 +13,7 @@ use serde::Deserialize;
 
 use crate::daemon::client::internal::response::{require_success, require_unit};
 use crate::daemon::client::internal::session::with_settings_token;
+use crate::state::Stage;
 use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 
@@ -30,12 +31,13 @@ pub struct ModelDevice {
     pub available_devices: Vec<String>,
 }
 
-fn device_path(stage: u32, model: &str) -> String {
-    format!("/stt/pipeline/{stage}/model/{model}/device")
+fn device_path(stage: Stage, model: &str) -> String {
+    let (feature, number) = stage.route();
+    format!("/{feature}/pipeline/{number}/model/{model}/device")
 }
 
 /// Read a model's device (HTTP `GET /stt/pipeline/{stage}/model/{model}/device`).
-pub async fn get_model_device(stage: u32, model: String) -> HttpResult<ModelDevice> {
+pub async fn get_model_device(stage: Stage, model: String) -> HttpResult<ModelDevice> {
     let path = device_path(stage, &model);
     with_settings_token(move |socket, token| {
         let path = path.clone();
@@ -58,7 +60,7 @@ pub async fn get_model_device(stage: u32, model: String) -> HttpResult<ModelDevi
 ///
 /// `device` is the `cpu`/`gpu` preference. Reloads the model when it is the
 /// one its stage is running; otherwise only records the choice.
-pub async fn set_model_device(stage: u32, model: String, device: String) -> HttpResult<()> {
+pub async fn set_model_device(stage: Stage, model: String, device: String) -> HttpResult<()> {
     let path = device_path(stage, &model);
     let body = serde_json::json!({ "device": device });
     with_settings_token(move |socket, token| {
@@ -72,12 +74,14 @@ pub async fn set_model_device(stage: u32, model: String, device: String) -> Http
     .await
 }
 
-fn device_list_path(stage: u32, model: &str) -> String {
-    format!("/stt/pipeline/{stage}/model/{model}/device/list")
+fn device_list_path(stage: Stage, model: &str) -> String {
+    let (feature, number) = stage.route();
+    format!("/{feature}/pipeline/{number}/model/{model}/device/list")
 }
 
-fn stage_device_list_path(stage: u32) -> String {
-    format!("/stt/pipeline/{stage}/device/list")
+fn stage_device_list_path(stage: Stage) -> String {
+    let (feature, number) = stage.route();
+    format!("/{feature}/pipeline/{number}/device/list")
 }
 
 /// The devices a model can be loaded onto here
@@ -88,7 +92,7 @@ fn stage_device_list_path(stage: u32) -> String {
 /// for an online model (no local compute) and for a local model no installed
 /// asset can run — the picker tells those two apart by the model's own
 /// `supported_devices`, which only the online one marks `none`.
-pub async fn list_model_devices(stage: u32, model: String) -> HttpResult<Vec<String>> {
+pub async fn list_model_devices(stage: Stage, model: String) -> HttpResult<Vec<String>> {
     let path = device_list_path(stage, &model);
     with_settings_token(move |socket, token| {
         let path = path.clone();
@@ -106,7 +110,7 @@ pub async fn list_model_devices(stage: u32, model: String) -> HttpResult<Vec<Str
 /// The devices the stage's selected backend can run models on here
 /// (HTTP `GET /stt/pipeline/{stage}/device/list`) — the union of
 /// [`list_model_devices`] over the models it serves in that stage's role.
-pub async fn list_stage_devices(stage: u32) -> HttpResult<Vec<String>> {
+pub async fn list_stage_devices(stage: Stage) -> HttpResult<Vec<String>> {
     let path = stage_device_list_path(stage);
     with_settings_token(move |socket, token| {
         let path = path.clone();

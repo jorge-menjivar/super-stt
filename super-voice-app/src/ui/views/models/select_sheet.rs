@@ -7,7 +7,7 @@ use cosmic::widget::{self, button, text};
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
 use crate::state::ContextPage;
-use crate::state::device_offers::STT_STAGE;
+use crate::state::Stage;
 use crate::ui::icons;
 use crate::ui::messages::{Message, ShellMessage, StageMessage};
 
@@ -67,7 +67,7 @@ pub fn select_backend_sheet(app: &AppModel) -> Element<'_, Message> {
     //
     // `None` is the answer still in flight; an empty answer is the daemon
     // saying nothing installed transcribes. The two read differently below.
-    let answered = app.stage_catalog.backends(STT_STAGE);
+    let answered = app.stage_catalog.backends(Stage::Transcription);
     let eligible: &[BackendInfo] = answered.unwrap_or_default();
     let mut col = widget::column::with_capacity(eligible.len() + 1)
         .spacing(spacing.space_xs)
@@ -130,7 +130,7 @@ fn select_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static
         button::suggested("Select")
             .leading_icon(icons::phosphor_handle(icons::PLAY))
             .on_press(Message::Stage(StageMessage::SelectBackend {
-                stage: STT_STAGE,
+                stage: Stage::Transcription,
                 source: backend.source.clone(),
             }))
             .into()
