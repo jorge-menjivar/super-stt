@@ -78,14 +78,14 @@ SERVICES=(super-voice super-stt super-tts)
 # Every binary any of them installed, current names first.
 BINARIES=(
     super-voice-daemon super-voice-cli super-voice-consent super-voice-install voice
-    super-stt-app super-tts-app
+    super-voice-app super-tts-app super-stt-app
     super-cosmic-applet
     super-stt super-stt-daemon super-stt-cli super-stt-consent super-stt-install stt
     super-stt-cosmic-applet super-stt-applet-full super-stt-applet-left super-stt-applet-right
     super-tts-daemon super-tts-cli super-tts-consent super-tts-install tts
     super-tts-cosmic-applet
 )
-APPS=(super-stt-app super-tts-app)
+APPS=(super-voice-app super-tts-app super-stt-app)
 APPLETS=(super-cosmic-applet super-stt-cosmic-applet super-tts-cosmic-applet)
 # Processes to stop at the end, for a daemon started outside systemd.
 DAEMONS=(super-voice-daemon super-stt-daemon super-tts-daemon super-stt)

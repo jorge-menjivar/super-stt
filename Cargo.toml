@@ -1,7 +1,7 @@
 [workspace]
   resolver        = "2"
   members         = [
-    "super-stt-app",
+    "super-voice-app",
     "super-voice-cli",
     "super-voice-consent",
     "super-voice-daemon",
@@ -26,7 +26,7 @@
   # heavy deps, so keep it out of `default-members`: the everyday
   # `cargo build`/`run`/`test` (no `--workspace`) stays lean.
   default-members = [
-    "super-stt-app",
+    "super-voice-app",
     "super-voice-cli",
     "super-voice-consent",
     "super-voice-daemon",

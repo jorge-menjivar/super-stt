@@ -129,7 +129,7 @@ jobs:
             --bin super-voice-daemon \
             --bin super-voice-cli \
             --bin super-voice-consent \
-            --bin super-stt-app \
+            --bin super-voice-app \
             --bin super-tts-app \
             --bin super-voice-install
 
@@ -142,7 +142,7 @@ jobs:
           cp target/${{ matrix.target }}/release/super-voice-daemon dist/
           cp target/${{ matrix.target }}/release/super-voice-cli dist/
           cp target/${{ matrix.target }}/release/super-voice-consent dist/
-          cp target/${{ matrix.target }}/release/super-stt-app dist/
+          cp target/${{ matrix.target }}/release/super-voice-app dist/
           cp target/${{ matrix.target }}/release/super-tts-app dist/
 
           # Include systemd service files
@@ -153,7 +153,7 @@ jobs:
 
           # Include both apps' desktop resources: launcher entries,
           # metainfo, icons. Their icon trees merge.
-          cp -r super-stt-app/resources/* dist/resources
+          cp -r super-voice-app/resources/* dist/resources
           cp -r super-tts-app/resources/* dist/resources
 
           # Remove any extra assets

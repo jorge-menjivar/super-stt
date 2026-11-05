@@ -13,8 +13,8 @@ Super Voice is a speech-to-text and text-to-speech service built in Rust with a 
 - **super-voice-registry-types**: the one backend manifest spec (`backend.toml`) and the registry index, for both features.
 - **super-voice-indexer**: builds the registry index (CI only).
 - **super-voice-cli**: the `voice` command. Each feature's commands are under its own subcommand: `voice record` (speech to text), `voice speak` (text to speech).
-- **super-stt-app**, **super-stt-shared**: speech to text's settings app and client library.
-- **super-tts-app**, **super-tts-shared**: text to speech's. The two apps merge later.
+- **super-voice-app**: the settings app. Text to speech's pages are still in **super-tts-app**, until they move into it.
+- **super-stt-shared**, **super-tts-shared**: each feature's client library.
 - **super-voice-install**: the installer and self-updater.
 
 The COSMIC applet lives in super-libre/super-cosmic-applet. Super TTS's repository was imported under `tts/`; what is still there is being merged.

@@ -41,7 +41,7 @@ Source: https://github.com/phosphor-icons/core
 
 Unlike the entries above, these are redistributed in this repository rather
 than fetched at build time: the SVGs under
-super-stt-app/resources/icons/phosphor/ and super-tts-app/resources/icons/phosphor/
+super-voice-app/resources/icons/phosphor/ and super-tts-app/resources/icons/phosphor/
 are copied verbatim from that project's raw/regular/ directory and embedded in
 the settings apps. The MIT license text they are provided under sits beside them
 in each directory.

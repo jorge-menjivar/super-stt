@@ -1,4 +1,4 @@
-app_name := 'super-stt-app'
+app_name := 'super-voice-app'
 daemon_bin_name := 'super-voice-daemon'
 # systemd unit name (matches super-voice-daemon/systemd/super-voice.service)
 service_name := 'super-voice'
@@ -14,6 +14,8 @@ wrapper_name := 'voice'
 shared_applet := 'super-cosmic-applet'
 shared_applet_dir := env('SHARED_APPLET_DIR', '..' / 'super-cosmic-applet')
 old_applets := 'super-stt-cosmic-applet super-tts-cosmic-applet'
+# Super STT's settings app, which Super Voice's replaced.
+old_apps := 'super-stt-app'
 
 # Installation paths — root-owned under /usr/local, matching the
 # release installers, so install/uninstall recipes escalate with sudo
@@ -47,11 +49,11 @@ consent_dst := bin_dir / consent_name
 wrapper_dst := bin_dir / wrapper_name
 
 # App files
-app_desktop_file_name := 'super-stt-app.desktop'
-app_desktop_file_src := 'super-stt-app' / 'resources' / app_desktop_file_name
-app_icon_src := 'super-stt-app' / 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'super-stt-app.svg'
+app_desktop_file_name := 'super-voice-app.desktop'
+app_desktop_file_src := 'super-voice-app' / 'resources' / app_desktop_file_name
+app_icon_src := 'super-voice-app' / 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'super-voice-app.svg'
 app_desktop_file_dst := desktop_dir / app_desktop_file_name
-app_icon_dst := icons_dir / 'super-stt-app.svg'
+app_icon_dst := icons_dir / 'super-voice-app.svg'
 
 # Service file
 service_file := service_name + '.service'
@@ -64,12 +66,12 @@ service_dst := systemd_unit_dir / service_file
 # itself is portable — its vendored iced fork gates every Wayland crate behind
 # `not(target_vendor = "apple")` — so the app builds once its libcosmic
 # feature list drops `applet` and the Wayland/D-Bus features. See
-# super-stt-app/Cargo.toml.
+# super-voice-app/Cargo.toml.
 #
 # Named as a list rather than reached with `--workspace --exclude` so the
 # macOS gates say what they cover, and so a new portable crate has to be added
 # deliberately rather than silently skipped.
-macos_members := '-p super-voice-daemon -p super-voice-cli -p super-stt-shared -p super-voice-registry-types -p super-voice-install -p super-stt-app'
+macos_members := '-p super-voice-daemon -p super-voice-cli -p super-stt-shared -p super-voice-registry-types -p super-voice-install -p super-voice-app'
 
 # macOS ships as one app bundle, `Super Voice.app`: the settings app is its
 # executable, and the daemon and the CLI sit beside it in Contents/MacOS. The
@@ -78,10 +80,10 @@ macos_members := '-p super-voice-daemon -p super-voice-cli -p super-stt-shared -
 macos_bundle_name := 'Super Voice.app'
 macos_bundle_src := 'target' / 'release' / macos_bundle_name
 macos_bundle_dst := '/Applications' / macos_bundle_name
-# The CLI inside the installed bundle. `stt service` has to run as this copy:
+# The CLI inside the installed bundle. `voice service` has to run as this copy:
 # ServiceManagement finds the agents through the caller's bundle.
 macos_bundle_cli := macos_bundle_dst / 'Contents' / 'MacOS' / cli_name
-macos_resources := 'super-stt-app' / 'resources' / 'macos'
+macos_resources := 'super-voice-app' / 'resources' / 'macos'
 
 # macOS launchd agent (the counterpart to the systemd user unit above).
 # A per-user LaunchAgent, not a root-owned LaunchDaemon: the daemon needs the
@@ -341,7 +343,7 @@ ci-macos: fmt-check check-macos check-features test-macos test-install doctest-m
 
 # Stop a recipe that builds a COSMIC-shell component before cargo does.
 #
-# Not everything on libcosmic: super-stt-app builds and runs on macOS (see
+# Not everything on libcosmic: super-voice-app builds and runs on macOS (see
 # `macos_members`). These are the two components that are Linux shell
 # integration by nature, for two different reasons:
 #
@@ -457,7 +459,7 @@ bundle-macos:
     echo "✓ Built $bundle ($version)"
 
 # Render the macOS app icon into an .icns at `out`, from the SVG the Linux
-# desktop entry uses. See super-stt-app/resources/macos/app-icon.swift.
+# desktop entry uses. See super-voice-app/resources/macos/app-icon.swift.
 [private]
 macos-icon out:
     #!/usr/bin/env bash
@@ -582,7 +584,7 @@ run-app *args:
     # signed — the binary reverts to ad-hoc, with its mtime rolled back to
     # the deps artifact's, and macOS quietly drops every grant again.
 
-    exec env RUST_BACKTRACE=full RUST_LOG=super_stt_app=debug,super_stt_shared=debug \
+    exec env RUST_BACKTRACE=full RUST_LOG=super_voice_app=debug,super_stt_shared=debug \
         "$exe"
 
 # Run the daemon for testing purposes.
@@ -894,6 +896,9 @@ install-app:
         sudo install -m755 "target/release/$app" "{{ bin_dir }}/$app"
         sudo install -Dm0644 "$app/resources/$app.desktop" "{{ desktop_dir }}/$app.desktop"
         sudo install -Dm0644 "$app/resources/icons/hicolor/scalable/apps/$app.svg" "{{ icons_dir }}/$app.svg"
+    done
+    for app in {{ old_apps }}; do
+        sudo rm -f "{{ bin_dir }}/$app" "{{ desktop_dir }}/$app.desktop" "{{ icons_dir }}/$app.svg"
     done
 
     # Update desktop database
@@ -1425,7 +1430,7 @@ uninstall-app:
         exec just uninstall-macos
     fi
     echo "Uninstalling the apps..."
-    for app in {{ app_name }} super-tts-app; do
+    for app in {{ app_name }} super-tts-app {{ old_apps }}; do
         sudo rm -f "{{ bin_dir }}/$app" "{{ desktop_dir }}/$app.desktop" "{{ icons_dir }}/$app.svg"
     done
 

@@ -52,10 +52,10 @@ impl SuperSTTDaemon {
                     let sent = notifier
                         .send_with_actions(
                             &format!("Super Voice {tag} is available"),
-                            "Open Super STT to install the update.",
+                            "Open Super Voice to install the update.",
                             &[(
                                 crate::output::notification::OPEN_APP_ACTION_KEY,
-                                "Open Super STT",
+                                "Open Super Voice",
                             )],
                         )
                         .await;
@@ -69,7 +69,7 @@ impl SuperSTTDaemon {
                     drop(notifier);
                     if let Ok(id) = sent {
                         self.self_update.record_notified(&tag).await;
-                        // The bubble carries an "Open Super STT" action; a
+                        // The bubble carries an "Open Super Voice" action; a
                         // click on it (or the bubble itself, on servers that
                         // bind the default action) should bring the app up.
                         // Spawned so the check path isn't blocked waiting on
@@ -95,7 +95,7 @@ impl SuperSTTDaemon {
         status
     }
 
-    /// Wait for the user to click the "Open Super STT" action on the update
+    /// Wait for the user to click the "Open Super Voice" action on the update
     /// notification `id`, then launch the app. The app is single-instance
     /// (its `org.freedesktop.DbusActivation` interface), so launching it
     /// while it is already running activates and focuses the existing window
@@ -109,8 +109,8 @@ impl SuperSTTDaemon {
         if key != crate::output::notification::OPEN_APP_ACTION_KEY {
             return;
         }
-        if let Err(e) = tokio::process::Command::new("super-stt-app").spawn() {
-            log::warn!("failed to launch Super STT app from update notification: {e}");
+        if let Err(e) = tokio::process::Command::new("super-voice-app").spawn() {
+            log::warn!("failed to launch the Super Voice app from the update notification: {e}");
         }
     }
 }
