@@ -515,3 +515,40 @@ async fn documented_error_shapes_match_the_envelopes_the_daemon_builds() {
         undocumented.join("\n")
     );
 }
+
+/// Both features' documents merge into one, and a merge keeps the first
+/// schema of a name. Two schemas sharing a name must therefore be the same
+/// shape, or one feature's endpoints are documented with the other's body —
+/// which is what `name_colliding_schemas` prevents.
+#[test]
+fn the_features_do_not_publish_two_shapes_under_one_name() {
+    use crate::daemon::http::openapi::{name_colliding_schemas, structure};
+    let schemas = |doc: utoipa::openapi::OpenApi| -> std::collections::BTreeMap<String, Value> {
+        let doc = serde_json::to_value(doc).expect("serializes");
+        doc["components"]["schemas"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
+    };
+    let base = super::v1::stt_and_shared_openapi();
+    let tts = schemas(name_colliding_schemas(
+        &base,
+        crate::tts::daemon::http::openapi_document(),
+        "Tts",
+    ));
+    let stt = schemas(base);
+    let differ: Vec<&String> = tts
+        .iter()
+        .filter(|(name, shape)| {
+            stt.get(*name)
+                .is_some_and(|other| structure(other) != structure(shape))
+        })
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        differ.is_empty(),
+        "published under one name with two shapes: {differ:?}"
+    );
+}
