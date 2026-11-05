@@ -87,9 +87,8 @@ pub(super) fn backend_header(
 
 /// The selected backend, shown above the tabs: its model picker + Select, an
 /// in-card status line (loading / download progress / error), Configure, and
-/// Deselect. `width` is the card's: under [`super::surface::NARROW_CARD`] the
-/// header's actions take a line of their own, and the control row splits when
-/// its controls do not fit.
+/// Deselect. `width` is the card's: under [`super::surface::NARROW_CARD`] its
+/// header stacks (see [`super::surface::card_header`]).
 pub(super) fn active_backend_card<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
@@ -123,7 +122,9 @@ pub(super) fn active_backend_card<'a>(
     let header = super::surface::card_header(
         width < super::surface::NARROW_CARD,
         backend_glyph_tile(),
-        super::surface::card_title_block(backend.name.clone(), &backend.version, description),
+        backend.name.clone(),
+        &backend.version,
+        description,
         actions.into(),
     );
 
@@ -185,9 +186,9 @@ pub(super) fn active_backend_card<'a>(
     if missing.is_empty() {
         card = card.push(card_divider());
         if model_loaded {
-            card = card.push(loaded_model_summary(backend, app, width));
+            card = card.push(loaded_model_summary(backend, app));
         } else {
-            card = card.push(staged_model_picker(backend, app, width));
+            card = card.push(staged_model_picker(backend, app));
         }
     }
 
@@ -241,7 +242,6 @@ pub(super) fn device_dropdown<'a>(
             })
         })
         .placeholder("Device")
-        .width(Length::FillPortion(1))
         .into(),
     )
 }
@@ -266,20 +266,17 @@ pub(super) fn resolved_suffix(running: &str, chosen: Option<&str>) -> String {
 pub(super) fn loaded_model_summary<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
-    width: f32,
 ) -> Element<'a, Message> {
-    let spacing = cosmic::theme::spacing();
-    let label = text::body(format!(
-        "Active: {}{}",
+    let running = text::body(format!(
+        "{}{}",
         app.current_model,
         resolved_suffix(
             &app.current_device,
             app.staged_picks.device(Stage::Transcription)
         )
     ))
-    .class(cosmic::theme::Text::Accent)
-    .width(Length::Fill);
-    let mut pickers = Vec::new();
+    .class(cosmic::theme::Text::Accent);
+    let mut rows: Vec<(&'static str, Element<'a, Message>)> = vec![("Model", running.into())];
     let mut buttons = Vec::new();
     // The same picker the unloaded card shows, in the same place. Changing it
     // now reloads the model onto the new device rather than staging a choice
@@ -290,13 +287,13 @@ pub(super) fn loaded_model_summary<'a>(
         &app.current_model,
         app,
     ) {
-        pickers.push(devices);
+        rows.push(("Device", devices));
     }
-    // Per-model language trigger, inline before Unload, for a multilingual model.
+    // Per-model language, for a multilingual model.
     if let Some(lang_button) =
         language_button(Stage::Transcription, backend, &app.current_model, app)
     {
-        buttons.push(lang_button);
+        rows.push(("Language", lang_button));
     }
     // A leading stop glyph fronts the Unload label, mirroring the Load button's
     // play icon so load/unload read as a play/stop pair.
@@ -308,7 +305,7 @@ pub(super) fn loaded_model_summary<'a>(
             }))
             .into(),
     );
-    super::surface::control_layout(width, spacing.space_xs, label.into(), pickers, buttons)
+    super::surface::control_rows(rows, buttons)
 }
 
 /// Pure VRAM-fit check for a staged load: given the staged `device`, the
@@ -371,7 +368,6 @@ pub(super) fn staged_vram_shortfall(backend: &BackendInfo, app: &AppModel) -> Op
 pub(super) fn staged_model_picker<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
-    width: f32,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
@@ -388,17 +384,16 @@ pub(super) fn staged_model_picker<'a>(
         .and_then(|source| app.staged_picks.model(Stage::Transcription, source));
     let model_index = staged_model.and_then(|m| model_names.iter().position(|n| n == m));
     let model_names_pick = model_names.clone();
-    // Model select takes twice the width of the device select (2:1 flex ratio).
     let model_dropdown = widget::dropdown(model_names, model_index, move |index| {
         Message::Stage(StageMessage::StageModel {
             stage: Stage::Transcription,
             model: model_names_pick[index].clone(),
         })
     })
-    .placeholder("Select model")
-    .width(Length::FillPortion(2));
+    .placeholder("Select model");
 
-    let mut pickers = Vec::new();
+    let mut rows: Vec<(&'static str, Element<'a, Message>)> =
+        vec![("Model", model_dropdown.into())];
     let mut buttons = Vec::new();
 
     // Device dropdown — only once the daemon has answered what the staged
@@ -415,15 +410,15 @@ pub(super) fn staged_model_picker<'a>(
     if let Some(model) = staged_model
         && let Some(devices) = device_dropdown(Stage::Transcription, &backend.source, model, app)
     {
-        pickers.push(devices);
+        rows.push(("Device", devices));
     }
 
-    // Per-model language trigger, inline after the device dropdown — shown only
-    // for a staged multilingual model.
+    // Per-model language, after the device — shown only for a staged
+    // multilingual model.
     if let Some(model) = staged_model
         && let Some(lang_button) = language_button(Stage::Transcription, backend, model, app)
     {
-        buttons.push(lang_button);
+        rows.push(("Language", lang_button));
     }
 
     // Load button — enabled only when a model is staged AND (the staged
@@ -449,13 +444,7 @@ pub(super) fn staged_model_picker<'a>(
             )),
         );
     buttons.push(load_button.into());
-    let picker_row = super::surface::control_layout(
-        width,
-        spacing.space_s,
-        model_dropdown.into(),
-        pickers,
-        buttons,
-    );
+    let picker_row = super::surface::control_rows(rows, buttons);
 
     // Below the picker: either the "can't be loaded here" advisory for a
     // staged model with no viable device (blocking — Load is already

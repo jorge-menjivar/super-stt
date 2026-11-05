@@ -319,30 +319,40 @@ pub(super) fn card_title_block<'a>(
     version: &str,
     description: Option<String>,
 ) -> Element<'a, Message> {
-    let spacing = cosmic::theme::spacing();
-    // The version rides beside the name, muted: it answers "what am I running"
-    // without competing with the name for the eye. Backends installed before
-    // the daemon reported it have none, so the row simply omits it rather than
-    // showing a placeholder.
-    let title: Element<'a, Message> = if version.is_empty() {
-        text::title4(name).line_height(1.0).into()
-    } else {
-        row![
-            text::title4(name).line_height(1.0),
-            text::body(format!("v{version}")).class(cosmic::theme::Text::Color(muted_text_color())),
-        ]
-        .spacing(spacing.space_xxs)
-        .align_y(cosmic::iced::Alignment::End)
-        .into()
-    };
     let mut col = widget::column::with_capacity(2)
-        .spacing(spacing.space_xxxs)
+        .spacing(cosmic::theme::spacing().space_xxxs)
         .width(Length::Fill)
-        .push(title);
+        .push(card_title_line(name, version));
     if let Some(desc) = description {
-        col = col.push(text::body(desc).class(cosmic::theme::Text::Color(muted_text_color())));
+        col = col.push(card_description(desc));
     }
     col.into()
+}
+
+/// A card's name with its version beside it.
+///
+/// The version rides beside the name, muted: it answers "what am I running"
+/// without competing with the name for the eye. Backends installed before the
+/// daemon reported it have none, so the row simply omits it rather than
+/// showing a placeholder.
+fn card_title_line<'a>(name: String, version: &str) -> Element<'a, Message> {
+    if version.is_empty() {
+        return text::title4(name).line_height(1.0).into();
+    }
+    row![
+        text::title4(name).line_height(1.0),
+        text::body(format!("v{version}")).class(cosmic::theme::Text::Color(muted_text_color())),
+    ]
+    .spacing(cosmic::theme::spacing().space_xxs)
+    .align_y(cosmic::iced::Alignment::End)
+    .into()
+}
+
+/// A card's description, muted under its name.
+fn card_description<'a>(description: String) -> Element<'a, Message> {
+    text::body(description)
+        .class(cosmic::theme::Text::Color(muted_text_color()))
+        .into()
 }
 
 /// A backend's one-line description, resolved by `source`; `None` when neither
@@ -439,102 +449,73 @@ pub(in crate::ui::views) fn accent_button_class(radius: [f32; 4]) -> cosmic::the
 /// into one: a narrow window, or a wide one with the side panel open.
 pub(super) const NARROW_CARD: f32 = 480.0;
 
-/// A card's header: its glyph tile and title block, then its actions. On a
-/// narrow card the actions take a line of their own, at its end, so the title
-/// keeps the width it needs to be read.
+/// A card's header: its glyph tile, its name and description, then its
+/// actions.
+///
+/// On a narrow card the glyph sits beside the name alone, the description
+/// takes the card's width under them, and the actions a line of their own at
+/// its end: beside the glyph, a description ran five lines down a narrow
+/// column with the glyph floating halfway down it.
 pub(super) fn card_header<'a>(
     narrow: bool,
     glyph: Element<'a, Message>,
-    title: Element<'a, Message>,
+    name: String,
+    version: &str,
+    description: Option<String>,
     actions: Element<'a, Message>,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
-    if narrow {
-        widget::column::with_capacity(2)
-            .push(
-                row![glyph, title]
-                    .spacing(spacing.space_s)
-                    .align_y(cosmic::iced::Alignment::Center),
-            )
-            .push(
-                row![widget::space::horizontal(), actions].align_y(cosmic::iced::Alignment::Center),
-            )
-            .spacing(spacing.space_xs)
-            .into()
-    } else {
-        row![glyph, title, actions]
+    if !narrow {
+        return row![glyph, card_title_block(name, version, description), actions]
             .spacing(spacing.space_s)
             .align_y(cosmic::iced::Alignment::Center)
-            .into()
+            .into();
     }
+    let mut column = widget::column::with_capacity(3)
+        .spacing(spacing.space_xs)
+        .push(
+            row![glyph, card_title_line(name, version)]
+                .spacing(spacing.space_s)
+                .align_y(cosmic::iced::Alignment::Center),
+        );
+    if let Some(description) = description {
+        column = column.push(card_description(description));
+    }
+    column
+        .push(row![widget::space::horizontal(), actions].align_y(cosmic::iced::Alignment::Center))
+        .into()
 }
 
-/// The least a dropdown in a card's control row can show its value in, and a
-/// button its label.
-const PICKER_WIDTH: f32 = 180.0;
-const BUTTON_WIDTH: f32 = 120.0;
-
-/// A card's control row: `lead` (the running model, or the model picker), the
-/// other pickers, then the buttons.
+/// A card's controls: one labeled settings row per choice (the model, its
+/// device, voice and language), then the buttons at the end.
 ///
-/// One line when `width`, the card's, holds them all at [`PICKER_WIDTH`] and
-/// [`BUTTON_WIDTH`]. Otherwise each group takes a line of its own, or several:
-/// the pickers one each when two do not fit side by side, the buttons as many
-/// to a line as fit, against the end. No dropdown is squeezed below the width of what it shows.
-/// Counted rather than fixed because the cards differ: synthesis adds a voice
-/// to what the others show.
-// reason: a handful of controls, far inside f32's exact integers
-#[allow(clippy::cast_precision_loss)]
-pub(super) fn control_layout<'a>(
-    width: f32,
-    gap: u16,
-    lead: Element<'a, Message>,
-    pickers: Vec<Element<'a, Message>>,
+/// The rows are libcosmic's own `settings::flex_item`, as on the settings
+/// pages, so a control sits at the end of its row at its natural width and
+/// moves under its label when the card runs out of room for both.
+pub(super) fn control_rows<'a>(
+    rows: Vec<(&'static str, Element<'a, Message>)>,
     buttons: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    // The card's own padding comes off the width its content gets.
-    let room = width - 2.0 * f32::from(cosmic::theme::spacing().space_s);
-    let needed = PICKER_WIDTH * (1 + pickers.len()) as f32 + BUTTON_WIDTH * buttons.len() as f32;
-    let narrow = room < needed;
-    let line = |items: Vec<Element<'a, Message>>| {
-        items
-            .into_iter()
-            .fold(row![].spacing(gap), widget::Row::push)
-            .align_y(cosmic::iced::Alignment::Center)
-    };
-    if !narrow {
-        let mut all = vec![lead];
-        all.extend(pickers);
-        all.extend(buttons);
-        return line(all).width(Length::Fill).into();
-    }
-    let mut lines = widget::column::with_capacity(3)
-        .spacing(cosmic::theme::spacing().space_xs)
-        .push(lead);
-    // The pickers share a line when they fit on one, and otherwise take a line
-    // each: a long voice name beside the device picker squeezed it to its arrow.
-    if room >= PICKER_WIDTH * pickers.len() as f32 {
-        if !pickers.is_empty() {
-            lines = lines.push(line(pickers).width(Length::Fill));
+    let spacing = cosmic::theme::spacing();
+    let mut column = widget::column::with_capacity(2 * rows.len() + 1).spacing(spacing.space_xs);
+    for (index, (label, control)) in rows.into_iter().enumerate() {
+        if index > 0 {
+            column = column.push(widget::divider::horizontal::light());
         }
-    } else {
-        for picker in pickers {
-            lines = lines.push(picker);
-        }
+        column = column.push(
+            widget::settings::flex_item(label, control)
+                .align_items(cosmic::iced::Alignment::Center),
+        );
     }
-    // The buttons take as many lines as they need, each against the end, the
-    // last line holding the last button: Load or Unload.
-    // reason: the room is a few hundred pixels and the quotient small
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let per_line = ((room / BUTTON_WIDTH).floor() as usize).max(1);
-    let mut buttons = buttons.into_iter().peekable();
-    let first = buttons.len() % per_line;
-    let mut take = if first == 0 { per_line } else { first };
-    while buttons.peek().is_some() {
-        let mut end = vec![widget::space::horizontal().into()];
-        end.extend(buttons.by_ref().take(take));
-        lines = lines.push(line(end).width(Length::Fill));
-        take = per_line;
+    if !buttons.is_empty() {
+        let end = buttons.into_iter().fold(
+            row![widget::space::horizontal()].spacing(spacing.space_xs),
+            widget::Row::push,
+        );
+        column = column.push(
+            end.align_y(cosmic::iced::Alignment::Center)
+                .width(Length::Fill),
+        );
     }
-    lines.into()
+    column.into()
 }
