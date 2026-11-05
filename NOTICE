@@ -1,4 +1,4 @@
-Super STT - High-performance speech-to-text service
+Super Voice - High-performance speech-to-text and text-to-speech service
 Copyright (C) 2025 Jorge Menjivar <jorge@menjivar.ai>
 
 This program is free software: you can redistribute it and/or modify
@@ -40,10 +40,11 @@ Licensed under the MIT License
 Source: https://github.com/phosphor-icons/core
 
 Unlike the entries above, these are redistributed in this repository rather
-than fetched at build time: the nineteen SVGs under
-super-stt-app/resources/icons/phosphor/ are copied verbatim from that project's
-raw/regular/ directory and embedded in the settings app. The MIT license text
-they are provided under sits beside them in that directory.
+than fetched at build time: the SVGs under
+super-stt-app/resources/icons/phosphor/ and super-tts-app/resources/icons/phosphor/
+are copied verbatim from that project's raw/regular/ directory and embedded in
+the settings apps. The MIT license text they are provided under sits beside them
+in each directory.
 
 Rust Ecosystem Libraries
 ------------------------
