@@ -488,19 +488,3 @@ fn available_languages_distinguishes_empty_from_absent() {
     .expect("serialize");
     assert_eq!(filled["available_languages"][0], "auto");
 }
-
-/// The global default keeps its own verbs. Per-model devices are an addition,
-/// not a replacement: a client with no model in hand still has something to
-/// set, and every client shipped before the per-model verbs keeps working.
-#[test]
-fn the_global_device_commands_still_parse() {
-    let req = make_request("set_device", Some(json!({ "device": "cpu" })));
-    match Command::try_from(req).expect("parses") {
-        Command::SetDevice { device } => assert_eq!(device, "cpu"),
-        other => panic!("wrong command: {other:?}"),
-    }
-    assert!(matches!(
-        Command::try_from(make_request("get_device", None)),
-        Ok(Command::GetDevice)
-    ));
-}

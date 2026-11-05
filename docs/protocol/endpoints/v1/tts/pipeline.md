@@ -91,9 +91,9 @@ is a property of a model — a small preset-voice model runs fine on the CPU
 while the cloning model beside it needs the GPU — so it is now read and set per
 model, at
 [`/tts/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-ttspipelinestagemodelmodeldevice).
-A daemon upgraded from the global preference keeps loading models where it
-always did: a model with no device of its own falls back to the old global
-value in `daemon.ron`, and takes its own the first time one is set.
+There is no global default: a model with no framework of its own runs on the
+best one its installed build runs, and takes its own the first time one is
+set.
 
 ## Auth
 

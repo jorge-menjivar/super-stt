@@ -38,18 +38,6 @@ pub enum Command {
     /// beside the slot; clients read them and nothing here replaces them.
     GetModel,
     ListModels,
-    /// Set the *global default* device: the one a model with no device of its
-    /// own loads on. Kept alongside the per-model verbs because it is a
-    /// genuinely different setting — "where models go unless told otherwise" —
-    /// and because a client with no model in hand (the device toggle on the
-    /// active-backend card, before anything is selected) has nothing else to
-    /// address.
-    SetDevice {
-        device: String, // "cpu" or "cuda"
-    },
-    /// Read the global default device, what it resolved to, and what this host
-    /// offers.
-    GetDevice,
     /// Set the device one model runs on: `cpu` or `gpu`. `model` is resolved
     /// against the active backend. Reloads the model when it is the loaded
     /// one; otherwise only records the choice for its next load, which is what

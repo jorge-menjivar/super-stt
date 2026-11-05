@@ -248,17 +248,17 @@ impl SuperTTSDaemon {
 
         self.broadcast_model_loading_status(&model);
         self.unload_current_model().await;
-        // The model's own device if it has one, else the global default —
-        // never the raw default, or a model the user pinned to the CPU would
-        // be dragged onto the GPU by the next switch to it.
-        let device_pref = self
+        // The model's own framework if it has one, else the best its
+        // installed build runs.
+        let chosen = self
             .config
             .read()
             .await
-            .effective_device(&backend_source, &model);
+            .model_device(&backend_source, &model)
+            .map(ToString::to_string);
 
         match self
-            .instantiate_backend(&model, &backend_source, &device_pref)
+            .instantiate_backend(&model, &backend_source, chosen.as_deref())
             .await
         {
             Ok((instance, definition)) => {

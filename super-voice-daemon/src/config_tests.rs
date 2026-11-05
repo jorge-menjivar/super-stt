@@ -26,7 +26,6 @@ fn round_trip(config: &DaemonConfig) -> DaemonConfig {
 fn a_config_with_only_some_sections_loads_the_rest_as_defaults() {
     let config = from_ron(
         r#"(
-    device: (preferred_device: "cpu"),
     audio: (theme: "classic", volume: 100),
     transcription: (preferred_model: "whisper-tiny"),
 )"#,
@@ -149,7 +148,6 @@ fn daemon_bad_theme_falls_back_preserving_rest() {
     // A single unrecognized enum value must NOT wipe the whole config.
     let cfg = from_ron(
         r#"(
-    device: (preferred_device: "vulkan"),
     audio: (theme: "Nonexistent", volume: 80),
     transcription: (
         preferred_model: "WhisperTiny",
@@ -161,7 +159,6 @@ fn daemon_bad_theme_falls_back_preserving_rest() {
     );
     assert_eq!(cfg.audio.theme, AudioTheme::default()); // bad field reset
     assert_eq!(cfg.audio.volume, 80); // everything else preserved
-    assert_eq!(cfg.device.preferred_device, "vulkan");
     assert!(cfg.transcription.write_mode);
     assert_eq!(
         cfg.transcription.recording_stop_mode,
@@ -174,7 +171,6 @@ fn daemon_bad_theme_falls_back_preserving_rest() {
 fn daemon_bad_stop_mode_and_write_method_fall_back_preserving_rest() {
     let cfg = from_ron(
         r#"(
-    device: (preferred_device: "cpu"),
     audio: (theme: "gentle", volume: 100),
     transcription: (
         preferred_model: "WhisperTiny",
@@ -198,47 +194,23 @@ fn corrupt_daemon_config_resets_to_default() {
     assert!(was_reset, "garbage input must trigger a reset");
     // The reset config is a valid default (proves no panic, app can start).
     assert_eq!(cfg.audio.theme, AudioTheme::default());
-    assert_eq!(cfg.device.preferred_device, "cpu");
 }
 
-/// A wire setter rejects an unparseable device outright; a persisted config
-/// value has no such option — a daemon that refused to start over a stale
-/// `preferred_device` would be worse than one that falls back to the default.
-/// A framework is kept as it is; `gpu`, which no longer is one, falls back
-/// like any other value that is not.
+/// There is no global default device any more: a model with no framework of
+/// its own runs on the best one its installed build runs. A config written
+/// when there was one still loads, its `device` section ignored, and is
+/// written back without it.
 #[test]
-fn a_persisted_device_preference_normalizes_and_a_bogus_one_falls_back_to_cpu() {
-    let ron_str = |device: &str| {
-        format!(
-            "(device: (preferred_device: \"{device}\"), \
-             audio: (theme: \"classic\", volume: 100), \
-             transcription: (preferred_model: \"\", write_mode: false))"
-        )
-    };
-
-    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&ron_str("cuda"));
-    assert!(!was_reset);
-    assert_eq!(cfg.device.preferred_device, "cuda");
-
-    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&ron_str("gpu"));
-    assert!(!was_reset);
-    assert_eq!(
-        cfg.device.preferred_device, "cpu",
-        "a GPU is reached through a framework"
+fn an_old_global_device_is_ignored() {
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset(
+        "(device: (preferred_device: \"cpu\"), \
+         audio: (theme: \"classic\", volume: 100), \
+         transcription: (preferred_model: \"\", write_mode: false))",
     );
-
-    // A garbage value (or `none`, a model sentinel rather than a preference)
-    // degrades to the default instead of failing the whole config load.
-    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&ron_str("xpu"));
-    assert!(
-        !was_reset,
-        "a stale device field must not reset the whole config"
-    );
-    assert_eq!(cfg.device.preferred_device, "cpu");
-
-    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&ron_str("none"));
-    assert!(!was_reset);
-    assert_eq!(cfg.device.preferred_device, "cpu");
+    assert!(!was_reset, "an old field must not reset the whole config");
+    assert_eq!(cfg.audio.volume, 100);
+    let written = super_engine_daemon::config::to_string(&cfg).expect("serialize");
+    assert!(!written.contains("preferred_device"), "{written}");
 }
 
 /// The invariant behind the unload path (`disable_transcription`): unloading
@@ -335,7 +307,6 @@ fn all_published_daemon_configs_load_cleanly() {
 fn a_stored_preferred_provider_is_dropped() {
     let config = from_ron(
         r#"(
-    device: (preferred_device: "cpu"),
     audio: (theme: "classic", volume: 100),
     transcription: (
         preferred_model: "voxtral-mini",
@@ -358,7 +329,6 @@ fn a_stored_preferred_provider_is_dropped() {
 fn daemon_config_reads_notification_method() {
     let cfg = from_ron(
         r#"(
-    device: (preferred_device: "cpu"),
     audio: (theme: "classic", volume: 100),
     notification_method: "desktop",
     transcription: (preferred_model: "whisper"),
@@ -374,7 +344,6 @@ fn daemon_config_reads_notification_method() {
 fn daemon_bad_notification_method_falls_back_preserving_rest() {
     let cfg = from_ron(
         r#"(
-    device: (preferred_device: "cpu"),
     audio: (theme: "classic", volume: 100),
     transcription: (
         preferred_model: "whisper",
@@ -403,7 +372,6 @@ fn bad_beta_optin_falls_back_preserving_rest() {
     // bad enum value must reset only that field, not wipe the config.
     let cfg = from_ron(
         r#"(
-    device: (preferred_device: "cpu"),
     audio: (theme: "classic", volume: 80),
     transcription: (preferred_model: "whisper-tiny"),
     update: (check_enabled: false, beta_optin: "yes-please"),
@@ -458,7 +426,6 @@ fn rename_active_backend_preserves_the_model_preference() {
 fn tcp_defaults_are_the_same_whether_constructed_or_deserialized() {
     let from_empty_section = from_ron(
         r#"(
-    device: (preferred_device: "cpu"),
     audio: (theme: "classic", volume: 100),
     transcription: (),
     http: (tcp: ()),

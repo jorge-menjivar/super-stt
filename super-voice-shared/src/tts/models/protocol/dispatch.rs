@@ -18,8 +18,6 @@ impl TryFrom<DaemonRequest> for Command {
             "set_model" => cmd_set_model(&request),
             "get_model" => Ok(Command::GetModel),
             "list_models" => Ok(Command::ListModels),
-            "set_device" => cmd_set_device(&request),
-            "get_device" => Ok(Command::GetDevice),
             "set_model_device" => cmd_set_model_device(&request),
             "get_model_device" => cmd_get_model_device(&request),
             "list_model_devices" => Ok(Command::ListModelDevices {
@@ -83,24 +81,6 @@ fn cmd_set_model(request: &DaemonRequest) -> Result<Command, String> {
         model: model_str.to_string(),
         source,
     })
-}
-
-fn cmd_set_device(request: &DaemonRequest) -> Result<Command, String> {
-    let device = request
-        .data
-        .as_ref()
-        .and_then(|data| data.get("device"))
-        .and_then(|v| v.as_str())
-        .ok_or("Missing device for set_device command")?
-        .to_string();
-
-    if let Err(e) =
-        validation::validate_string(&device, "device", validation::limits::MAX_NAME_LENGTH)
-    {
-        return Err(e.to_string());
-    }
-
-    Ok(Command::SetDevice { device })
 }
 
 /// The `model` a per-model device command addresses. Required and non-empty:

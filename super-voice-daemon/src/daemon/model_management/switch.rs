@@ -248,17 +248,18 @@ impl SuperSTTDaemon {
 
         self.broadcast_model_loading_status(&model, PipelineStage::Transcription);
         self.unload_current_model().await;
-        let device_pref = self
+        let chosen = self
             .config
             .read()
             .await
-            .effective_device(&backend_source, &model);
+            .model_device(&backend_source, &model)
+            .map(ToString::to_string);
 
         match self
             .instantiate_backend(
                 &model,
                 &backend_source,
-                &device_pref,
+                chosen.as_deref(),
                 PipelineStage::Transcription,
             )
             .await

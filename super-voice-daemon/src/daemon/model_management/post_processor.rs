@@ -55,7 +55,12 @@ impl SuperSTTDaemon {
             bail!("model {name} is a transcription model, not a post-processing model");
         }
 
-        let device_pref = self.config.read().await.effective_device(&source, &name);
+        let chosen = self
+            .config
+            .read()
+            .await
+            .model_device(&source, &name)
+            .map(ToString::to_string);
         // Stage 2 announces its own load the way stage 1 does — this is the
         // only notice a client that did not start it ever gets, and the daemon
         // loads the post-processor on startup as well as on request.
@@ -78,7 +83,12 @@ impl SuperSTTDaemon {
         // taken out of the lock before `shutdown()`, which can take seconds.
         self.unload_post_processor().await;
         let (instance, definition) = match self
-            .instantiate_backend(&name, &source, &device_pref, PipelineStage::PostProcessor)
+            .instantiate_backend(
+                &name,
+                &source,
+                chosen.as_deref(),
+                PipelineStage::PostProcessor,
+            )
             .await
         {
             Ok(loaded) => loaded,

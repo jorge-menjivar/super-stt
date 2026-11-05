@@ -64,7 +64,7 @@ struct DeviceTarget {
 /// What narrows a model's declared devices to the frameworks it can run on
 /// here, and says which of them the build on disk runs. See
 /// [`model_available_devices`].
-struct InstallContext {
+pub(crate) struct InstallContext {
     /// Every framework the backend's builds run on here, installed or not.
     frameworks: Vec<String>,
     installed_accel: Vec<String>,
@@ -79,6 +79,17 @@ impl InstallContext {
     /// Whether the build on disk runs `framework`.
     fn installed(&self, framework: &str) -> bool {
         build_installed(framework, &self.installed_accel)
+    }
+
+    /// The framework `model` loads on: `chosen`, its own, when it can run on
+    /// it here and that build is installed, else the best one the build on
+    /// disk runs. `None` when nothing is offered.
+    pub(crate) fn effective(
+        &self,
+        model: &ModelDefinition,
+        chosen: Option<&str>,
+    ) -> Option<String> {
+        effective_framework(chosen, &self.offer(model), &self.installed_accel)
     }
 }
 
@@ -134,7 +145,7 @@ impl SuperSTTDaemon {
             Ok(target) => target,
             Err(early_return) => return early_return,
         };
-        let device = self.effective_device(&target).await;
+        let device = self.effective_device(&target).await.unwrap_or_default();
         let message = format!("Device for {model}: {device}");
         self.model_device_response(stage, &target, message).await
     }
@@ -273,7 +284,7 @@ impl SuperSTTDaemon {
         // Where the model is running now, if it is the one loaded in its
         // stage. Only then does the change mean a reload.
         let running_on = self.running_device(stage, &target).await;
-        let current = self.effective_device(&target).await;
+        let current = self.effective_device(&target).await.unwrap_or_default();
         let name = &target.definition.name;
 
         let Some(actual) = running_on else {
@@ -290,8 +301,8 @@ impl SuperSTTDaemon {
 
         if switch_is_satisfied(&current, &actual, &device) {
             // Nothing to reload — but record the choice anyway: the model
-            // may have been on this device only through the global default,
-            // and the user just made it its own.
+            // may have been on this framework with no choice of its own, and
+            // the user just made it its own.
             self.store_model_device(&target, &device).await;
             info!("Device change skipped - {name} already on {device} (actual: {actual})");
             return self
@@ -395,16 +406,18 @@ impl SuperSTTDaemon {
     /// and that build is installed, else the best one the build on disk runs.
     /// A client staging a load from this answer never asks for a build that
     /// is not installed. A choice whose build was replaced since stays stored,
-    /// and is used again once that build is back.
-    async fn effective_device(&self, target: &DeviceTarget) -> String {
-        let configured = self
+    /// and is used again once that build is back. `None` when nothing is
+    /// offered here.
+    async fn effective_device(&self, target: &DeviceTarget) -> Option<String> {
+        let chosen = self
             .config
             .read()
             .await
-            .effective_device(&target.definition.source, &target.definition.name);
-        let install = self.install_context(&target.backend_dir).await;
-        let offered = install.offer(&target.definition);
-        effective_framework(&configured, &offered, &install.installed_accel)
+            .model_device(&target.definition.source, &target.definition.name)
+            .map(ToString::to_string);
+        self.install_context(&target.backend_dir)
+            .await
+            .effective(&target.definition, chosen.as_deref())
     }
 
     /// Record the target's device and persist it. A persist failure is logged,
@@ -459,7 +472,7 @@ impl SuperSTTDaemon {
             // The manifest's own sentinel: no local device, ever.
             Device::None.to_string()
         } else {
-            self.effective_device(target).await
+            self.effective_device(target).await.unwrap_or_default()
         };
         let resolved_accel = if online {
             // Remote compute: nothing resolves locally, loaded or not.
@@ -488,7 +501,7 @@ impl SuperSTTDaemon {
     /// per request: the host is probed fresh, off the async runtime, so an AMD
     /// host is never offered a GPU it cannot use, and the install record says
     /// which accelerators the build actually has.
-    async fn install_context(&self, backend_dir: &std::path::Path) -> InstallContext {
+    pub(crate) async fn install_context(&self, backend_dir: &std::path::Path) -> InstallContext {
         let host = tokio::task::spawn_blocking(crate::registry::host_detect::detect)
             .await
             .unwrap_or_else(|_| crate::registry::host_detect::Host {

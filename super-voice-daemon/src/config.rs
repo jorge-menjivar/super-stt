@@ -14,7 +14,6 @@ use super_voice_shared::theme::AudioTheme;
 /// `contexts`, and text to speech's `synthesis`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonConfig {
-    pub device: DeviceConfig,
     pub audio: AudioConfig,
     /// How a failure is surfaced to the user, a recording's or an
     /// utterance's. An unparseable stored value degrades to the default
@@ -110,11 +109,12 @@ pub struct ModelSettings {
     /// (Automatic — inherit the global `primary_language`, else the model's primary).
     #[serde(default)]
     pub language: Option<String>,
-    /// The device this model loads on: `"cpu"` or `"gpu"`, or `None` to use
-    /// [`DeviceConfig::preferred_device`]. A device belongs to a model
-    /// because it is a property of the model: a small one runs fine on the
-    /// CPU while the large one beside it needs the GPU, and a post-processor
-    /// sharing the pipeline with either has its own answer again.
+    /// The framework this model loads on (`"cpu"`, `"cuda"`, `"rocm"`,
+    /// `"metal"` or `"vulkan"`), or `None` for the best one the installed
+    /// build runs. A framework belongs to a model because it is a property of
+    /// the model: a small one runs fine on the CPU while the large one beside
+    /// it needs the GPU, and a post-processor sharing the pipeline with
+    /// either has its own answer again. There is no global default.
     #[serde(default)]
     pub device: Option<String>,
     /// The voice a synthesis model speaks in when an utterance names none: a
@@ -128,15 +128,6 @@ pub struct ModelSettings {
     /// model whose `voice_kinds` do not include `cloned`.
     #[serde(default)]
     pub voice: Option<String>,
-}
-
-/// The device models fall back to when they have none of their own
-/// ([`ModelSettings::device`]). Not settable over the API any more — every
-/// setter is per model — but kept in the file so a config written when the
-/// preference was global keeps loading models where it always did.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceConfig {
-    pub preferred_device: String, // a framework: "cpu", "cuda", "rocm", "metal" or "vulkan"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -333,9 +324,6 @@ impl TranscriptionConfig {
 impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
-            device: DeviceConfig {
-                preferred_device: "cpu".to_string(), // Default to CPU for compatibility
-            },
             audio: AudioConfig {
                 theme: AudioTheme::default(),
                 volume: default_volume(),
@@ -402,18 +390,13 @@ fn test_config_path() -> PathBuf {
 /// catches a stale value at the serde layer — they are normalized here
 /// instead. Unlike the wire setter, which rejects an unparseable value
 /// outright, a persisted value has no such option: a daemon that refused to
-/// start over a stale config field would be worse than one that falls back to
-/// the default, so the global default degrades to `"cpu"` and a per-model
-/// device to "none of its own" rather than triggering a full reset. The
-/// deprecated `cuda`/`metal` spellings normalize to `gpu` rather than falling
-/// back, the same as the wire setter, so a config written before this
-/// vocabulary still loads onto the accelerator it always meant.
+/// start over a stale config field would be worse than one that falls back,
+/// so a model's device that is not a framework degrades to "none of its own"
+/// rather than triggering a full reset.
 impl super_engine_daemon::config::ConfigFile for DaemonConfig {
     fn normalize(&mut self) {
         use crate::daemon::device_management::parse_device_preference;
 
-        self.device.preferred_device = parse_device_preference(&self.device.preferred_device)
-            .unwrap_or_else(|| "cpu".to_string());
         for settings in self
             .backends
             .models
@@ -512,16 +495,6 @@ impl DaemonConfig {
             .get(source)
             .and_then(|m| m.get(model))
             .and_then(|s| s.device.as_deref())
-    }
-
-    /// The device `(source, model)` loads on: its own, else the global
-    /// default. Every load path asks this, so a model with no device of its
-    /// own keeps loading where the global preference always put it.
-    #[must_use]
-    pub fn effective_device(&self, source: &str, model: &str) -> String {
-        self.model_device(source, model)
-            .unwrap_or(&self.device.preferred_device)
-            .to_string()
     }
 
     /// Update audio theme.
@@ -758,14 +731,6 @@ impl DaemonConfig {
         self.primary_language.as_deref()
     }
 
-    /// Set the global default device: the one models without a device of
-    /// their own fall back to. Per-model choices are untouched, which is the
-    /// point of the split: flipping the default must not silently move a model
-    /// the user deliberately pinned somewhere else.
-    pub fn update_preferred_device(&mut self, device: String) {
-        self.device.preferred_device = device;
-    }
-
     /// Set (`Some`) or clear (`None`) the voice a synthesis model speaks in
     /// by default.
     pub fn update_model_voice(&mut self, source: String, model: String, voice: Option<String>) {
@@ -913,32 +878,22 @@ mod language_config_tests {
 mod device_config_tests {
     use super::*;
 
-    /// A model with no device of its own loads where the global default
-    /// says; one with its own loads there regardless of the default.
+    /// A model's device is its own, and a sibling's is untouched.
     #[test]
-    fn a_model_device_overrides_the_global_default() {
+    fn a_model_device_is_its_own() {
         let mut cfg = DaemonConfig::default();
-        assert_eq!(cfg.effective_device("s", "m"), "cpu");
-
-        cfg.device.preferred_device = "cuda".to_string();
-        assert_eq!(
-            cfg.effective_device("s", "m"),
-            "cuda",
-            "inherits the default"
-        );
+        assert_eq!(cfg.model_device("s", "m"), None);
 
         cfg.update_model_device("s", "m", Some("cpu".into()));
         assert_eq!(cfg.model_device("s", "m"), Some("cpu"));
-        assert_eq!(cfg.effective_device("s", "m"), "cpu");
         assert_eq!(
-            cfg.effective_device("s", "other"),
-            "cuda",
-            "a sibling model is untouched"
+            cfg.model_device("s", "other"),
+            None,
+            "a sibling is untouched"
         );
 
         cfg.update_model_device("s", "m", None);
         assert_eq!(cfg.model_device("s", "m"), None);
-        assert_eq!(cfg.effective_device("s", "m"), "cuda");
     }
 
     /// Setting a device on a model that already has a language keeps the
@@ -958,10 +913,10 @@ mod device_config_tests {
         assert_eq!(back.model_device("s", "m"), Some("vulkan"));
     }
 
-    /// A persisted per-model device is normalized on load the same way the
-    /// global default is: a framework is kept, and anything else, `gpu`
-    /// included, degrades to "no device of its own" rather than resetting the
-    /// whole config.
+    /// A persisted per-model device is normalized on load: a framework is
+    /// kept, and anything else, `gpu` included, degrades to "no device of its
+    /// own" rather than resetting the whole config. A `device` section a
+    /// config written with the old global default still carries is ignored.
     #[test]
     fn persisted_model_devices_are_normalized_on_load() {
         let content = r#"(

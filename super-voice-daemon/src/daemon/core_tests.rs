@@ -1465,8 +1465,9 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
     assert!(daemon.model.read().await.is_none());
     assert_eq!(
-        daemon.config.read().await.effective_device(source, "large"),
-        "cpu"
+        daemon.config.read().await.model_device(source, "large"),
+        None,
+        "no choice of its own yet"
     );
 
     // The CPU, the one framework every machine offers, so the test holds on
@@ -1502,11 +1503,6 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
         daemon.config.read().await.model_device(source, "large"),
         Some("cpu"),
         "the choice is the model's own now"
-    );
-    assert_eq!(
-        daemon.config.read().await.device.preferred_device,
-        "cpu",
-        "the global default is not what a per-model setter writes"
     );
 
     // The getter answers from the same state.
@@ -1571,6 +1567,29 @@ async fn a_framework_whose_build_is_not_installed_is_refused() {
         daemon.config.read().await.model_device(source, "large"),
         None,
         "nothing is recorded"
+    );
+}
+
+/// There is no global default: a model nobody chose a framework for runs on
+/// the best one its installed build runs, which is the first offered, not
+/// the CPU.
+#[tokio::test]
+async fn a_model_with_no_choice_runs_on_the_best_installed_framework() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/whisper";
+    let folder = folder_with_builds(source, "large", "transcription", r#"["vulkan", "cpu"]"#);
+    seed_folder_backend(&daemon, source, folder.path()).await;
+
+    let response = daemon
+        .handle_get_model_device(PipelineStage::Transcription, "large".to_string())
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    let offered = response.available_devices.unwrap_or_default();
+    assert_eq!(
+        response.device.as_deref(),
+        offered.first().map(String::as_str),
+        "every framework offered here is installed, so the best one: {offered:?}"
     );
 }
 

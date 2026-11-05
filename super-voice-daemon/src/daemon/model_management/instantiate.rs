@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::types::SuperSTTDaemon;
-use crate::registry::installed;
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use crate::stt_models::transcribe::Transcribe;
 use anyhow::{Result, anyhow, bail};
-use super_engine_daemon::devices::resolve_accel;
 
 impl SuperSTTDaemon {
     /// Build a running backend instance for `(name, source)` plus its
     /// resolved definition. Central routing point for all model loading —
     /// startup, a model switch, a device switch, and a config reload all
-    /// funnel through here, so `device_pref` (the user's `cpu`/`gpu`
-    /// preference) is resolved into the concrete accelerator right here
-    /// rather than by each caller.
+    /// funnel through here, so `chosen` (the model's own framework, if it has
+    /// one) is resolved into the framework it loads on right here rather than
+    /// by each caller: the same answer `GET …/device` gives, so a load never
+    /// lands somewhere the card did not say.
     ///
     /// Being the one place every load passes through, it is also where loads
     /// are serialized, one at a time per `stage`. A load takes minutes and
@@ -35,7 +34,7 @@ impl SuperSTTDaemon {
         &self,
         name: &str,
         source: &str,
-        device_pref: &str,
+        chosen: Option<&str>,
         stage: crate::daemon::device_management::PipelineStage,
     ) -> Result<(Box<dyn Transcribe>, ModelDefinition)> {
         // Claimed before queueing, so waiting here is what reveals a newer
@@ -56,7 +55,13 @@ impl SuperSTTDaemon {
         let instance: Box<dyn Transcribe> = match backend.kind.as_str() {
             "wasm" => self.instantiate_wasm(&backend, &def).await?,
             "subprocess" => {
-                let resolved = resolve_device_for_backend(device_pref, &backend.dir);
+                // Empty when no framework is offered here: the load then
+                // names none and the backend runs on what it has.
+                let resolved = self
+                    .install_context(&backend.dir)
+                    .await
+                    .effective(&def, chosen)
+                    .unwrap_or_default();
                 self.instantiate_subprocess(&backend, name, &resolved, stage)
                     .await?
             }
@@ -391,17 +396,6 @@ impl SuperSTTDaemon {
     ) -> Vec<String> {
         super_engine_daemon::wasm::base_url::egress_hosts(backend, overrides)
     }
-}
-
-/// The framework handed to a subprocess backend's `POST /v1/load` for
-/// `device_pref`, per `docs/protocol/backend/contract.md`: the preference
-/// when the build on disk runs it, else nothing, so the backend loads on the
-/// build it has. Reads the backend directory's install record.
-fn resolve_device_for_backend(device_pref: &str, backend_dir: &std::path::Path) -> String {
-    let installed_accel = installed::read(backend_dir)
-        .map(|r| r.selected.accel)
-        .unwrap_or_default();
-    resolve_accel(device_pref, &installed_accel)
 }
 
 /// The effective value of a backend option — the user's override if set, else

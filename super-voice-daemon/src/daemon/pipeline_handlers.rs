@@ -175,20 +175,20 @@ impl SuperSTTDaemon {
     /// The device block for a stage's selection.
     ///
     /// Deliberately the shape `GET /stt/pipeline/{stage}/model/{model}/device`
-    /// answers with, minus `available_devices`: that list costs a fresh host
-    /// probe, and a card fills its picker from the device endpoint once rather
-    /// than on every poll of the stage's model.
+    /// answers with, minus `available_devices`: a card fills its picker from
+    /// the device endpoint once rather than on every read of the stage.
     async fn stage_model_device(
         &self,
         source: &str,
         model: &str,
         running: Option<String>,
     ) -> StageModelDevice {
-        let online = {
+        let found = {
             let backends = self.backends.read().await;
-            backends::find_model(&backends, model, source).is_some_and(|(_, def)| def.is_online())
+            backends::find_model(&backends, model, source)
+                .map(|(backend, def)| (backend.dir.clone(), def.clone()))
         };
-        if online {
+        if found.as_ref().is_some_and(|(_, def)| def.is_online()) {
             // The manifest's own sentinel: remote compute has no local device,
             // and nothing resolves locally whether it is loaded or not.
             return StageModelDevice {
@@ -196,7 +196,21 @@ impl SuperSTTDaemon {
                 resolved_accel: None,
             };
         }
-        let preference = self.config.read().await.effective_device(source, model);
+        let chosen = self
+            .config
+            .read()
+            .await
+            .model_device(source, model)
+            .map(ToString::to_string);
+        // The device endpoint's answer, so the stage and the card agree.
+        let preference = match &found {
+            Some((dir, def)) => self
+                .install_context(dir)
+                .await
+                .effective(def, chosen.as_deref()),
+            None => chosen,
+        }
+        .unwrap_or_default();
         let resolved_accel = match running {
             Some(actual) => Some(actual),
             // Not loaded: `cpu` needs no resolution, `gpu` has none yet — a

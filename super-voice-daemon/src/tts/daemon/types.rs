@@ -96,14 +96,10 @@ pub struct SuperTTSDaemon {
     /// fan out to `GET /events` subscribers through it.
     pub events: Arc<EventBus>,
     pub download_manager: Arc<DownloadStateManager>,
-    // Device management. `preferred_device` is the runtime mirror of the
-    // *global default* (`config.device.preferred_device`) that `get_device`
-    // reads — not what any one model loads on. A model's device is
-    // `config.effective_device(source, model)`: its own if it has one, this
-    // otherwise. Every load path asks the config, never this lock, so a
-    // per-model choice cannot be lost to a stale mirror.
-    pub preferred_device: Arc<tokio::sync::RwLock<String>>, // "cpu" or "gpu"
-    pub actual_device: Arc<tokio::sync::RwLock<String>>,    // actual device in use (may fallback)
+    // The framework the loaded model actually runs on (it may have fallen
+    // back), empty until one loads. What a model is set to run on is its own
+    // `config.model_device(source, model)`, read by every load path.
+    pub actual_device: Arc<tokio::sync::RwLock<String>>,
     // Configuration management
     pub config: Arc<tokio::sync::RwLock<DaemonConfig>>,
     // Resource management for connection and rate limiting
@@ -157,8 +153,7 @@ pub(crate) async fn test_daemon() -> SuperTTSDaemon {
         shutdown_tx,
         events: Arc::new(EventBus::new()),
         download_manager: Arc::new(DownloadStateManager::new()),
-        preferred_device: Arc::new(tokio::sync::RwLock::new("cpu".to_string())),
-        actual_device: Arc::new(tokio::sync::RwLock::new("cpu".to_string())),
+        actual_device: Arc::new(tokio::sync::RwLock::new(String::new())),
         config: Arc::new(tokio::sync::RwLock::new(DaemonConfig::default())),
         resource_manager: Arc::new(ResourceManager::development()),
         backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),

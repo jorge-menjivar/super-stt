@@ -23,8 +23,6 @@ impl SuperTTSDaemon {
             Command::SetModel { model, source } => self.handle_set_model(model, source).await,
             Command::GetModel => self.handle_get_model().await,
             Command::ListModels => self.handle_list_models().await,
-            Command::SetDevice { device } => self.handle_set_device(device).await,
-            Command::GetDevice => self.handle_get_device().await,
             cmd @ (Command::SetModelDevice { .. }
             | Command::GetModelDevice { .. }
             | Command::ListModelDevices { .. }

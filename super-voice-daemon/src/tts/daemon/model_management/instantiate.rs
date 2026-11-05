@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::registry::host_detect::Host;
-use crate::registry::installed;
 use crate::tts::daemon::types::SuperTTSDaemon;
 use crate::tts::tts_models::ModelDefinition;
 use crate::tts::tts_models::backends::{self, DiscoveredBackend};
 use crate::tts::tts_models::synthesize::Synthesize;
 use anyhow::{Result, anyhow, bail};
-use super_engine_daemon::devices::resolve_accel;
 
 impl SuperTTSDaemon {
     /// Build a running backend instance for `(name, source)` plus its
     /// resolved definition. Central routing point for all model loading —
     /// startup, a model switch, a device switch, and a config reload all
-    /// funnel through here, so `device_pref` (the user's `cpu`/`gpu`
-    /// preference) is resolved into the concrete accelerator right here
-    /// rather than by each caller.
+    /// funnel through here, so `chosen` (the model's own framework, if it has
+    /// one) is resolved into the framework it loads on right here rather than
+    /// by each caller.
     ///
     /// Being the one place every load passes through, it is also where loads
     /// are serialized. A load takes minutes and every caller empties the model
@@ -37,7 +35,7 @@ impl SuperTTSDaemon {
         &self,
         name: &str,
         source: &str,
-        device_pref: &str,
+        chosen: Option<&str>,
     ) -> Result<(Box<dyn Synthesize>, ModelDefinition)> {
         // Claimed before queueing, so waiting here is what reveals a newer
         // request rather than hiding it.
@@ -56,7 +54,14 @@ impl SuperTTSDaemon {
         let instance: Box<dyn Synthesize> = match backend.kind.as_str() {
             "wasm" => self.instantiate_wasm(&backend, &def).await?,
             "subprocess" => {
-                let resolved = resolve_device_for_backend(device_pref, &backend.dir);
+                // The framework `GET …/device` says the model loads on, so a
+                // load never lands somewhere the card did not say. Empty when
+                // none is offered here: the load then names none.
+                let resolved = self
+                    .install_context(&backend.dir)
+                    .await
+                    .effective(&def, chosen)
+                    .unwrap_or_default();
                 // The per-architecture model files are the framework's the
                 // model will run on: the Vulkan files for a Vulkan load on an
                 // NVIDIA machine, not the CUDA ones the machine would rank
@@ -383,17 +388,6 @@ impl SuperTTSDaemon {
     ) -> Vec<String> {
         super_engine_daemon::wasm::base_url::egress_hosts(backend, overrides)
     }
-}
-
-/// The framework handed to a subprocess backend's `POST /v1/load` for
-/// `device_pref`, per `docs/protocol/backend/contract.md`: the preference
-/// when the build on disk runs it, else nothing, so the backend loads on the
-/// build it has. Reads the backend directory's install record.
-fn resolve_device_for_backend(device_pref: &str, backend_dir: &std::path::Path) -> String {
-    let installed_accel = installed::read(backend_dir)
-        .map(|r| r.selected.accel)
-        .unwrap_or_default();
-    resolve_accel(device_pref, &installed_accel)
 }
 
 /// The effective value of a backend option — the user's override if set, else

@@ -371,11 +371,11 @@ async fn a_models_device_is_its_own() {
 
     let local = format!("/tts/pipeline/1/model/{LOCAL_MODEL}/device");
 
-    // The default, before anything is set.
+    // Before anything is set: the best framework offered, since there is no
+    // global default. The fixture has no install record, so every framework
+    // the host has counts as installed.
     let (st, body) = get(&sock, &local, &token).await;
     assert_eq!(st, StatusCode::OK, "{body}");
-    assert_eq!(body["device"], "cpu", "{body}");
-    assert_eq!(body["resolved_accel"], "cpu", "cpu needs no resolution");
     assert!(
         body["available_devices"]
             .as_array()
@@ -383,6 +383,10 @@ async fn a_models_device_is_its_own() {
             .iter()
             .any(|d| d == "cpu"),
         "every host offers the CPU: {body}"
+    );
+    assert_eq!(
+        body["device"], body["available_devices"][0],
+        "the best framework offered: {body}"
     );
 
     // `gpu` is not a framework: a GPU is reached through one.
@@ -459,7 +463,10 @@ async fn the_device_verb_validates_the_model_and_the_device() {
     assert_eq!(st, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error_code"], "invalid_device", "{body}");
     let (_, body) = get(&sock, &local, &token).await;
-    assert_eq!(body["device"], "cpu", "the bogus value was not recorded");
+    assert_eq!(
+        body["device"], body["available_devices"][0],
+        "the bogus value was not recorded: {body}"
+    );
 
     // A model that runs remotely: reading reports the manifest's `none`,
     // setting is refused.

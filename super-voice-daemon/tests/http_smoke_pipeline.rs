@@ -641,17 +641,21 @@ async fn a_models_device_is_its_own() {
     .await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
 
-    // The default, before anything is set.
+    // Before anything is set: the best framework offered, since there is no
+    // global default. The fixture has no install record, so every framework
+    // the host has counts as installed.
     let (status, body) = get(&sock, "/stt/pipeline/1/model/whisper-local/device", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
-    assert_eq!(body["device"], "cpu");
-    assert_eq!(body["resolved_accel"], "cpu", "cpu needs no resolution");
     let offered = body["available_devices"]
         .as_array()
         .expect("available_devices is a list");
     assert!(
         offered.iter().any(|d| d == "cpu"),
         "every host offers the CPU: {body}"
+    );
+    assert_eq!(
+        body["device"], offered[0],
+        "the best framework offered: {body}"
     );
 
     // `gpu` is not a framework: a GPU is reached through one.
@@ -914,7 +918,10 @@ async fn the_device_verb_validates_the_model_and_the_device() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
     assert_eq!(body["error_code"], "invalid_device");
     let (_, body) = get(&sock, "/stt/pipeline/1/model/whisper-local/device", &token).await;
-    assert_eq!(body["device"], "cpu", "the bogus value was not recorded");
+    assert_eq!(
+        body["device"], body["available_devices"][0],
+        "the bogus value was not recorded: {body}"
+    );
 
     // An online model has no device: reading reports the manifest's `none`,
     // setting is refused.

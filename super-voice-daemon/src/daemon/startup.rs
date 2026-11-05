@@ -315,9 +315,19 @@ impl SuperSTTDaemon {
     ) -> Result<()> {
         daemon.broadcast_model_loading_status(&name, PipelineStage::Transcription);
 
-        let device_pref = daemon.config.read().await.effective_device(&source, &name);
+        let chosen = daemon
+            .config
+            .read()
+            .await
+            .model_device(&source, &name)
+            .map(ToString::to_string);
         let (instance, definition) = daemon
-            .instantiate_backend(&name, &source, &device_pref, PipelineStage::Transcription)
+            .instantiate_backend(
+                &name,
+                &source,
+                chosen.as_deref(),
+                PipelineStage::Transcription,
+            )
             .await?;
 
         info!("model {name} loaded successfully");

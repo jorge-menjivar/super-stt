@@ -71,9 +71,9 @@ device is a property of a model — a small one runs fine on the CPU while the
 large one beside it needs the GPU, and a post-processor sharing the pipeline
 with either has its own answer again — so it is now read and set per model, at
 [`/stt/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-sttpipelinestagemodelmodeldevice).
-A daemon upgraded from the global preference keeps loading models where it
-always did: a model with no device of its own falls back to the old global
-value in `daemon.ron`, and takes its own the first time one is set.
+There is no global default: a model with no framework of its own runs on the
+best one its installed build runs, and takes its own the first time one is
+set.
 
 **On extending the pipeline.** Positions are the contract, so a third stage is
 a new position rather than a new endpoint. Two things are deliberately settled

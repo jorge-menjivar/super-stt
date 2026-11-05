@@ -32,7 +32,12 @@ impl SuperSTTDaemon {
         info!("Loading model {name} with target device: {target_device}");
         self.broadcast_device_model_loading_status(name, target_device);
         let (instance, definition) = self
-            .instantiate_backend(name, source, target_device, PipelineStage::Transcription)
+            .instantiate_backend(
+                name,
+                source,
+                Some(target_device),
+                PipelineStage::Transcription,
+            )
             .await?;
         info!(
             "Model {name} loaded on {}",
@@ -62,9 +67,19 @@ impl SuperSTTDaemon {
         info!("Reloading active model {name} to apply configuration changes");
         self.broadcast_model_loading_status(&name, PipelineStage::Transcription);
         self.unload_current_model().await;
-        let device_pref = self.config.read().await.effective_device(&source, &name);
+        let chosen = self
+            .config
+            .read()
+            .await
+            .model_device(&source, &name)
+            .map(ToString::to_string);
         match self
-            .instantiate_backend(&name, &source, &device_pref, PipelineStage::Transcription)
+            .instantiate_backend(
+                &name,
+                &source,
+                chosen.as_deref(),
+                PipelineStage::Transcription,
+            )
             .await
         {
             Ok((instance, definition)) => {

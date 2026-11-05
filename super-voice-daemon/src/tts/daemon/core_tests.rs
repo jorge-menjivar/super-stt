@@ -938,92 +938,6 @@ async fn set_active_backend_from_idle_keeps_model_none() {
     assert!(daemon.model.read().await.is_none());
 }
 
-/// `set_device` with no model loaded only records the preference — it
-/// does not error. The next model load picks up the new device. This
-/// makes the GPU toggle usable in the active-backend card before a model
-/// has been selected.
-#[tokio::test]
-async fn set_device_when_idle_only_updates_preference() {
-    let daemon = test_daemon().await;
-    // Start with the default "cpu" preference and an empty model lock —
-    // the test_daemon fixture already initializes both that way.
-    assert!(daemon.model.read().await.is_none());
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
-
-    let response = daemon.handle_set_device("cuda".to_string()).await;
-    assert_eq!(
-        response.status, "success",
-        "set_device must succeed when no model is loaded; got error: {:?}",
-        response.message,
-    );
-    // Both runtime locks updated, and the model lock is still empty.
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "cuda");
-    assert_eq!(daemon.actual_device.read().await.as_str(), "cuda");
-    assert!(daemon.model.read().await.is_none());
-    assert_eq!(
-        daemon.config.read().await.device.preferred_device,
-        "cuda",
-        "preference must be persisted to in-memory config so the next load uses it"
-    );
-}
-
-/// An invalid device value is still rejected when idle — the preference
-/// must validate before being recorded.
-#[tokio::test]
-async fn set_device_when_idle_rejects_invalid_device() {
-    let daemon = test_daemon().await;
-
-    // `gpu` is not a framework: a GPU is reached through one.
-    for device in ["xpu", "gpu"] {
-        let response = daemon.handle_set_device(device.to_string()).await;
-        assert_eq!(response.status, "error", "{device}");
-        assert_eq!(
-            response.error_code,
-            Some(ErrorCode::InvalidDevice),
-            "{device}"
-        );
-    }
-    let response = daemon.handle_set_device("xpu".to_string()).await;
-    assert_eq!(response.status, "error");
-    assert_eq!(
-        response.error_code,
-        Some(ErrorCode::InvalidDevice),
-        "the documented 400 invalid_device carries its code, or an uncoded \
-         error would map to 500 instead"
-    );
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
-    assert_eq!(daemon.actual_device.read().await.as_str(), "cpu");
-
-    // `none` parses via `Device::from_str` (it is a real device variant) but
-    // is a per-model sentinel, not a preference a client may set — the wire
-    // setter must still reject it rather than deferring to the parser.
-    let response = daemon.handle_set_device("none".to_string()).await;
-    assert_eq!(response.status, "error");
-    assert_eq!(response.error_code, Some(ErrorCode::InvalidDevice));
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
-    assert_eq!(daemon.actual_device.read().await.as_str(), "cpu");
-}
-
-/// Switching devices while an online model is loaded only records the
-/// preference — online models run remotely, so there is nothing to reload.
-/// Exercises `get_device_switch_context` (which reads the loaded model) on
-/// the reachable path, verifying it returns the model context + `is_online`.
-#[tokio::test]
-async fn set_device_with_online_model_keeps_model_and_updates_preference() {
-    let daemon = test_daemon().await;
-    // `seed_loaded_model` sets supported_devices = ["none"] → an online model.
-    seed_loaded_model(&daemon, "m", "github.com/x/online").await;
-
-    let response = daemon.handle_set_device("cuda".to_string()).await;
-
-    assert_eq!(response.status, "success", "got: {:?}", response.message);
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "cuda");
-    assert!(
-        daemon.model.read().await.is_some(),
-        "online model must not be unloaded by a device switch"
-    );
-}
-
 /// `unload_active_model` is a no-op when no model is loaded — success
 /// with a clear message — and otherwise drops the model lock while
 /// leaving `active_backend` selected so the user can pick another model.
@@ -1147,8 +1061,9 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
             .config
             .read()
             .await
-            .effective_device(source, "kokoro-82m"),
-        "cpu"
+            .model_device(source, "kokoro-82m"),
+        None,
+        "no choice of its own yet"
     );
 
     // The CPU, the one framework every machine offers, so the test holds on
@@ -1184,11 +1099,6 @@ async fn set_model_device_when_not_loaded_only_records_the_preference() {
             .model_device(source, "kokoro-82m"),
         Some("cpu"),
         "the choice is the model's own now"
-    );
-    assert_eq!(
-        daemon.config.read().await.device.preferred_device,
-        "cpu",
-        "the global default is not what a per-model setter writes"
     );
 
     // The getter answers from the same state.
@@ -1251,6 +1161,28 @@ async fn a_framework_whose_build_is_not_installed_is_refused() {
             .model_device(source, "kokoro-82m"),
         None,
         "nothing is recorded"
+    );
+}
+
+/// There is no global default: a model nobody chose a framework for runs on
+/// the best one its installed build runs, which is the first offered, not
+/// the CPU.
+#[tokio::test]
+async fn a_model_with_no_choice_runs_on_the_best_installed_framework() {
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/kokoro";
+    let folder = folder_with_builds(source, "kokoro-82m", "synthesis", r#"["vulkan", "cpu"]"#);
+    seed_folder_backend(&daemon, source, folder.path()).await;
+
+    let response = daemon
+        .handle_get_model_device("kokoro-82m".to_string())
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    let offered = response.available_devices.unwrap_or_default();
+    assert_eq!(
+        response.device.as_deref(),
+        offered.first().map(String::as_str),
+        "every framework offered here is installed, so the best one: {offered:?}"
     );
 }
 
@@ -1584,54 +1516,6 @@ async fn model_device_commands_dispatch_through_handle_command() {
         .handle_command(make_request("list_active_backend_devices"))
         .await;
     assert_eq!(response.available_devices, Some(vec!["cpu".to_string()]));
-}
-
-/// The global default and a model's own device are separate settings, and
-/// the load path reads the model's. Changing the default must not move a
-/// model that was pinned, or the per-model choice would silently expire the
-/// next time anyone touched the global toggle.
-#[tokio::test]
-async fn the_global_default_does_not_override_a_models_own_device() {
-    let daemon = test_daemon().await;
-    let source = "github.com/super-tts/kokoro";
-    *daemon.backends.write().await = vec![fixture_backend_devices(
-        "kokoro",
-        source,
-        "Kokoro",
-        "kokoro-82m",
-        vec![
-            super_voice_registry_types::manifest::Device::Cpu,
-            super_voice_registry_types::manifest::Device::Gpu,
-        ],
-    )];
-    let _ = daemon.handle_set_active_backend(source.to_string()).await;
-
-    let response = daemon
-        .handle_set_model_device("kokoro-82m".to_string(), "cpu".to_string())
-        .await;
-    assert_eq!(response.status, "success", "{:?}", response.message);
-
-    // The global setter still works and still writes the global default.
-    let response = daemon.handle_set_device("vulkan".to_string()).await;
-    assert_eq!(response.status, "success", "{:?}", response.message);
-    assert_eq!(daemon.config.read().await.device.preferred_device, "vulkan");
-
-    let config = daemon.config.read().await;
-    assert_eq!(
-        config.model_device(source, "kokoro-82m"),
-        Some("cpu"),
-        "the model keeps its own choice"
-    );
-    assert_eq!(
-        config.effective_device(source, "kokoro-82m"),
-        "cpu",
-        "and loads on it"
-    );
-    assert_eq!(
-        config.effective_device(source, "some-other-model"),
-        "vulkan",
-        "a model with no choice of its own follows the new default"
-    );
 }
 
 // --- The pipeline report ----------------------------------------------------

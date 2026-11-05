@@ -26,7 +26,7 @@ impl SuperTTSDaemon {
         info!("Loading model {name} with target device: {target_device}");
         self.broadcast_device_model_loading_status(name, target_device);
         let (instance, _def) = self
-            .instantiate_backend(name, source, target_device)
+            .instantiate_backend(name, source, Some(target_device))
             .await?;
         let actual = normalize_device(&instance.device());
         *self.actual_device.write().await = actual.clone();
@@ -52,11 +52,19 @@ impl SuperTTSDaemon {
         self.stop_speech_for("reload the model").await;
         self.broadcast_model_loading_status(&name);
         self.unload_current_model().await;
-        // Reload where the model belongs, not where the global default points:
-        // an in-place reload to pick up a changed secret must not also move
-        // the model off the device it was deliberately put on.
-        let device_pref = self.config.read().await.effective_device(&source, &name);
-        match self.instantiate_backend(&name, &source, &device_pref).await {
+        // Reload where the model belongs: an in-place reload to pick up a
+        // changed secret must not also move the model off the framework it
+        // was put on.
+        let chosen = self
+            .config
+            .read()
+            .await
+            .model_device(&source, &name)
+            .map(ToString::to_string);
+        match self
+            .instantiate_backend(&name, &source, chosen.as_deref())
+            .await
+        {
             Ok((instance, definition)) => {
                 self.finalize_model_switch_success(name, source, definition, instance)
                     .await

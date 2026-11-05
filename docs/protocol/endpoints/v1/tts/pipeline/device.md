@@ -22,9 +22,8 @@ remembered per `(source, model)`, and addressed through the
 name to a backend.
 
 > **Replaces `/active_device`,** which set one device for the whole daemon.
-> A model with no framework of its own falls back to the global value in
-> `daemon.ron` when that is one it can run on here, and otherwise to the best
-> framework whose build is installed.
+> There is no global default: a model with no framework of its own runs on
+> the best one its installed build runs.
 
 Two list endpoints sit beside it: the per-model list, which is the narrow and
 accurate answer once a model is chosen, and
@@ -68,7 +67,7 @@ Content-Type: application/json
 
 | Field               | Type     | Notes                                                                                   |
 |---------------------|----------|-----------------------------------------------------------------------------------------|
-| `device`            | string   | The framework the model loads on: its own, when it is one offered here; otherwise the best offered framework whose build is installed. A client staging a load from this value never asks for a build that is not there. `"none"` for an online model, which synthesizes remotely and has no local device. |
+| `device`            | string   | The framework the model loads on: its own, when it is one offered here; otherwise, and for a model with no framework of its own, the best offered framework whose build is installed. Loads use the same rule, so a model loads where this says. A client staging a load from this value never asks for a build that is not there. `"none"` for an online model, which synthesizes remotely and has no local device; `""` for a local model nothing here can run. |
 | `resolved_accel`    | string?  | The framework the model is actually running on while it is loaded in this stage, so a choice that fell back reads `"cpu"` here. When the model is not loaded: `"cpu"` for a `"cpu"` preference (nothing to resolve), `null` for a GPU framework (nothing has loaded yet). `null` for an online model. |
 | `available_devices` | string[] | The frameworks this machine can offer the model, best first: every framework a build of its backend would run on here (the release's `[[assets.subprocess]]`, in the installed `backend.toml`), on the axis the model declares. A backend whose manifest names no builds offers what is installed. Empty for an online model. |
 

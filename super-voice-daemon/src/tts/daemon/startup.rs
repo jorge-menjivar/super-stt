@@ -18,9 +18,6 @@ impl SuperTTSDaemon {
     /// does, once the daemon is assembled.
     #[must_use]
     pub fn new(shared: Shared, config: &DaemonConfig) -> Self {
-        let preferred_device = config.device.preferred_device.clone();
-        // Updated once a model loads.
-        let actual_device = preferred_device.clone();
         let active_backend = config.synthesis.active_backend.clone();
         let voices = Arc::new(crate::tts::voices::VoiceLibrary::new(
             crate::tts::voices::VoiceLibrary::default_dir(),
@@ -34,8 +31,8 @@ impl SuperTTSDaemon {
             shutdown_tx: shared.shutdown_tx,
             events: Arc::clone(&shared.events),
             download_manager: Arc::new(DownloadStateManager::new()),
-            preferred_device: Arc::new(tokio::sync::RwLock::new(preferred_device)),
-            actual_device: Arc::new(tokio::sync::RwLock::new(actual_device)),
+            // Empty until a model loads.
+            actual_device: Arc::new(tokio::sync::RwLock::new(String::new())),
             config: shared.config,
             resource_manager: shared.resource_manager,
             backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
@@ -127,12 +124,16 @@ impl SuperTTSDaemon {
     ) -> Result<()> {
         daemon.broadcast_model_loading_status(&name);
 
-        // The persisted model comes back on the device it was persisted with —
-        // its own if it has one, else the global default. Reading the default
-        // alone would quietly undo a per-model choice on every restart.
-        let device_pref = daemon.config.read().await.effective_device(&source, &name);
+        // The persisted model comes back on its own framework if it has one,
+        // else the best its installed build runs.
+        let chosen = daemon
+            .config
+            .read()
+            .await
+            .model_device(&source, &name)
+            .map(ToString::to_string);
         let (instance, definition) = daemon
-            .instantiate_backend(&name, &source, &device_pref)
+            .instantiate_backend(&name, &source, chosen.as_deref())
             .await?;
 
         info!("model {name} loaded successfully");
