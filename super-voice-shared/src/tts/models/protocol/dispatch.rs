@@ -14,13 +14,7 @@ impl TryFrom<DaemonRequest> for Command {
         match request.command.as_str() {
             "speak" => cmd_speak(&request),
             "stop_speaking" => Ok(Command::StopSpeaking),
-            "ping" => Ok(Command::Ping {
-                client_id: request.client_id.clone(),
-            }),
             "status" => Ok(Command::Status),
-            "set_audio_theme" => cmd_set_audio_theme(&request),
-            "get_audio_theme" => Ok(Command::GetAudioTheme),
-            "test_audio_theme" => Ok(Command::TestAudioTheme),
             "set_model" => cmd_set_model(&request),
             "get_model" => Ok(Command::GetModel),
             "list_models" => Ok(Command::ListModels),
@@ -35,19 +29,6 @@ impl TryFrom<DaemonRequest> for Command {
             "get_config" => Ok(Command::GetConfig),
             "cancel_download" => Ok(Command::CancelDownload),
             "get_download_status" => Ok(Command::GetDownloadStatus),
-            "list_audio_themes" => Ok(Command::ListAudioThemes),
-            "set_notification_method" => cmd_set_notification_method(&request),
-            "get_notification_method" => Ok(Command::GetNotificationMethod),
-            "set_update_check_enabled" => cmd_set_update_check_enabled(&request),
-            "get_update_check_enabled" => Ok(Command::GetUpdateCheckEnabled),
-            "set_update_beta_optin" => cmd_set_update_beta_optin(&request),
-            "get_update_beta_optin" => Ok(Command::GetUpdateBetaOptin),
-            "set_volume" => cmd_set_volume(&request),
-            "get_volume" => Ok(Command::GetVolume),
-            "set_primary_language" => cmd_set_primary_language(&request),
-            "get_primary_language" => Ok(Command::GetPrimaryLanguage),
-            "clear_primary_language" => Ok(Command::ClearPrimaryLanguage),
-            "list_primary_languages" => Ok(Command::ListPrimaryLanguages),
             "set_model_language" => cmd_set_model_language(&request),
             "get_model_language" => cmd_get_model_language(&request),
             "clear_model_language" => cmd_clear_model_language(&request),
@@ -64,7 +45,6 @@ impl TryFrom<DaemonRequest> for Command {
             "get_active_backend" => Ok(Command::GetActiveBackend),
             "clear_active_backend" => Ok(Command::ClearActiveBackend),
             "get_pipeline" => Ok(Command::GetPipeline),
-            "get_gpu_info" => Ok(Command::GetGpuInfo),
             _ => Err(format!("Unknown command: {}", request.command)),
         }
     }
@@ -81,24 +61,6 @@ fn cmd_speak(request: &DaemonRequest) -> Result<Command, String> {
         .ok_or("Missing text for speak command")?
         .to_string();
     Ok(Command::Speak { text })
-}
-
-fn cmd_set_audio_theme(request: &DaemonRequest) -> Result<Command, String> {
-    let theme = request
-        .data
-        .as_ref()
-        .and_then(|data| data.get("theme"))
-        .and_then(|v| v.as_str())
-        .ok_or("Missing theme for set_audio_theme command")?
-        .to_string();
-
-    if let Err(e) =
-        validation::validate_string(&theme, "theme", validation::limits::MAX_NAME_LENGTH)
-    {
-        return Err(e.to_string());
-    }
-
-    Ok(Command::SetAudioTheme { theme })
 }
 
 fn cmd_set_model(request: &DaemonRequest) -> Result<Command, String> {
@@ -198,52 +160,6 @@ fn cmd_get_model_device(request: &DaemonRequest) -> Result<Command, String> {
     Ok(Command::GetModelDevice { model })
 }
 
-fn cmd_set_notification_method(request: &DaemonRequest) -> Result<Command, String> {
-    let method = request
-        .data
-        .as_ref()
-        .and_then(|data| data.get("method"))
-        .and_then(|v| v.as_str())
-        .ok_or("Missing method for set_notification_method command")?
-        .to_string();
-
-    Ok(Command::SetNotificationMethod { method })
-}
-
-fn cmd_set_update_check_enabled(request: &DaemonRequest) -> Result<Command, String> {
-    let enabled = request
-        .enabled
-        .ok_or("Missing enabled field for set_update_check_enabled command")?;
-    Ok(Command::SetUpdateCheckEnabled { enabled })
-}
-
-fn cmd_set_update_beta_optin(request: &DaemonRequest) -> Result<Command, String> {
-    let value = request
-        .data
-        .as_ref()
-        .and_then(|data| data.get("value"))
-        .and_then(|v| v.as_str())
-        .ok_or("Missing value for set_update_beta_optin command")?
-        .to_string();
-
-    Ok(Command::SetUpdateBetaOptin { value })
-}
-
-fn cmd_set_volume(request: &DaemonRequest) -> Result<Command, String> {
-    let volume = request
-        .data
-        .as_ref()
-        .and_then(|data| data.get("volume"))
-        .and_then(serde_json::Value::as_u64)
-        .ok_or("Missing volume for set_volume command")?;
-    let volume =
-        u8::try_from(volume).map_err(|_| "Volume must be between 0 and 100".to_string())?;
-    if volume > 100 {
-        return Err("Volume must be between 0 and 100".to_string());
-    }
-    Ok(Command::SetVolume { volume })
-}
-
 fn cmd_set_backend_option(request: &DaemonRequest) -> Result<Command, String> {
     let data = request.data.as_ref();
     let source = data
@@ -278,17 +194,6 @@ fn cmd_set_active_backend(request: &DaemonRequest) -> Result<Command, String> {
         .ok_or("Missing source for set_active_backend")?
         .to_string();
     Ok(Command::SetActiveBackend { source })
-}
-
-fn cmd_set_primary_language(request: &DaemonRequest) -> Result<Command, String> {
-    let language = request
-        .data
-        .as_ref()
-        .and_then(|data| data.get("language"))
-        .and_then(|v| v.as_str())
-        .ok_or("Missing language for set_primary_language command")?
-        .to_string();
-    Ok(Command::SetPrimaryLanguage { language })
 }
 
 /// Extract the `(source, model)` pair every per-model setting command carries

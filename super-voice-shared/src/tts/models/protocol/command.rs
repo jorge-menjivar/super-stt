@@ -14,15 +14,7 @@ pub enum Command {
     },
     /// Stop the current utterance and discard queued audio.
     StopSpeaking,
-    Ping {
-        client_id: Option<String>,
-    },
     Status,
-    SetAudioTheme {
-        theme: String,
-    },
-    GetAudioTheme,
-    TestAudioTheme,
     SetModel {
         model: String,
         /// Backend repo id that serves the model (e.g.
@@ -85,45 +77,6 @@ pub enum Command {
     GetConfig,
     CancelDownload,
     GetDownloadStatus,
-    ListAudioThemes,
-    /// The raw wire string, unparsed. `handle_set_notification_method` parses
-    /// it (mirrors `SetAudioTheme`) so an unrecognized value can be rejected
-    /// with a classified `error_code` (400), not just a bare error string.
-    SetNotificationMethod {
-        method: String,
-    },
-    GetNotificationMethod,
-    SetUpdateCheckEnabled {
-        enabled: bool,
-    },
-    GetUpdateCheckEnabled,
-    /// The raw wire string, unparsed; `handle_set_update_beta_optin` parses it
-    /// (mirrors `SetNotificationMethod`).
-    SetUpdateBetaOptin {
-        value: String,
-    },
-    GetUpdateBetaOptin,
-    SetVolume {
-        volume: u8,
-    },
-    GetVolume,
-    SetPrimaryLanguage {
-        language: String,
-    },
-    GetPrimaryLanguage,
-    ClearPrimaryLanguage,
-    /// The tags the global language setting offers.
-    ///
-    /// A client cannot infer them. Not the vocabulary — which of the world's
-    /// tags this daemon means to offer is a curation decision, not a
-    /// derivation — and not the shape: whether to send `en` or `en-US` for a
-    /// model that declares only one of them depends on the region-stripping
-    /// rule the daemon applies when it resolves the tag, so the daemon is the
-    /// only thing that can answer it. Without this command each client ships
-    /// its own hand-maintained copy of the list, which is exactly how the
-    /// desktop app's picker and every other client came to disagree about what
-    /// the setting takes.
-    ListPrimaryLanguages,
     /// Set the per-model language override for a specific `(source, model)`.
     SetModelLanguage {
         source: String,
@@ -217,6 +170,4 @@ pub enum Command {
     /// "a backend is selected" as "a model is loaded", and paint a ready UI
     /// over a daemon that will refuse the next `speak`.
     GetPipeline,
-    /// Read-only GPU inventory + memory. See `docs/protocol/endpoints/v1/gpu_info.md`.
-    GetGpuInfo,
 }

@@ -424,14 +424,12 @@ fn a_response_carries_the_stage_model_slot_only_when_set() {
     assert!(json["stage_model"]["switch"].is_null());
 }
 
-/// The two language-listing verbs: the global one addresses nothing, the
-/// per-model one carries the same `(source, model)` pair its setter does.
+/// The per-model language list carries the same `(source, model)` pair its
+/// setter does. The global list is one of the daemon's shared settings, not a
+/// command of text to speech's.
 #[test]
 fn language_list_commands_parse() {
-    assert!(matches!(
-        Command::try_from(make_request("list_primary_languages", None)),
-        Ok(Command::ListPrimaryLanguages)
-    ));
+    assert!(Command::try_from(make_request("list_primary_languages", None)).is_err());
 
     let request = make_request(
         "list_model_languages",
