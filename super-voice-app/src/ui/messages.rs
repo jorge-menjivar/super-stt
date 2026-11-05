@@ -18,8 +18,8 @@ use cosmic::widget::segmented_button;
 use super_stt_shared::models::contexts::DictationContext;
 
 use crate::daemon::backends::BackendInfo;
-use crate::state::Stage;
 use crate::state::{AudioTheme, ContextPage};
+use crate::state::{BlockStage, Stage};
 
 /// Messages emitted by the application and its widgets.
 #[derive(Debug, Clone)]
@@ -33,7 +33,6 @@ pub enum Message {
     Device(DeviceMessage),
     Download(DownloadMessage),
     PreviewTyping(PreviewTypingMessage),
-    PostProcessor(PostProcessorMessage),
     RecordingStopMode(RecordingStopModeMessage),
     WriteMethod(WriteMethodMessage),
     NotificationMethod(NotificationMethodMessage),
@@ -410,23 +409,17 @@ pub enum StageMessage {
     },
     /// User clicked Unload. Drops the model but keeps the backend selected.
     Unload { stage: Stage },
-}
-
-/// Post-processor state, read back from the daemon.
-///
-/// Selecting, staging and loading go through [`StageMessage`] like every other
-/// stage's; what is left here is stage 2's own block arriving from the daemon,
-/// which has no stage-1 counterpart because stage 1 announces its identity
-/// through `ModelMessage` events instead.
-#[derive(Debug, Clone)]
-pub enum PostProcessorMessage {
-    /// A write succeeded; re-read the daemon's own state rather than assuming
-    /// the write's arguments took effect verbatim.
-    ReloadRequested,
-    /// The daemon's current state, from the initial load or after a change.
-    Loaded(crate::daemon::client::StageState),
-    /// A get/set failed; the message is shown inline.
-    Error(String),
+    /// Re-read `stage`'s block: a write succeeded, so read what the daemon
+    /// holds rather than assume the write took effect as sent.
+    RefreshBlock { stage: BlockStage },
+    /// `stage`'s block as the daemon holds it, from the startup load or after
+    /// a change.
+    BlockLoaded {
+        stage: BlockStage,
+        block: crate::daemon::client::StageState,
+    },
+    /// Re-reading `stage`'s block failed; the message is shown on its card.
+    BlockFailed { stage: BlockStage, message: String },
 }
 
 /// Recording stop-mode setting.
@@ -786,7 +779,6 @@ message_from! {
     Device => DeviceMessage,
     Download => DownloadMessage,
     PreviewTyping => PreviewTypingMessage,
-    PostProcessor => PostProcessorMessage,
     RecordingStopMode => RecordingStopModeMessage,
     WriteMethod => WriteMethodMessage,
     NotificationMethod => NotificationMethodMessage,

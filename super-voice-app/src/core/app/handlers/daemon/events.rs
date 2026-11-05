@@ -100,11 +100,13 @@ impl AppModel {
             // post-processor's load as the transcription model's would clear
             // the wrong card and report the wrong device.
             DaemonStatusEvent::Ready { stage, .. } if is_post_processing(stage) => {
-                self.finish_post_processor_operation();
+                self.model_operations.set_ready(Stage::PostProcessing);
                 // The daemon is authoritative about what stage 2 is running,
                 // and this is the only notice of a load it started itself (at
                 // startup, say) or one another client asked for.
-                Some(crate::core::app::handlers::tasks::load_post_processor())
+                Some(crate::core::app::handlers::stage::load_block(
+                    crate::state::BlockStage::PostProcessing,
+                ))
             }
             DaemonStatusEvent::Ready {
                 model_loaded,
@@ -170,9 +172,9 @@ impl AppModel {
                     // Another client (or this one) changed the post-processor.
                     // Re-read it so the section shows the current selection and
                     // its live `loaded` state.
-                    "post_processor" => {
-                        Some(crate::core::app::handlers::tasks::load_post_processor())
-                    }
+                    "post_processor" => Some(crate::core::app::handlers::stage::load_block(
+                        crate::state::BlockStage::PostProcessing,
+                    )),
                     // A context was added, edited, deleted, or put in force.
                     // One topic covers the whole family because the answer to
                     // any of them is the same: re-read the list. The open

@@ -7,8 +7,8 @@ mod download;
 mod fmt;
 mod installed;
 mod language;
-mod post_processing;
 mod select_sheet;
+mod stage_section;
 mod status;
 mod surface;
 mod tabs;
@@ -31,7 +31,7 @@ use crate::state::ModelsTab;
 use crate::ui::icons;
 use crate::ui::messages::Message;
 
-pub use post_processing::post_processor_sheet;
+pub use stage_section::{sheet as stage_sheet, sheet_title as stage_sheet_title};
 
 pub use add_sheet::{add_backend_footer, add_backend_sheet};
 pub use configure::configure_sheet;
@@ -229,7 +229,10 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
         // The post-processor is selected independently of the transcription
         // backend, so its section is shown whether or not one is selected.
         .push(page_container(section_heading("Post-processing")))
-        .push(page_container(post_processing::section(app)));
+        .push(page_container(stage_section::section(
+            app,
+            crate::state::BlockStage::PostProcessing,
+        )));
 
     widget::column::with_capacity(2)
         .push(page_container(title_row))

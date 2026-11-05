@@ -73,11 +73,10 @@ pub enum ContextPage {
     /// Models page's "Select transcription backend" flow). Scoped to the
     /// Models page; picking a backend activates it and closes the sheet.
     SelectBackend,
-    /// Right-side sheet for choosing which installed backend provides the
-    /// transcript post-processor. The post-processing twin of
-    /// [`Self::SelectBackend`], listing only backends that serve a
-    /// `post_processor` model; also Models-scoped.
-    SelectPostProcessor,
+    /// Right-side sheet for choosing which installed backend fills a stage the
+    /// app reads back from the daemon: the twin of [`Self::SelectBackend`],
+    /// listing only the backends that can fill that stage; also Models-scoped.
+    SelectBlockBackend(super::BlockStage),
     /// Right-side sheet for editing one dictation context: its name, its
     /// prompt, and its vocabulary. The context being edited is carried by
     /// `ContextsState::draft`, which is also what makes an open editor survive

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The Post-processing card on the Models page.
+//! The section of a stage the app reads back from the daemon
+//! ([`BlockStage`]): post-processing's on the Models page.
 //!
 //! A post-processor rewrites each final transcript — filler removal,
 //! punctuation, formatting. It is an ordinary backend model, so once one is
@@ -9,6 +10,9 @@
 //! stage-then-load. The one difference is what the picker offers —
 //! post-processors from *every* installed backend, since this selection is
 //! independent of the active one.
+//!
+//! What names the stage on the section, from its prompts to its picker sheet,
+//! is in [`Copy`]; the rest is the same for every such stage.
 //!
 //! Before a backend is chosen there is no card at all, only a prompt and the
 //! button that opens the picker. A card frames a backend that exists; a
@@ -23,8 +27,7 @@ use cosmic::widget::{self, button, text};
 use super::language::language_button;
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
-use crate::state::ContextPage;
-use crate::state::Stage;
+use crate::state::{BlockStage, ContextPage};
 use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage, StageMessage};
 
@@ -38,98 +41,137 @@ use super::surface::{
     repo_button,
 };
 
-/// The backends that can fill stage 2, each already narrowed to the
-/// post-processors it serves — the daemon's answer, from
-/// `GET /stt/pipeline/2/backend/list`.
+/// What a section says that names its stage.
+struct Copy {
+    /// The prompt when nothing installed serves the stage.
+    none_installed: &'static str,
+    /// The prompt when something does but none is selected.
+    unselected: &'static str,
+    /// The button that opens the picker sheet, and the sheet's title.
+    select: &'static str,
+    /// The notice for a stage switched on whose model is not running.
+    not_loaded: &'static str,
+    /// The count chip's noun, singular and plural.
+    count: (&'static str, &'static str),
+    /// The line above the sheet's rows.
+    sheet_caption: &'static str,
+    /// The sheet when nothing installed serves the stage.
+    sheet_empty: &'static str,
+}
+
+fn copy(stage: BlockStage) -> Copy {
+    match stage {
+        BlockStage::PostProcessing => Copy {
+            none_installed: "Install a post-processor from the Library to clean up text before \
+                             is is typed and remove filler words.",
+            unselected: "Optional. Clean up text before it is typed. Remove filler words. \
+                         Improve punctuation and formatting.",
+            select: "Select post-processor backend",
+            not_loaded: "The selected model isn't loaded — transcripts are used as they are.",
+            count: ("post-processor", "post-processors"),
+            sheet_caption: "Pick which backend cleans up your transcripts. Add and manage \
+                            backends in your Library.",
+            sheet_empty: "No installed backend provides a post-processor. Open the Library \
+                          to install one.",
+        },
+    }
+}
+
+/// The title of `stage`'s picker sheet.
+pub fn sheet_title(stage: BlockStage) -> &'static str {
+    copy(stage).select
+}
+
+/// The backends that can fill `stage`, each already narrowed to the models it
+/// serves there: the daemon's answer, from
+/// `GET /{feature}/pipeline/{number}/backend/list`.
 ///
 /// `None` while the answer is in flight, which the sheet draws differently from
 /// an empty answer: one is loading, the other is "install one".
-pub(crate) fn post_processor_backends(app: &AppModel) -> Option<&[BackendInfo]> {
-    app.stage_catalog.backends(Stage::PostProcessing)
+pub(crate) fn stage_backends(app: &AppModel, stage: BlockStage) -> Option<&[BackendInfo]> {
+    app.stage_catalog.backends(stage.stage())
 }
 
-/// The post-processor model names one backend serves, in manifest order.
-fn post_processor_models(app: &AppModel, backend: &BackendInfo) -> Vec<String> {
-    app.stage_catalog
-        .models(Stage::PostProcessing, &backend.source)
+/// The model names one backend serves in `stage`, in manifest order.
+fn stage_models(app: &AppModel, stage: BlockStage, backend: &BackendInfo) -> Vec<String> {
+    app.stage_catalog.models(stage.stage(), &backend.source)
 }
 
 /// The backend the card is about: the one the daemon has selected.
 ///
-/// A post-processor selection stores `(model, source)` the way every model
-/// selection does, and `source` alone is the "backend chosen, nothing running"
-/// state — exactly what `/active_backend` holds for transcription.
-fn selected_backend(app: &AppModel) -> Option<&BackendInfo> {
-    let source = app.post_processor.source.as_deref()?;
+/// A selection stores `(model, source)` the way every model selection does,
+/// and `source` alone is the "backend chosen, nothing running" state — exactly
+/// what `/active_backend` holds for transcription.
+fn selected_backend(app: &AppModel, stage: BlockStage) -> Option<&BackendInfo> {
+    let source = app.block(stage).source.as_deref()?;
     app.backends.iter().find(|b| b.source == source)
 }
 
-/// The Post-processing section: a card once a backend is selected, and a plain
-/// prompt line before that.
-pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
+/// `stage`'s section: a card once a backend is selected, and a plain prompt
+/// line before that.
+pub(crate) fn section(app: &AppModel, stage: BlockStage) -> Element<'_, Message> {
+    let copy = copy(stage);
+    let block = app.block(stage);
     // Nothing installed serves one: say so, rather than offering a picker that
     // opens an empty sheet.
     // Only once the daemon has answered: while the question is in flight the
     // section falls through to its normal prompt rather than flashing "install
     // one" and then replacing it.
-    if post_processor_backends(app).is_some_and(<[BackendInfo]>::is_empty) {
-        return prompt_row(
-            "Install a post-processor from the Library to clean up text before \
-             is is typed and remove filler words.",
-            None,
-        );
+    if stage_backends(app, stage).is_some_and(<[BackendInfo]>::is_empty) {
+        return prompt_row(copy.none_installed, None);
     }
 
     // Installed but none chosen: there is no backend to put in a card, so the
     // section is the prompt and the button that opens the picker sheet.
-    let Some(backend) = selected_backend(app) else {
-        return unselected_state();
+    let Some(backend) = selected_backend(app, stage) else {
+        return unselected_state(stage, &copy);
     };
 
     let spacing = cosmic::theme::spacing();
     let mut card = widget::column::with_capacity(6)
         .spacing(spacing.space_s)
-        .push(header(backend, app));
+        .push(header(stage, backend, app));
 
-    if let Some(chips) = chip_row(backend, app) {
+    if let Some(chips) = chip_row(stage, &copy, backend, app) {
         card = card.push(chips);
     }
 
-    card = card.push(card_divider()).push(control_row(app, backend));
+    card = card
+        .push(card_divider())
+        .push(control_row(app, stage, backend));
 
     // Downloading, loading, or the failure that ended it — shown here when the
-    // operation is this stage's, so a post-processor's progress is on the card
-    // that started it rather than on the transcription card below the models.
-    if let Some(status) = super::active::operation_status(app, Stage::PostProcessing) {
+    // operation is this stage's, so its progress is on the card that started
+    // it rather than on the transcription card above it.
+    if let Some(status) = super::active::operation_status(app, stage.stage()) {
         card = card.push(status);
     }
 
     // Enabled but not running: transcripts are passing through untouched, and
     // nothing else on the card would say so. `enabled` and `loaded` are
     // separate fields for exactly this case.
-    if app.post_processor.enabled && !app.post_processor.loaded {
-        card = card.push(notice(
-            "The selected model isn't loaded — transcripts are used as they are.",
-        ));
+    if block.enabled && !block.loaded {
+        card = card.push(notice(copy.not_loaded));
     }
 
     // A failed save surfaces on the card that owns it rather than only reaching
     // the log.
-    if let Some(message) = app.action_error_for(crate::state::ErrorScope::PostProcessing) {
+    if let Some(message) = app.action_error_for(stage.error_scope()) {
         card = card.push(crate::ui::views::common::error_banner(message));
     }
 
-    card_surface(
-        card,
-        app.post_processor.enabled && app.post_processor.loaded,
-    )
+    card_surface(card, block.enabled && block.loaded)
 }
 
 /// The card header for a selected backend: glyph tile, the backend's name /
 /// version / description, then the repo button, Configure and Deselect — the
 /// same action set the transcription card carries. Changing backend is ✕ then
 /// pick again.
-fn header<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, Message> {
+fn header<'a>(
+    stage: BlockStage,
+    backend: &'a BackendInfo,
+    app: &'a AppModel,
+) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let source = backend.source.clone();
     let actions = row![
@@ -140,7 +182,7 @@ fn header<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, Messag
         super::surface::deselect_button(
             "Deselect this backend",
             Message::Stage(StageMessage::DeselectBackend {
-                stage: Stage::PostProcessing
+                stage: stage.stage()
             }),
         ),
     ]
@@ -164,19 +206,23 @@ fn header<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, Messag
 /// Capability chips for the selected backend, plus a count of the
 /// post-processors it serves. Same row the transcription card carries, so the
 /// two read alike.
-fn chip_row<'a>(backend: &'a BackendInfo, app: &AppModel) -> Option<Element<'a, Message>> {
+fn chip_row<'a>(
+    stage: BlockStage,
+    copy: &Copy,
+    backend: &'a BackendInfo,
+    app: &AppModel,
+) -> Option<Element<'a, Message>> {
     let spacing = cosmic::theme::spacing();
     let egress = backend_is_online(backend).then(|| CloudEgress {
         hosts: backend.allowed_hosts.as_slice(),
         user_url: backend_has_user_url(backend),
     });
     let compute = stage_device_support(
-        app.device_offers
-            .backend(Stage::PostProcessing, &backend.source),
+        app.device_offers.backend(stage.stage(), &backend.source),
         backend,
     );
     let caps = capability_chips(compute.gpu, compute.cpu, egress, true);
-    let count = post_processor_models(app, backend).len();
+    let count = stage_models(app, stage, backend).len();
     if caps.is_none() && count == 0 {
         return None;
     }
@@ -185,10 +231,11 @@ fn chip_row<'a>(backend: &'a BackendInfo, app: &AppModel) -> Option<Element<'a, 
         chips = chips.push(caps);
     }
     if count > 0 {
+        let (one, many) = copy.count;
         let label = if count == 1 {
-            "1 post-processor".to_string()
+            format!("1 {one}")
         } else {
-            format!("{count} post-processors")
+            format!("{count} {many}")
         };
         chips = chips.push(count_chip(label));
     }
@@ -220,21 +267,25 @@ pub(super) fn shown_model(
 /// with a stop-glyph Unload one way, dropdowns with a play-glyph Load model the
 /// other. Both stages run a model in a stage, so both say so: Unload stops
 /// processing and keeps the backend, while the header's ✕ clears the selection.
-fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, Message> {
+fn control_row<'a>(
+    app: &'a AppModel,
+    stage: BlockStage,
+    backend: &'a BackendInfo,
+) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
+    let block = app.block(stage);
 
-    if app.post_processor.enabled {
-        let model = app
-            .post_processor
+    if block.enabled {
+        let model = block
             .model
             .clone()
-            .unwrap_or_else(|| "post-processor".to_string());
+            .unwrap_or_else(|| stage.noun().to_string());
         // What it is actually running on, the way the transcription card
         // suffixes its active model — and only when that differs from the
         // device the picker beside it already shows.
         let device_suffix = super::active::resolved_suffix(
-            app.post_processor.running_device().unwrap_or_default(),
-            app.staged_picks.device(Stage::PostProcessing),
+            block.running_device().unwrap_or_default(),
+            app.staged_picks.device(stage.stage()),
         );
         let label = text::body(format!("Active: {model}{device_suffix}"))
             .class(cosmic::theme::Text::Accent)
@@ -245,13 +296,13 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         // The same picker the disabled card shows, in the same place: a running
         // post-processor's device can be changed in place too.
         if let Some(devices) =
-            super::active::device_dropdown(Stage::PostProcessing, &backend.source, &model, app)
+            super::active::device_dropdown(stage.stage(), &backend.source, &model, app)
         {
             summary = summary.push(devices);
         }
         // The same control the transcription card shows beside its active
         // model, from the same function.
-        if let Some(lang_button) = language_button(Stage::PostProcessing, backend, &model, app) {
+        if let Some(lang_button) = language_button(stage.stage(), backend, &model, app) {
             summary = summary.push(lang_button);
         }
         return summary
@@ -259,17 +310,16 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
                 button::standard("Unload")
                     .leading_icon(icons::phosphor_handle(icons::STOP))
                     .on_press(Message::Stage(StageMessage::Unload {
-                        stage: Stage::PostProcessing,
+                        stage: stage.stage(),
                     })),
             )
             .into();
     }
 
-    let models = post_processor_models(app, backend);
+    let models = stage_models(app, stage, backend);
     let shown = shown_model(
-        app.staged_picks
-            .for_backend(Stage::PostProcessing, &backend.source),
-        app.post_processor.model.as_deref(),
+        app.staged_picks.for_backend(stage.stage(), &backend.source),
+        block.model.as_deref(),
     );
     let selected = shown
         .as_deref()
@@ -279,7 +329,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     let models_pick = models.clone();
     let dropdown = widget::dropdown(models, selected, move |index| {
         Message::Stage(StageMessage::StageModel {
-            stage: Stage::PostProcessing,
+            stage: stage.stage(),
             model: models_pick[index].clone(),
         })
     })
@@ -299,7 +349,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     // so an online model (offering nothing) shows no picker.
     if let Some(model) = shown.as_deref()
         && let Some(devices) =
-            super::active::device_dropdown(Stage::PostProcessing, &backend.source, model, app)
+            super::active::device_dropdown(stage.stage(), &backend.source, model, app)
     {
         picker_row = picker_row.push(devices);
     }
@@ -307,7 +357,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     // Per-model language, inline after the device dropdown — the same position
     // and the same function as the transcription card's staged picker.
     if let Some(model) = shown.as_deref()
-        && let Some(lang_button) = language_button(Stage::PostProcessing, backend, model, app)
+        && let Some(lang_button) = language_button(stage.stage(), backend, model, app)
     {
         picker_row = picker_row.push(lang_button);
     }
@@ -319,19 +369,17 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     let staged_online = shown
         .as_deref()
         .is_some_and(|m| model_is_online(backend, m));
-    let staged_ok = selected.is_some()
-        && (app.staged_picks.device(Stage::PostProcessing).is_some() || staged_online);
+    let staged_ok =
+        selected.is_some() && (app.staged_picks.device(stage.stage()).is_some() || staged_online);
     picker_row
         .push(
             button::suggested("Load model")
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
-                .on_press_maybe(
-                    (staged_ok && app.is_model_ready(Stage::PostProcessing)).then_some(
-                        Message::Stage(StageMessage::Load {
-                            stage: Stage::PostProcessing,
-                        }),
-                    ),
-                ),
+                .on_press_maybe((staged_ok && app.is_model_ready(stage.stage())).then_some(
+                    Message::Stage(StageMessage::Load {
+                        stage: stage.stage(),
+                    }),
+                )),
         )
         .into()
 }
@@ -341,15 +389,14 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
 ///
 /// The "Post-processing" heading above the section already names it, so the
 /// line only has to say what a post-processor is for.
-fn unselected_state<'a>() -> Element<'a, Message> {
+fn unselected_state<'a>(stage: BlockStage, copy: &Copy) -> Element<'a, Message> {
     prompt_row(
-        "Optional. Clean up text before it is typed. Remove filler words. Improve punctuation and \
-         formatting.",
+        copy.unselected,
         Some(
-            button::suggested("Select post-processor backend")
+            button::suggested(copy.select)
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
                 .on_press(Message::Shell(ShellMessage::ToggleContextPage(
-                    ContextPage::SelectPostProcessor,
+                    ContextPage::SelectBlockBackend(stage),
                 )))
                 .into(),
         ),
@@ -386,44 +433,37 @@ fn notice(message: &str) -> Element<'_, Message> {
     .into()
 }
 
-/// The "Select post-processor backend" side sheet: one row per installed backend that
-/// serves a post-processor. The selected one is flagged; every other row
-/// carries a Select button.
+/// `stage`'s picker sheet: one row per installed backend that can fill it.
+/// The selected one is flagged; every other row carries a Select button.
 ///
-/// The post-processing twin of
-/// [`select_backend_sheet`](super::select_backend_sheet), and deliberately the
-/// same shape.
-pub fn post_processor_sheet(app: &AppModel) -> Element<'_, Message> {
+/// The twin of [`select_backend_sheet`](super::select_backend_sheet), and
+/// deliberately the same shape.
+pub fn sheet(app: &AppModel, stage: BlockStage) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let muted = muted_text_color();
-    let selected = app.post_processor.source.as_deref();
+    let copy = copy(stage);
+    let selected = app.block(stage).source.as_deref();
 
-    let answered = post_processor_backends(app);
+    let answered = stage_backends(app, stage);
     let eligible: &[BackendInfo] = answered.unwrap_or_default();
     let mut col = widget::column::with_capacity(eligible.len() + 1)
         .spacing(spacing.space_xs)
         .width(Length::Fill)
-        .push(
-            text::caption(
-                "Pick which backend cleans up your transcripts. Add and manage backends \
-                 in your Library.",
-            )
-            .class(cosmic::theme::Text::Color(muted)),
-        );
+        .push(text::caption(copy.sheet_caption).class(cosmic::theme::Text::Color(muted)));
 
     if eligible.is_empty() {
         return col
             .push(text::body(if answered.is_none() {
                 "Loading…"
             } else {
-                "No installed backend provides a post-processor. Open the Library to \
-                 install one."
+                copy.sheet_empty
             }))
             .into();
     }
 
     for backend in eligible {
         col = col.push(sheet_row(
+            stage,
             backend,
             selected == Some(backend.source.as_str()),
         ));
@@ -431,9 +471,13 @@ pub fn post_processor_sheet(app: &AppModel) -> Element<'_, Message> {
     col.into()
 }
 
-/// One backend row inside the picker sheet: glyph + name + its post-processor
-/// models, then either a "Selected" flag or a Select button.
-fn sheet_row(backend: &BackendInfo, is_selected: bool) -> Element<'static, Message> {
+/// One backend row inside the picker sheet: glyph + name + the models it
+/// serves in the stage, then either a "Selected" flag or a Select button.
+fn sheet_row(
+    stage: BlockStage,
+    backend: &BackendInfo,
+    is_selected: bool,
+) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
     let muted = muted_text_color();
 
@@ -457,7 +501,7 @@ fn sheet_row(backend: &BackendInfo, is_selected: bool) -> Element<'static, Messa
     } else {
         button::suggested("Select")
             .on_press(Message::Stage(StageMessage::SelectBackend {
-                stage: Stage::PostProcessing,
+                stage: stage.stage(),
                 source: backend.source.clone(),
             }))
             .into()

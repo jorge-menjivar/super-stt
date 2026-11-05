@@ -86,20 +86,20 @@ impl AppModel {
                     .footer(views::models::add_backend_footer(self))
                 })
             }
-            // The post-processing twin of the Select-a-backend sheet, scoped
-            // the same way: it lists the backends that serve a post-processor
-            // and selects the chosen one.
-            ContextPage::SelectPostProcessor => {
+            // The twin of the Select-a-backend sheet for every other stage,
+            // scoped the same way: it lists the backends that can fill the
+            // stage and selects the chosen one.
+            ContextPage::SelectBlockBackend(stage) => {
                 let on_models_page = self.daemon_status == DaemonStatus::Connected
                     && matches!(self.nav.data::<Page>(self.nav.active()), Some(Page::Models));
                 on_models_page.then(|| {
                     context_drawer::context_drawer(
-                        views::models::post_processor_sheet(self),
+                        views::models::stage_sheet(self, stage),
                         Message::Shell(ShellMessage::ToggleContextPage(
-                            ContextPage::SelectPostProcessor,
+                            ContextPage::SelectBlockBackend(stage),
                         )),
                     )
-                    .title("Select post-processor backend")
+                    .title(views::models::stage_sheet_title(stage))
                 })
             }
             // The "Select a backend" sheet is scoped to the Models page: it

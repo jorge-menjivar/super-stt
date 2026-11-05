@@ -12,6 +12,8 @@ use std::fmt;
 
 use super_stt_shared::models::protocol::{POST_PROCESSOR_STAGE, TRANSCRIPTION_STAGE};
 
+use super::ErrorScope;
+
 /// One pipeline stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Stage {
@@ -64,6 +66,59 @@ impl Stage {
     }
 }
 
+impl Stage {
+    /// The stage as one the app reads back from the daemon, or `None` for
+    /// transcription, which the app holds itself.
+    #[must_use]
+    pub const fn block(self) -> Option<BlockStage> {
+        match self {
+            Self::Transcription => None,
+            Self::PostProcessing => Some(BlockStage::PostProcessing),
+        }
+    }
+}
+
+/// A stage the app reads back from the daemon after every change, rather than
+/// holding its selection and running model itself.
+///
+/// Transcription keeps its own, so its card can move before the daemon
+/// answers. Every other stage re-reads its block (`GET
+/// /{feature}/pipeline/{number}` and its model) instead, with one
+/// implementation for all of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BlockStage {
+    PostProcessing,
+}
+
+impl BlockStage {
+    /// Every such stage, in pipeline order.
+    pub const ALL: [Self; 1] = [Self::PostProcessing];
+
+    /// The stage itself.
+    #[must_use]
+    pub const fn stage(self) -> Stage {
+        match self {
+            Self::PostProcessing => Stage::PostProcessing,
+        }
+    }
+
+    /// Where a failed save of the stage is reported: on its own card.
+    #[must_use]
+    pub const fn error_scope(self) -> ErrorScope {
+        match self {
+            Self::PostProcessing => ErrorScope::PostProcessing,
+        }
+    }
+
+    /// What a message calls the thing the stage runs.
+    #[must_use]
+    pub const fn noun(self) -> &'static str {
+        match self {
+            Self::PostProcessing => "post-processor",
+        }
+    }
+}
+
 /// How logs name a stage.
 impl fmt::Display for Stage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -82,6 +137,16 @@ mod tests {
     fn each_stage_answers_on_its_features_route() {
         assert_eq!(Stage::Transcription.route(), ("stt", 1));
         assert_eq!(Stage::PostProcessing.route(), ("stt", 2));
+    }
+
+    #[test]
+    fn every_stage_but_transcription_is_read_back() {
+        for stage in Stage::ALL {
+            assert_eq!(
+                stage.block().map(super::BlockStage::stage),
+                (stage != Stage::Transcription).then_some(stage)
+            );
+        }
     }
 
     #[test]

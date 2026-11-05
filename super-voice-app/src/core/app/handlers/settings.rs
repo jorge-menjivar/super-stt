@@ -5,10 +5,9 @@ use crate::daemon::client::{
     set_notification_method, set_preview_typing, set_recording_stop_mode, set_write_method,
     test_write_method,
 };
-use crate::state::Stage;
 use crate::ui::messages::{
-    Message, NotificationMethodMessage, PostProcessorMessage, PreviewTypingMessage,
-    RecordingStopModeMessage, WriteMethodMessage,
+    Message, NotificationMethodMessage, PreviewTypingMessage, RecordingStopModeMessage,
+    WriteMethodMessage,
 };
 use cosmic::prelude::*;
 
@@ -52,88 +51,6 @@ impl AppModel {
                 );
                 Task::none()
             }
-        }
-    }
-
-    /// Handle post-processor messages: stage 2's own block arriving from the
-    /// daemon.
-    ///
-    /// Selecting a backend, staging a model or a device, loading and unloading
-    /// all go through [`StageMessage`] — the same handler every stage uses.
-    /// What is left here is the state read-back, which stage 1 does not have a
-    /// counterpart for: it announces its identity through `ModelMessage`
-    /// events instead.
-    pub(in crate::core::app) fn handle_post_processor_messages(
-        &mut self,
-        message: PostProcessorMessage,
-    ) -> Task<cosmic::Action<Message>> {
-        match message {
-            PostProcessorMessage::ReloadRequested => Task::perform(
-                crate::daemon::client::get_stage_view(Stage::PostProcessing),
-                Self::reloaded_post_processor,
-            ),
-
-            PostProcessorMessage::Loaded(state) => {
-                self.post_processor = state;
-                self.clear_action_error(crate::state::ErrorScope::PostProcessing);
-                // Stage 2 has no completion event of its own: the daemon's
-                // `ready` reports stage 1's load, and nothing reports this one,
-                // so the progress and loading lines would otherwise sit on the
-                // card until the stall watchdog turned them into an error.
-                self.finish_post_processor_operation();
-                let selection = self.post_processor.selection();
-                let source = self.post_processor.source.clone();
-                Task::batch([
-                    // The card's device chips are the daemon's answer for the
-                    // backend now selected, so every selection asks again.
-                    source.map_or_else(Task::none, |source| {
-                        Self::load_backend_devices(Stage::PostProcessing, source)
-                    }),
-                    // The model the daemon remembers is the one the card offers
-                    // to load, so it is staged like any other pick.
-                    selection.map_or_else(Task::none, |(model, source)| {
-                        self.stage_selection_if_unstaged(Stage::PostProcessing, &model, &source)
-                    }),
-                ])
-            }
-
-            PostProcessorMessage::Error(err) => {
-                log::warn!("Post-processor error: {err}");
-                self.set_action_error(
-                    crate::state::ErrorScope::PostProcessing,
-                    format!("Couldn't save the post-processor: {err}"),
-                );
-                // The failure ends the operation too, and the banner above is
-                // where it is reported.
-                self.finish_post_processor_operation();
-                Task::none()
-            }
-        }
-    }
-
-    /// End a stage-2 model operation, leaving a stage-1 one alone.
-    ///
-    /// Stage 2 has no completion event of its own: the daemon's `ready` is
-    /// stage 1's, and a post-processor's download and load are reported only by
-    /// the `download_progress` ticks that name its model. The write's own
-    /// response is the end of it.
-    pub(in crate::core::app) fn finish_post_processor_operation(&mut self) {
-        self.model_operations.set_ready(Stage::PostProcessing);
-    }
-
-    /// Map a `GET /stt/pipeline/2` result into its message.
-    fn reloaded_post_processor(
-        result: super_stt_shared::daemon::http_client::HttpResult<
-            crate::daemon::client::StageState,
-        >,
-    ) -> cosmic::Action<Message> {
-        match result {
-            Ok(state) => {
-                cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(state)))
-            }
-            Err(e) => cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Error(
-                e.to_string(),
-            ))),
         }
     }
 

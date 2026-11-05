@@ -19,4 +19,4 @@ pub use models::{
     ActionError, AudioTheme, ContextPage, DaemonStatus, ErrorScope, LanguageResolution, MenuAction,
     ModelsTab, Page, RecordingStatus,
 };
-pub use stage::Stage;
+pub use stage::{BlockStage, Stage};

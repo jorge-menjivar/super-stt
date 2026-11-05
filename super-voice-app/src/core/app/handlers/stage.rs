@@ -27,13 +27,14 @@ use cosmic::prelude::*;
 
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
+use crate::daemon::client::StageState;
 use crate::daemon::client::{
     clear_stage_backend, get_model_device, list_model_devices, list_stage_backends,
     list_stage_devices, set_model_device, set_stage_backend, set_stage_model, unload_stage_model,
 };
-use crate::state::Stage;
 use crate::state::device_offers::staged_device;
-use crate::ui::messages::{Message, ModelMessage, PostProcessorMessage, StageMessage};
+use crate::state::{BlockStage, Stage};
+use crate::ui::messages::{Message, ModelMessage, StageMessage};
 
 impl AppModel {
     /// Handle a stage message — the same handler for every stage.
@@ -115,7 +116,60 @@ impl AppModel {
                 Task::none()
             }
             StageMessage::Unload { stage } => self.unload_stage(stage),
+            StageMessage::RefreshBlock { stage } => refresh_block(stage),
+            StageMessage::BlockLoaded { stage, block } => self.block_loaded(stage, block),
+            StageMessage::BlockFailed { stage, message } => {
+                log::warn!("Could not read the {stage:?} stage: {message}");
+                self.set_action_error(
+                    stage.error_scope(),
+                    format!("Couldn't save the {}: {message}", stage.noun()),
+                );
+                // The failure ends the operation too, and the banner above is
+                // where it is reported.
+                self.model_operations.set_ready(stage.stage());
+                Task::none()
+            }
         }
+    }
+
+    /// `stage`'s block as the daemon holds it.
+    #[must_use]
+    pub fn block(&self, stage: BlockStage) -> &StageState {
+        match stage {
+            BlockStage::PostProcessing => &self.post_processor,
+        }
+    }
+
+    /// Take `stage`'s block from the daemon, then ask about what it names.
+    fn block_loaded(
+        &mut self,
+        stage: BlockStage,
+        block: StageState,
+    ) -> Task<cosmic::Action<Message>> {
+        match stage {
+            BlockStage::PostProcessing => self.post_processor = block,
+        }
+        self.clear_action_error(stage.error_scope());
+        // These stages have no completion event of their own: the daemon's
+        // `ready` reports transcription's load, and nothing reports theirs,
+        // so the progress and loading lines would otherwise sit on the card
+        // until the stall watchdog turned them into an error.
+        self.model_operations.set_ready(stage.stage());
+        let block = self.block(stage);
+        let selection = block.selection();
+        let source = block.source.clone();
+        Task::batch([
+            // The card's device chips are the daemon's answer for the backend
+            // now selected, so every selection asks again.
+            source.map_or_else(Task::none, |source| {
+                Self::load_backend_devices(stage.stage(), source)
+            }),
+            // The model the daemon remembers is the one the card offers to
+            // load, so it is staged like any other pick.
+            selection.map_or_else(Task::none, |(model, source)| {
+                self.stage_selection_if_unstaged(stage.stage(), &model, &source)
+            }),
+        ])
     }
 
     /// The arms that only record what the daemon answered.
@@ -184,10 +238,9 @@ impl AppModel {
     /// later stages read it back from the daemon's own stage block.
     #[must_use]
     pub fn selected_backend(&self, stage: Stage) -> Option<String> {
-        if stage == Stage::Transcription {
-            self.models_page.active_backend.clone()
-        } else {
-            self.post_processor.source.clone()
+        match stage.block() {
+            None => self.models_page.active_backend.clone(),
+            Some(block) => self.block(block).source.clone(),
         }
     }
 
@@ -212,12 +265,16 @@ impl AppModel {
     /// through an unload, is not the same as having no model selected.
     #[must_use]
     fn loaded_model(&self, stage: Stage) -> Option<&str> {
-        if stage == Stage::Transcription {
-            (!self.current_model.is_empty()).then_some(self.current_model.as_str())
-        } else if self.post_processor.loaded {
-            self.post_processor.model.as_deref()
-        } else {
-            None
+        match stage.block() {
+            None => (!self.current_model.is_empty()).then_some(self.current_model.as_str()),
+            Some(block) => {
+                let block = self.block(block);
+                if block.loaded {
+                    block.model.as_deref()
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -229,15 +286,14 @@ impl AppModel {
     /// it from a stale snapshot. Later stages have no identity of their own to
     /// announce and simply re-read their block.
     fn load_committed(stage: Stage, model: &str, source: &str) -> cosmic::Action<Message> {
-        if stage == Stage::Transcription {
-            cosmic::Action::App(Message::Model(ModelMessage::ModelChanged {
+        match stage.block() {
+            None => cosmic::Action::App(Message::Model(ModelMessage::ModelChanged {
                 model: model.to_string(),
                 source: source.to_string(),
-            }))
-        } else {
-            cosmic::Action::App(Message::PostProcessor(
-                PostProcessorMessage::ReloadRequested,
-            ))
+            })),
+            Some(block) => {
+                cosmic::Action::App(Message::Stage(StageMessage::RefreshBlock { stage: block }))
+            }
         }
     }
 
@@ -356,7 +412,9 @@ impl AppModel {
         };
         self.staged_picks
             .stage_model(stage, source.clone(), model.clone());
-        self.clear_action_error(crate::state::ErrorScope::PostProcessing);
+        if let Some(block) = stage.block() {
+            self.clear_action_error(block.error_scope());
+        }
         Task::batch([
             Self::load_staged_devices(stage, source.clone(), model.clone()),
             // So the card can show the language control before Load.
@@ -540,17 +598,11 @@ impl AppModel {
         }
         self.model_operations.set_ready(stage);
         Task::perform(unload_stage_model(stage), move |result| match result {
-            Ok(()) => {
-                if stage == Stage::Transcription {
-                    cosmic::Action::None
-                } else {
-                    // Later stages have no identity event of their own, so the
-                    // re-read is what tells the card it stopped.
-                    cosmic::Action::App(Message::PostProcessor(
-                        PostProcessorMessage::ReloadRequested,
-                    ))
-                }
-            }
+            // Read-back stages have no identity event of their own, so the
+            // re-read is what tells the card it stopped.
+            Ok(()) => stage.block().map_or(cosmic::Action::None, |block| {
+                cosmic::Action::App(Message::Stage(StageMessage::RefreshBlock { stage: block }))
+            }),
             Err(e) => cosmic::Action::App(Message::Stage(StageMessage::LoadFailed {
                 stage,
                 prev_device: String::new(),
@@ -684,6 +736,41 @@ fn staged_load_device(
                 .map(ToString::to_string)
         },
     }
+}
+
+/// Re-read `stage`'s block after a write. A failure is reported on its card.
+pub(in crate::core::app) fn refresh_block(stage: BlockStage) -> Task<cosmic::Action<Message>> {
+    Task::perform(
+        crate::daemon::client::get_stage_view(stage.stage()),
+        move |result| match result {
+            Ok(block) => {
+                cosmic::Action::App(Message::Stage(StageMessage::BlockLoaded { stage, block }))
+            }
+            Err(e) => cosmic::Action::App(Message::Stage(StageMessage::BlockFailed {
+                stage,
+                message: e.to_string(),
+            })),
+        },
+    )
+}
+
+/// Read `stage`'s block. Part of the startup settings load, and re-run when
+/// another client changes the stage.
+///
+/// A read failure, including a daemon predating the endpoint, leaves the
+/// section at its default (off, nothing selected) rather than failing the
+/// whole settings load, like every other getter in that batch.
+pub(in crate::core::app) fn load_block(stage: BlockStage) -> Task<cosmic::Action<Message>> {
+    Task::perform(
+        crate::daemon::client::get_stage_view(stage.stage()),
+        move |result| {
+            let block = result.unwrap_or_else(|e| {
+                log::warn!("Failed to load the {} stage: {e}", stage.stage());
+                StageState::default()
+            });
+            cosmic::Action::App(Message::Stage(StageMessage::BlockLoaded { stage, block }))
+        },
+    )
 }
 
 #[cfg(test)]

@@ -5,15 +5,13 @@
 
 use crate::daemon::client::{
     get_current_audio_theme, get_notification_method, get_preview_typing, get_recording_stop_mode,
-    get_stage_view, get_update_check_enabled, get_update_status, get_volume, get_write_method,
-    list_backends, ping_daemon,
+    get_update_check_enabled, get_update_status, get_volume, get_write_method, list_backends,
+    ping_daemon,
 };
 use crate::state::AudioTheme;
-use crate::state::Stage;
 use crate::ui::messages::{
     BackendMessage, DaemonMessage, Message, ModelsPageMessage, NotificationMethodMessage,
-    PostProcessorMessage, PreviewTypingMessage, RecordingStopModeMessage, UpdateMessage,
-    WriteMethodMessage,
+    PreviewTypingMessage, RecordingStopModeMessage, UpdateMessage, WriteMethodMessage,
 };
 use cosmic::prelude::*;
 use log::warn;
@@ -108,7 +106,7 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
                 cosmic::Action::App(Message::Daemon(DaemonMessage::VolumeLoaded(100)))
             }
         }),
-        load_post_processor(),
+        Task::batch(crate::state::BlockStage::ALL.map(super::stage::load_block)),
         // Contexts are global and the daemon owns them, so a restart under an
         // open Contexts page would otherwise leave the list showing whatever
         // the previous daemon had. The `settings_changed` topic covers a live
@@ -179,30 +177,6 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
         refresh_update_status(),
         load_update_check_enabled(),
     ])
-}
-
-/// Read the post-processor selection. Part of the startup settings load, and
-/// re-run by the `SettingsChanged { setting: "post_processor" }` SSE handler
-/// when another client changes it.
-///
-/// A read failure — including a daemon predating the endpoint — leaves the
-/// section at its default (off, nothing selected) rather than failing the whole
-/// settings load, like every other getter in the batch.
-pub(in crate::core::app) fn load_post_processor() -> Task<cosmic::Action<Message>> {
-    Task::perform(
-        get_stage_view(Stage::PostProcessing),
-        |result| match result {
-            Ok(state) => {
-                cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(state)))
-            }
-            Err(e) => {
-                log::warn!("Failed to load the post-processor setting: {e}");
-                cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(
-                    crate::daemon::client::StageState::default(),
-                )))
-            }
-        },
-    )
 }
 
 /// Re-fetch the self-update status. Used by connection-time settings loads
