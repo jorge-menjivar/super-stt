@@ -33,7 +33,7 @@ impl AppModel {
         if let Some(gpu) = views::models::gpu_summary(self) {
             row = row.push(gpu);
         }
-        row = row.push(views::models::status_pill(self));
+        row = row.push(views::models::feature_status_pills(self));
         if let Some(badge) = views::updates::header_badge(self) {
             row = row.push(badge);
         }

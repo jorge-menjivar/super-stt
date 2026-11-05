@@ -217,20 +217,36 @@ mod unmet_requirements_tests {
     }
 }
 
-/// Readiness of the Models page, surfaced as the 4-state status dot in the
-/// title row. Strictly ordered from "least ready" to "ready":
-/// [`None`](ModelStatus::None) → [`Blocked`](ModelStatus::Blocked) →
-/// [`Idle`](ModelStatus::Idle) → [`Ready`](ModelStatus::Ready).
+/// How ready one stage is, drawn as a colored dot: on its pipeline step, and
+/// for transcription and synthesis on their feature's pill in the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ModelStatus {
-    /// No backend is selected.
+    /// No backend is selected. Gray.
     None,
     /// A backend is selected but at least one required secret/option is unset.
+    /// Red.
     Blocked,
-    /// Backend selected and fully configured, but no model is loaded yet.
+    /// Backend selected and fully configured, but no model is up yet: none
+    /// loaded, or one still downloading or loading. Yellow.
     Idle,
-    /// A model is loaded and ready.
+    /// A model is loaded and ready. Green.
     Ready,
+    /// The stage is switched on but its model is not running: it failed to
+    /// come up, or the last load failed. Red.
+    Failed,
+}
+
+impl ModelStatus {
+    /// The hover text that names this state, after the feature's name.
+    pub(super) const fn detail(self) -> &'static str {
+        match self {
+            Self::None => "No backend selected",
+            Self::Blocked => "Backend setup incomplete",
+            Self::Idle => "No model loaded",
+            Self::Ready => "Model loaded and ready",
+            Self::Failed => "The selected model isn't loaded",
+        }
+    }
 }
 
 /// Compute the [`ModelStatus`] for the current app state — the same rule
@@ -275,14 +291,65 @@ pub(super) fn classify_model_status(
     }
 }
 
+/// The [`ModelStatus`] of any stage.
+///
+/// A download or load in flight reads as [`Idle`](ModelStatus::Idle) whatever
+/// the stage reports, since nothing is up yet but nothing is wrong either; a
+/// failed one reads as [`Failed`](ModelStatus::Failed) until the next attempt.
+pub(super) fn stage_status(app: &AppModel, stage: crate::state::Stage) -> ModelStatus {
+    use crate::state::model_operations::ModelOperationState;
+    match app.model_operations.get(stage) {
+        ModelOperationState::Provisioning { .. } | ModelOperationState::Loading { .. } => {
+            return ModelStatus::Idle;
+        }
+        ModelOperationState::Error { .. } => return ModelStatus::Failed,
+        ModelOperationState::Ready => {}
+    }
+    match stage.block() {
+        None => model_status(app),
+        Some(block) => classify_block_status(
+            app.block(block),
+            &app.backends,
+            &app.backend_secret_configured,
+        ),
+    }
+}
+
+/// [`stage_status`] for a stage the app reads back from the daemon, from only
+/// what the rule depends on.
+///
+/// Unlike transcription, such a stage carries a switch: `enabled` with
+/// nothing `loaded` is a stage meant to be running that is not, which is the
+/// one state the card warns about.
+pub(super) fn classify_block_status(
+    block: &crate::daemon::client::v1::pipeline::StageState,
+    backends: &[BackendInfo],
+    secret_configured: &std::collections::HashMap<(String, String), bool>,
+) -> ModelStatus {
+    let Some(source) = block.source.as_deref() else {
+        return ModelStatus::None;
+    };
+    if let Some(backend) = backends.iter().find(|b| b.source == source)
+        && !unmet_requirements(secret_configured, backend).is_empty()
+    {
+        return ModelStatus::Blocked;
+    }
+    match (block.enabled, block.loaded) {
+        (true, true) => ModelStatus::Ready,
+        (true, false) => ModelStatus::Failed,
+        (false, _) => ModelStatus::Idle,
+    }
+}
+
 #[cfg(test)]
 mod model_status_tests {
-    //! Pin the 4-state status-dot rule that lives in the page header. The
-    //! states are: no backend selected → gray; backend selected but
-    //! requirements unmet → red; ready but no model loaded → yellow; model
-    //! loaded → green.
+    //! Pin the status-dot rule. The states are: no backend selected → gray;
+    //! backend selected but requirements unmet → red; ready but no model
+    //! loaded → yellow; model loaded → green; switched on but not running →
+    //! red.
     use super::*;
     use crate::daemon::backends::{BackendInfo, BackendModel, BackendSecret};
+    use crate::daemon::client::v1::pipeline::StageState;
     use std::collections::HashMap;
 
     fn backend_with_required_secret() -> BackendInfo {
@@ -410,6 +477,62 @@ mod model_status_tests {
                 "github.com/super-stt/openai",
             ),
             ModelStatus::Ready,
+        );
+    }
+
+    fn block(source: Option<&str>, enabled: bool, loaded: bool) -> StageState {
+        StageState {
+            source: source.map(ToString::to_string),
+            name: None,
+            enabled,
+            model: source.map(|_| "whisper-1".to_string()),
+            loaded,
+            device: None,
+        }
+    }
+
+    const OPENAI: &str = "github.com/super-stt/openai";
+
+    #[test]
+    fn an_empty_block_has_no_backend() {
+        assert_eq!(
+            classify_block_status(&block(None, false, false), &[], &HashMap::new()),
+            ModelStatus::None,
+        );
+    }
+
+    /// A block needs its backend set up before anything else about it counts.
+    #[test]
+    fn a_block_whose_backend_is_not_set_up_is_blocked() {
+        let backends = vec![backend_with_required_secret()];
+        assert_eq!(
+            classify_block_status(&block(Some(OPENAI), true, true), &backends, &HashMap::new()),
+            ModelStatus::Blocked,
+        );
+    }
+
+    #[test]
+    fn a_switched_on_block_follows_its_model() {
+        let backends = vec![backend_with_required_secret()];
+        let mut map = HashMap::new();
+        map.insert((OPENAI.to_string(), "openai_api_key".to_string()), true);
+        assert_eq!(
+            classify_block_status(&block(Some(OPENAI), true, true), &backends, &map),
+            ModelStatus::Ready,
+        );
+        // Meant to run but not running: the state the card warns about.
+        assert_eq!(
+            classify_block_status(&block(Some(OPENAI), true, false), &backends, &map),
+            ModelStatus::Failed,
+        );
+    }
+
+    /// Unloaded on purpose is waiting, not wrong.
+    #[test]
+    fn a_switched_off_block_is_idle() {
+        assert_eq!(
+            classify_block_status(&block(Some(OPENAI), false, false), &[], &HashMap::new()),
+            ModelStatus::Idle,
         );
     }
 }

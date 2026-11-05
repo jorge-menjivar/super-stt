@@ -33,6 +33,7 @@ pub const GIT_BRANCH: &[u8] = include_bytes!("../../resources/icons/phosphor/git
 pub const BOOKS: &[u8] = include_bytes!("../../resources/icons/phosphor/books.svg");
 pub const X: &[u8] = include_bytes!("../../resources/icons/phosphor/x.svg");
 pub const CIRCLE_NOTCH: &[u8] = include_bytes!("../../resources/icons/phosphor/circle-notch.svg");
+pub const CARET_RIGHT: &[u8] = include_bytes!("../../resources/icons/phosphor/caret-right.svg");
 
 /// The Super Voice app logo, full-color artwork. Not a Phosphor glyph, so it
 /// lives at the app resources root rather than the phosphor set; shown beside
@@ -54,11 +55,11 @@ pub fn phosphor_handle(bytes: &'static [u8]) -> icon::Handle {
 /// tinted by a caller-supplied [`Svg`](cosmic::theme::Svg) color class. The
 /// plain [`Icon`] wrapper hides the `svg::Style::color` knob that does the
 /// tinting, so the tinted variants return the bare `Svg` widget instead.
-fn tinted_svg(
+fn tinted_svg<'a>(
     bytes: &'static [u8],
     size: f32,
     class: cosmic::theme::Svg,
-) -> cosmic::widget::Svg<'static, cosmic::Theme> {
+) -> cosmic::widget::Svg<'a, cosmic::Theme> {
     cosmic::widget::Svg::<cosmic::Theme>::new(svg::Handle::from_memory(bytes))
         .symbolic(true)
         .class(class)
@@ -99,11 +100,11 @@ pub fn phosphor_warning(
 /// A Phosphor icon tinted with an explicit `color` the caller resolves from
 /// the active theme. Used by the backend-capability chips, whose tone
 /// (accent / neutral) is chosen at view-build time.
-pub fn phosphor_tinted(
+pub fn phosphor_tinted<'a>(
     bytes: &'static [u8],
     size: f32,
     color: cosmic::iced::Color,
-) -> cosmic::widget::Svg<'static, cosmic::Theme> {
+) -> cosmic::widget::Svg<'a, cosmic::Theme> {
     tinted_svg(
         bytes,
         size,

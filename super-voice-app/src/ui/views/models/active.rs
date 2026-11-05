@@ -500,7 +500,7 @@ pub(super) fn operation_status(app: &AppModel, stage: Stage) -> Option<Element<'
 /// routes to this card is bytes coming off the network, and an unrecognised
 /// status reads as a download because that is what every status other than
 /// `verifying` has ever meant here.
-fn provisioning_verb(status: &str) -> &'static str {
+pub(super) fn provisioning_verb(status: &str) -> &'static str {
     if status == "verifying" {
         "Verifying"
     } else {
@@ -574,7 +574,7 @@ fn load_title(load: &LoadProgress, target_model: &str) -> String {
 
 /// What the backend says it is doing, in words. An id this app does not know
 /// is still a load in progress, so it reads as one rather than as an error.
-fn load_step(step: Option<&str>) -> &'static str {
+pub(super) fn load_step(step: Option<&str>) -> &'static str {
     match step {
         Some(load_progress::step::LOADING_WEIGHTS) => "Loading weights",
         Some(load_progress::step::BUILDING_KERNELS) => "Building kernels",
