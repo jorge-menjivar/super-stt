@@ -42,7 +42,7 @@ const NOTIFY_IFACE: &str = "org.freedesktop.Notifications";
 const APP_NAME: &str = "Super Voice";
 /// Installed into `share/icons/hicolor/scalable/apps` by the justfile.
 #[cfg(target_os = "linux")]
-const APP_ICON: &str = "super-stt-app";
+const APP_ICON: &str = "super-voice-app";
 /// 0 = low, 1 = normal, 2 = critical.
 #[cfg(target_os = "linux")]
 const URGENCY_NORMAL: u8 = 1;
@@ -87,7 +87,7 @@ enum Inner {
     /// allowed is reported as a failure.
     ///
     /// No buttons: clicking the banner opens the app, which is all the
-    /// "Open Super STT" action on an update bubble asks for, so
+    /// "Open Super Voice" action on an update bubble asks for, so
     /// [`Notifier::send_with_actions`] drops the actions it is given.
     #[cfg(target_os = "macos")]
     NotificationCenter(std::path::PathBuf),
@@ -101,7 +101,7 @@ enum Inner {
     /// - **Not Super STT's banner.** macOS titles it with the posting
     ///   process, which reads "Script Editor"; see [`NOTIFY_APPLESCRIPT`].
     /// - **No actions.** `display notification` posts a banner and nothing
-    ///   else, and a click opens Script Editor. The "Open Super STT" action on
+    ///   else, and a click opens Script Editor. The "Open Super Voice" action on
     ///   an update bubble is simply absent, so
     ///   [`Notifier::send_with_actions`] drops what it is given rather than
     ///   pretending a click can arrive.

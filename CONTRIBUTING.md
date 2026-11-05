@@ -54,7 +54,7 @@ puts every Wayland crate behind that same Apple gate, and has a
 `cfg(target_os = "windows")` table beside it. The settings app builds and
 runs on macOS once its libcosmic feature list drops `applet` and the
 Wayland/D-Bus features — see the two `[target.…]` tables in
-`super-stt-app/Cargo.toml`.
+`super-voice-app/Cargo.toml`.
 
 So a plain `cargo build`/`cargo test` over the workspace still fails on macOS
 by design — use the platform-scoped recipes, which select the members that do
@@ -86,8 +86,8 @@ them) puts it in `/Applications`:
 
 ```
 Super Voice.app/Contents/
-  Info.plist                      super-stt-app/resources/macos/Info.plist
-  MacOS/super-stt-app             the settings app, the bundle's executable
+  Info.plist                      super-voice-app/resources/macos/Info.plist
+  MacOS/super-voice-app           the settings app, the bundle's executable
   MacOS/super-voice-daemon
   MacOS/super-voice-cli           `voice` on the PATH is a wrapper around this
   Helpers/super-voice-cli         the same CLI, which the shortcut agent runs
@@ -103,9 +103,9 @@ executable in `Contents/MacOS` has the app as its main bundle, which is how
 A main bundle is not enough for notifications, though: Notification Center
 serves only the bundle's own executable, and every request the daemon makes
 fails as "not allowed" whatever the user has chosen. So the daemon runs
-`super-stt-app --notify <title> <body>`, which sets up a windowless
+`super-voice-app --notify <title> <body>`, which sets up a windowless
 `NSApplication`, posts as Super STT and exits
-(`super-stt-app/src/core/app/macos/notifier.rs`). A bare daemon falls back
+(`super-voice-app/src/core/app/macos/notifier.rs`). A bare daemon falls back
 to `osascript`, whose banners read "Script Editor".
 
 The main bundle is also why the shortcut listener runs from the copy in
@@ -239,12 +239,12 @@ just audit              # security audit (cargo audit)
 
 ## Workspace layout
 
-Super STT is a Rust workspace:
+Super Voice is a Rust workspace:
 
 | Crate                      | Role                                                              |
 |----------------------------|------------------------------------------------------------------|
 | `super-voice-daemon`         | The engine: installs backends, loads models, serves the protocol |
-| `super-stt-app`            | Desktop settings & management app                                |
+| `super-voice-app`          | Desktop settings & management app                                |
 | `super-voice-cli`          | The `voice` command-line client, for both features               |
 | `super-voice-consent`        | Consent-popup helper for the auth handshake                      |
 | `super-stt-shared`         | Common types, protocol definitions, validation                   |

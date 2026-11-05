@@ -4,7 +4,7 @@
 - Workspace root (`Cargo.toml`) with members:
   - `super-voice-daemon`: the one daemon, for speech to text and text to speech (ML, audio, D-Bus, model mgmt). Text to speech is its `tts` module.
   - `super-voice-consent`, `super-voice-registry-types`, `super-voice-indexer`: the consent dialog, the backend manifest spec, the registry indexer.
-  - `super-stt-app`, `super-tts-app`: each feature's desktop UI (COSMIC/iced), until they merge.
+  - `super-voice-app`: the settings app (COSMIC/iced), for both features.
   - `super-voice-cli`: the `voice` command, for both features.
   - `super-stt-shared`, `super-tts-shared`: each feature's client library.
 - Tests/tooling: Python scripts at repo root (e.g., `test_download_progress.py`).

@@ -27,7 +27,7 @@ const NOTIFY_IFACE: &str = "org.freedesktop.Notifications";
 /// this bubble is from. The summary is free to name the failure instead.
 const APP_NAME: &str = "Super Voice";
 /// Installed into `share/icons/hicolor/scalable/apps` by the justfile.
-const APP_ICON: &str = "super-tts-app";
+const APP_ICON: &str = "super-voice-app";
 /// 0 = low, 1 = normal, 2 = critical.
 const URGENCY_NORMAL: u8 = 1;
 /// Let the notification server pick the timeout.

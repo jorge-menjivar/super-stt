@@ -211,7 +211,7 @@ every request, that the caller is the executable it was granted to.
 ## First-party clients
 
 Super Voice's own client binaries skip the consent popup: the CLI
-(`super-voice-cli`), each feature's app (`super-stt-app`, `super-tts-app`) and
+(`super-voice-cli`), the settings app (`super-voice-app`) and
 the COSMIC panel applet (`super-cosmic-applet`). When one of them calls
 `POST /auth/request`, the daemon mints the session token immediately; the
 response is indistinguishable from a user-approved grant.

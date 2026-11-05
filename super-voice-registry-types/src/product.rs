@@ -56,7 +56,7 @@ pub static SUPER_VOICE: ProductSpec = ProductSpec {
     ],
     // The CLI, and each feature's app until the two merge. They skip the
     // consent dialog when they sit beside the daemon.
-    clients: &["super-stt-app", "super-tts-app", "super-voice-cli"],
+    clients: &["super-voice-app", "super-voice-cli"],
 };
 
 /// Super Voice, as a [`Product`] of the backend contract.

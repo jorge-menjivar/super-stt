@@ -7120,50 +7120,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-stt-app"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyhow",
- "block2 0.6.2",
- "dirs 7.0.0",
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-util",
- "i18n-embed",
- "i18n-embed-fl",
- "libc",
- "libcosmic",
- "log",
- "mockito",
- "muda",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "objc2-quartz-core 0.3.2",
- "objc2-user-notifications",
- "open",
- "raw-window-handle",
- "rfd 0.17.2",
- "rust-embed",
- "serde",
- "serde_json",
- "slab",
- "slotmap",
- "strum",
- "strum_macros",
- "super-engine-forge",
- "super-stt-shared",
- "super-voice-daemon",
- "super-voice-registry-types",
- "tempfile",
- "tokio",
- "urlencoding",
- "uuid",
- "vergen",
-]
-
-[[package]]
 name = "super-stt-shared"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -7191,40 +7147,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-tts-app"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyhow",
- "cpal 0.18.2",
- "dirs 7.0.0",
- "futures-util",
- "hound",
- "i18n-embed",
- "i18n-embed-fl",
- "libc",
- "libcosmic",
- "log",
- "mockito",
- "open",
- "rfd 0.17.2",
- "rust-embed",
- "serde",
- "serde_json",
- "slab",
- "slotmap",
- "super-engine-forge",
- "super-tts-shared",
- "super-voice-daemon",
- "super-voice-registry-types",
- "tempfile",
- "tokio",
- "toml 1.1.0+spec-1.1.0",
- "urlencoding",
- "uuid",
- "vergen",
-]
-
-[[package]]
 name = "super-tts-shared"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -7247,6 +7169,53 @@ dependencies = [
  "tokio",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "super-voice-app"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyhow",
+ "block2 0.6.2",
+ "cpal 0.18.2",
+ "dirs 7.0.0",
+ "futures-util",
+ "hound",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "i18n-embed",
+ "i18n-embed-fl",
+ "libc",
+ "libcosmic",
+ "log",
+ "mockito",
+ "muda",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "objc2-user-notifications",
+ "open",
+ "raw-window-handle",
+ "rfd 0.17.2",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "slab",
+ "slotmap",
+ "strum",
+ "strum_macros",
+ "super-engine-forge",
+ "super-stt-shared",
+ "super-tts-shared",
+ "super-voice-daemon",
+ "super-voice-registry-types",
+ "tempfile",
+ "tokio",
+ "urlencoding",
+ "uuid",
+ "vergen",
 ]
 
 [[package]]
