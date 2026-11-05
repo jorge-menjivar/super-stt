@@ -7202,7 +7202,6 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "cpal 0.17.3",
  "cpal 0.18.2",
  "dashmap",
  "dirs 7.0.0",

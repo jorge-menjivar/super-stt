@@ -448,7 +448,7 @@ impl DaemonAudioRecorder {
                     ..
                 } = setup;
                 let stream = device.build_input_stream(
-                    config,
+                    *config,
                     move |data: &[f32], info: &cpal::InputCallbackInfo| {
                         let mono = downmix_f32(data, channels);
                         gate.admit(captured_at(info), mono, sample_rate, |kept| {
@@ -478,7 +478,7 @@ impl DaemonAudioRecorder {
                     ..
                 } = setup;
                 let stream = device.build_input_stream(
-                    config,
+                    *config,
                     move |data: &[i16], info: &cpal::InputCallbackInfo| {
                         let mono = downmix_i16(data, channels);
                         gate.admit(captured_at(info), mono, sample_rate, |kept| {

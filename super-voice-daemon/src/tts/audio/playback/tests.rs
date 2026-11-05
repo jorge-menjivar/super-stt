@@ -5,10 +5,7 @@
 //! calls — against a [`Playback::detached`] pipeline, so the whole path runs
 //! with no audio device present and behaves identically in CI and on a desktop.
 
-// cpal 0.18, which text to speech plays through; speech to text still
-// captures with the workspace's 0.17 under the plain name.
 use super::*;
-use cpal_playback as cpal;
 use mixer::SeamFade;
 use super_voice_shared::tts::audio::frames::SampleFormat;
 

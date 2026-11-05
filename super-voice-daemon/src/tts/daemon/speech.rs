@@ -25,9 +25,6 @@
 //! state: every utterance already carries an id, so a real queue with priority
 //! and ducking can be added without changing the endpoint's shape.
 
-// cpal 0.18, which text to speech plays through; speech to text still
-// captures with the workspace's 0.17 under the plain name.
-use cpal_playback as cpal;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
