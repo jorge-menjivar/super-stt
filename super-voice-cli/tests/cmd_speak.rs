@@ -43,14 +43,6 @@ fn locate_daemon_bin() -> PathBuf {
     candidate
 }
 
-/// Monotonic per-call counter so temp paths are unique even when these
-/// tests run concurrently in the same binary.
-fn next_uniq() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static U: AtomicU64 = AtomicU64::new(0);
-    U.fetch_add(1, Ordering::Relaxed)
-}
-
 /// Start a hermetic daemon (see `super_engine_test_daemon`) and wait for its
 /// socket. The CLI targets it with `--socket`.
 ///
