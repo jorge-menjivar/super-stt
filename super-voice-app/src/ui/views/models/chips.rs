@@ -4,7 +4,7 @@ use cosmic::iced::widget::row;
 use cosmic::widget::{self, text};
 use cosmic::{Apply, Element};
 
-use crate::state::registry::RoleFilter;
+use crate::state::registry::{FeatureFilter, RoleFilter};
 use crate::ui::icons;
 use crate::ui::messages::Message;
 
@@ -415,6 +415,7 @@ pub(super) struct RoleGroup {
 pub(super) fn role_label(role: &str) -> &'static str {
     match role {
         "post_processor" => "Post-processing",
+        "synthesis" => "Text to speech",
         _ => "Speech to text",
     }
 }
@@ -427,11 +428,12 @@ pub(super) fn role_label(role: &str) -> &'static str {
 pub(super) fn role_groups<'a>(models: impl Iterator<Item = (&'a str, &'a str)>) -> Vec<RoleGroup> {
     let mut transcription = Vec::new();
     let mut post_processing = Vec::new();
+    let mut synthesis = Vec::new();
     for (name, role) in models {
-        if role_label(role) == "Post-processing" {
-            post_processing.push(name.to_string());
-        } else {
-            transcription.push(name.to_string());
+        match role_label(role) {
+            "Post-processing" => post_processing.push(name.to_string()),
+            "Text to speech" => synthesis.push(name.to_string()),
+            _ => transcription.push(name.to_string()),
         }
     }
     [
@@ -442,6 +444,10 @@ pub(super) fn role_groups<'a>(models: impl Iterator<Item = (&'a str, &'a str)>) 
         RoleGroup {
             label: "Post-processing",
             names: post_processing,
+        },
+        RoleGroup {
+            label: "Text to speech",
+            names: synthesis,
         },
     ]
     .into_iter()
@@ -607,10 +613,43 @@ pub(super) fn capability_chips(
 /// chip is filled — accent by default, or a neutral surface when `neutral` is
 /// set (used for the secondary "Format" filter); inactive chips are transparent
 /// so the track shows through.
-/// The "Kind" segmented filter: which stage's models a backend must serve.
+/// The "Feature" segmented filter: which feature's models a backend must
+/// serve.
 ///
 /// Both Library tabs render it from here, so the wording and the order of the
 /// choices cannot drift between Installed and Browse.
+pub(super) fn feature_filter_chips(
+    current: FeatureFilter,
+    on_pick: fn(FeatureFilter) -> Message,
+) -> Element<'static, Message> {
+    chip_group(
+        "Feature",
+        false,
+        vec![
+            (
+                "All",
+                current == FeatureFilter::All,
+                on_pick(FeatureFilter::All),
+            ),
+            (
+                "Speech to text",
+                current == FeatureFilter::SpeechToText,
+                on_pick(FeatureFilter::SpeechToText),
+            ),
+            (
+                "Text to speech",
+                current == FeatureFilter::TextToSpeech,
+                on_pick(FeatureFilter::TextToSpeech),
+            ),
+        ],
+    )
+}
+
+/// The "Kind" segmented filter: which of speech to text's stages a backend's
+/// models must serve. Shown only under [`FeatureFilter::SpeechToText`].
+///
+/// Both Library tabs render it from here, for the same reason as
+/// [`feature_filter_chips`].
 pub(super) fn role_filter_chips(
     current: RoleFilter,
     on_pick: fn(RoleFilter) -> Message,
@@ -1032,5 +1071,44 @@ mod update_offer_tests {
     fn needs_a_catalog_entry_and_an_installed_version() {
         assert_eq!(update_offer(None, false), None);
         assert_eq!(update_offer(Some(&entry(None, "0.1.1")), false), None);
+    }
+}
+
+#[cfg(test)]
+mod role_group_tests {
+    //! A card's model inventory names each kind of model it ships, in a fixed
+    //! order, so two backends with the same kinds read the same way round.
+    use super::role_groups;
+
+    fn labels(models: &[(&str, &str)]) -> Vec<(&'static str, Vec<String>)> {
+        role_groups(models.iter().copied())
+            .into_iter()
+            .map(|g| (g.label, g.names))
+            .collect()
+    }
+
+    #[test]
+    fn each_kind_is_a_group_in_pipeline_order() {
+        assert_eq!(
+            labels(&[
+                ("kokoro-82m", "synthesis"),
+                ("tidy", "post_processor"),
+                ("whisper-small", "transcription"),
+            ]),
+            [
+                ("Speech to text", vec!["whisper-small".to_string()]),
+                ("Post-processing", vec!["tidy".to_string()]),
+                ("Text to speech", vec!["kokoro-82m".to_string()]),
+            ]
+        );
+    }
+
+    /// The bug this fixed: a synthesis model was listed as speech to text.
+    #[test]
+    fn a_synthesis_model_is_text_to_speech() {
+        assert_eq!(
+            labels(&[("kokoro-82m", "synthesis")]),
+            [("Text to speech", vec!["kokoro-82m".to_string()])]
+        );
     }
 }

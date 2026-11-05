@@ -227,10 +227,14 @@ pub enum ModelsPageMessage {
     RegistryIncludeIncompatible(bool),
     /// User chose an online filter.
     RegistryOnlineFilter(Option<bool>),
+    /// User chose which feature a Browse entry must serve.
+    RegistryFeatureFilter(crate::state::registry::FeatureFilter),
     /// User chose which kind of model a Browse entry must serve.
     RegistryRoleFilter(crate::state::registry::RoleFilter),
     /// User chose an online filter for the Installed tab.
     InstalledOnlineFilter(Option<bool>),
+    /// User chose which feature an installed backend must serve.
+    InstalledFeatureFilter(crate::state::registry::FeatureFilter),
     /// User chose which kind of model an installed backend must serve.
     InstalledRoleFilter(crate::state::registry::RoleFilter),
     /// Toggle the per-row overflow ("⋯") menu on an installed-backend card,

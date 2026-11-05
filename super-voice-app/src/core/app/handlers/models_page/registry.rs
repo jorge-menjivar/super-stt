@@ -88,12 +88,20 @@ impl AppModel {
                 self.registry.filters.online = o;
                 Task::none()
             }
+            ModelsPageMessage::RegistryFeatureFilter(f) => {
+                self.registry.filters.feature = f;
+                Task::none()
+            }
             ModelsPageMessage::RegistryRoleFilter(r) => {
                 self.registry.filters.role = r;
                 Task::none()
             }
             ModelsPageMessage::InstalledOnlineFilter(o) => {
                 self.models_page.installed_filters.online = o;
+                Task::none()
+            }
+            ModelsPageMessage::InstalledFeatureFilter(f) => {
+                self.models_page.installed_filters.feature = f;
                 Task::none()
             }
             ModelsPageMessage::InstalledRoleFilter(r) => {

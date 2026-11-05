@@ -55,10 +55,11 @@ pub(super) fn download_split(app: &AppModel) -> (Element<'_, Message>, Element<'
         {
             continue;
         }
-        if !filters
-            .role
-            .admits(entry.models.iter().map(|m| m.product.role.as_str()))
-        {
+        if !crate::state::registry::admits(
+            filters.feature,
+            filters.role,
+            entry.models.iter().map(|m| m.product.role.as_str()),
+        ) {
             continue;
         }
         if !filters.search.is_empty() && !registry_entry_matches(entry, &filters.search) {
@@ -136,6 +137,9 @@ pub(super) fn download_toolbar<'a>(
     let runs_on = super::chips::runs_on_chips(filters.online, |o| {
         Message::ModelsPage(ModelsPageMessage::RegistryOnlineFilter(o))
     });
+    let feature = super::chips::feature_filter_chips(filters.feature, |f| {
+        Message::ModelsPage(ModelsPageMessage::RegistryFeatureFilter(f))
+    });
     let kind = super::chips::role_filter_chips(filters.role, |r| {
         Message::ModelsPage(ModelsPageMessage::RegistryRoleFilter(r))
     });
@@ -159,7 +163,14 @@ pub(super) fn download_toolbar<'a>(
     // spacer. A wrapping row cannot do that — a fill-width spacer would eat
     // the rest of the line and force a wrap at every width — so the toggle now
     // follows the chips directly.
-    let filter_row = row![runs_on, kind, show_incompat]
+    let mut chips = row![feature];
+    // The kind splits speech to text's two stages, so it shows only there.
+    if filters.feature == crate::state::registry::FeatureFilter::SpeechToText {
+        chips = chips.push(kind);
+    }
+    let filter_row = chips
+        .push(runs_on)
+        .push(show_incompat)
         .spacing(spacing.space_m)
         .align_y(Alignment::Center)
         .wrap()

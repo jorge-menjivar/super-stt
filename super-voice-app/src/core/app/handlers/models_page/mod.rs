@@ -48,8 +48,10 @@ impl AppModel {
             | ModelsPageMessage::RegistrySearchChanged(_)
             | ModelsPageMessage::RegistryIncludeIncompatible(_)
             | ModelsPageMessage::RegistryOnlineFilter(_)
+            | ModelsPageMessage::RegistryFeatureFilter(_)
             | ModelsPageMessage::RegistryRoleFilter(_)
             | ModelsPageMessage::InstalledOnlineFilter(_)
+            | ModelsPageMessage::InstalledFeatureFilter(_)
             | ModelsPageMessage::InstalledRoleFilter(_)
             | ModelsPageMessage::ImportBackendFromDir
             | ModelsPageMessage::ImportBackendFromDirPicked(_)

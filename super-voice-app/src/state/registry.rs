@@ -128,7 +128,17 @@ impl PreviewState {
     }
 }
 
-/// Which kind of model a backend must serve to be listed.
+/// Which feature a backend must serve to be listed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FeatureFilter {
+    #[default]
+    All,
+    SpeechToText,
+    TextToSpeech,
+}
+
+/// Which kind of speech-to-text model a backend must serve to be listed: the
+/// filter under [`FeatureFilter::SpeechToText`].
 ///
 /// A named enum rather than the `Option<bool>` [`Filters::online`] uses: "is a
 /// post-processor" has no obvious true/false reading at a call site, and the
@@ -141,22 +151,44 @@ pub enum RoleFilter {
     PostProcessing,
 }
 
-impl RoleFilter {
-    /// Whether a backend serving these model roles passes the filter.
-    ///
-    /// Takes the roles rather than a `BackendInfo` so it works for an installed
-    /// backend and a registry entry alike — the two carry the same `role`
-    /// strings in different structs.
-    pub fn admits<'a>(self, roles: impl IntoIterator<Item = &'a str>) -> bool {
-        let want_post_processor = match self {
-            Self::All => return true,
-            Self::Transcription => false,
-            Self::PostProcessing => true,
-        };
-        roles
-            .into_iter()
-            .any(|role| (role == "post_processor") == want_post_processor)
+/// The feature a model `role` belongs to. An unknown role — one a newer
+/// backend declares and this build has no name for — reads as transcription,
+/// matching the manifest default.
+fn feature_of(role: &str) -> FeatureFilter {
+    if role == "synthesis" {
+        FeatureFilter::TextToSpeech
+    } else {
+        FeatureFilter::SpeechToText
     }
+}
+
+/// Whether a backend serving these model roles passes the two filters: it
+/// serves at least one model of the feature, and under speech to text one of
+/// the kind. The kind is not asked under another feature, where it is hidden.
+///
+/// Takes the roles rather than a `BackendInfo` so it works for an installed
+/// backend and a registry entry alike — the two carry the same `role`
+/// strings in different structs.
+pub fn admits<'a>(
+    feature: FeatureFilter,
+    kind: RoleFilter,
+    roles: impl IntoIterator<Item = &'a str>,
+) -> bool {
+    if feature == FeatureFilter::All {
+        return true;
+    }
+    roles.into_iter().any(|role| {
+        feature_of(role) == feature
+            && match (feature, kind) {
+                (FeatureFilter::SpeechToText, RoleFilter::Transcription) => {
+                    role != "post_processor"
+                }
+                (FeatureFilter::SpeechToText, RoleFilter::PostProcessing) => {
+                    role == "post_processor"
+                }
+                _ => true,
+            }
+    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -164,7 +196,9 @@ pub struct Filters {
     pub include_incompatible: bool,
     pub online: Option<bool>,
     pub search: String,
-    /// Which kind of model a backend must serve.
+    /// Which feature a backend must serve.
+    pub feature: FeatureFilter,
+    /// Which kind of speech-to-text model it must serve.
     pub role: RoleFilter,
 }
 
@@ -175,6 +209,7 @@ pub struct Filters {
 #[derive(Debug, Clone, Default)]
 pub struct InstalledFilters {
     pub online: Option<bool>,
+    pub feature: FeatureFilter,
     pub role: RoleFilter,
 }
 
@@ -204,51 +239,102 @@ impl RegistryState {
 
 #[cfg(test)]
 mod role_filter_tests {
-    use super::RoleFilter;
+    use super::{FeatureFilter, RoleFilter, admits};
 
     const STT: &str = "transcription";
     const PP: &str = "post_processor";
+    const TTS: &str = "synthesis";
+
+    fn stt(kind: RoleFilter, roles: &[&str]) -> bool {
+        admits(FeatureFilter::SpeechToText, kind, roles.iter().copied())
+    }
 
     /// "All" is the default and hides nothing, including a backend whose
-    /// manifest declares no models at all.
+    /// manifest declares no models at all, whatever kind is set.
     #[test]
     fn all_admits_everything() {
+        assert_eq!(FeatureFilter::default(), FeatureFilter::All);
         assert_eq!(RoleFilter::default(), RoleFilter::All);
-        assert!(RoleFilter::All.admits([STT]));
-        assert!(RoleFilter::All.admits([PP]));
-        assert!(RoleFilter::All.admits([]));
+        for kind in [
+            RoleFilter::All,
+            RoleFilter::Transcription,
+            RoleFilter::PostProcessing,
+        ] {
+            for roles in [&[STT][..], &[PP], &[TTS], &[]] {
+                assert!(admits(FeatureFilter::All, kind, roles.iter().copied()));
+            }
+        }
     }
 
-    /// A filter keeps a backend that serves *at least one* model of that kind,
+    /// Each feature lists the backends serving it, and a backend serving both
+    /// is under both.
+    #[test]
+    fn each_feature_lists_its_own_backends() {
+        assert!(stt(RoleFilter::All, &[STT]));
+        assert!(stt(RoleFilter::All, &[PP]));
+        assert!(!stt(RoleFilter::All, &[TTS]));
+        assert!(admits(FeatureFilter::TextToSpeech, RoleFilter::All, [TTS]));
+        assert!(!admits(
+            FeatureFilter::TextToSpeech,
+            RoleFilter::All,
+            [STT, PP]
+        ));
+        assert!(stt(RoleFilter::All, &[STT, TTS]));
+        assert!(admits(
+            FeatureFilter::TextToSpeech,
+            RoleFilter::All,
+            [STT, TTS]
+        ));
+    }
+
+    /// A kind keeps a backend that serves *at least one* model of that kind,
     /// so a dual-role backend appears under both — it genuinely offers both.
     #[test]
-    fn a_dual_role_backend_survives_either_filter() {
-        assert!(RoleFilter::Transcription.admits([STT, PP]));
-        assert!(RoleFilter::PostProcessing.admits([STT, PP]));
+    fn a_dual_role_backend_survives_either_kind() {
+        assert!(stt(RoleFilter::Transcription, &[STT, PP]));
+        assert!(stt(RoleFilter::PostProcessing, &[STT, PP]));
     }
 
     #[test]
-    fn a_single_role_backend_is_hidden_by_the_other_filter() {
-        assert!(RoleFilter::Transcription.admits([STT]));
-        assert!(!RoleFilter::Transcription.admits([PP]));
-        assert!(RoleFilter::PostProcessing.admits([PP]));
-        assert!(!RoleFilter::PostProcessing.admits([STT]));
+    fn a_single_role_backend_is_hidden_by_the_other_kind() {
+        assert!(stt(RoleFilter::Transcription, &[STT]));
+        assert!(!stt(RoleFilter::Transcription, &[PP]));
+        assert!(stt(RoleFilter::PostProcessing, &[PP]));
+        assert!(!stt(RoleFilter::PostProcessing, &[STT]));
+    }
+
+    /// The bug the feature filter fixed: a synthesis model is not
+    /// transcription.
+    #[test]
+    fn a_synthesis_model_is_not_transcription() {
+        assert!(!stt(RoleFilter::Transcription, &[TTS]));
+    }
+
+    /// The kind is hidden under text to speech, so it narrows nothing there.
+    #[test]
+    fn the_kind_is_ignored_under_text_to_speech() {
+        assert!(admits(
+            FeatureFilter::TextToSpeech,
+            RoleFilter::PostProcessing,
+            [TTS]
+        ));
     }
 
     /// An unrecognized role reads as transcription, matching the manifest
     /// default — a model from a newer backend stays visible rather than
-    /// disappearing from both filters.
+    /// disappearing from every filter.
     #[test]
     fn an_unknown_role_reads_as_transcription() {
-        assert!(RoleFilter::Transcription.admits(["quantum"]));
-        assert!(!RoleFilter::PostProcessing.admits(["quantum"]));
+        assert!(stt(RoleFilter::Transcription, &["quantum"]));
+        assert!(!stt(RoleFilter::PostProcessing, &["quantum"]));
     }
 
-    /// A backend with no models is hidden by either specific filter: it serves
-    /// nothing for that stage, which is what the filter asks.
+    /// A backend with no models is hidden by every specific filter: it serves
+    /// nothing, which is what the filter asks.
     #[test]
     fn a_backend_with_no_models_matches_no_specific_filter() {
-        assert!(!RoleFilter::Transcription.admits([]));
-        assert!(!RoleFilter::PostProcessing.admits([]));
+        assert!(!stt(RoleFilter::All, &[]));
+        assert!(!stt(RoleFilter::Transcription, &[]));
+        assert!(!admits(FeatureFilter::TextToSpeech, RoleFilter::All, []));
     }
 }

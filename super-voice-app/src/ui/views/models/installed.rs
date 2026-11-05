@@ -65,9 +65,11 @@ fn installed_matches(backend: &BackendInfo, filters: &InstalledFilters) -> bool 
     {
         return false;
     }
-    filters
-        .role
-        .admits(backend.models.iter().map(|m| m.role.as_str()))
+    crate::state::registry::admits(
+        filters.feature,
+        filters.role,
+        backend.models.iter().map(|m| m.role.as_str()),
+    )
 }
 
 /// "{shown} of {total}", matching the Browse tab's count.
@@ -91,6 +93,9 @@ fn installed_toolbar<'a>(
     let runs_on = super::chips::runs_on_chips(filters.online, |o| {
         Message::ModelsPage(ModelsPageMessage::InstalledOnlineFilter(o))
     });
+    let feature = super::chips::feature_filter_chips(filters.feature, |f| {
+        Message::ModelsPage(ModelsPageMessage::InstalledFeatureFilter(f))
+    });
     let kind = super::chips::role_filter_chips(filters.role, |r| {
         Message::ModelsPage(ModelsPageMessage::InstalledRoleFilter(r))
     });
@@ -103,7 +108,14 @@ fn installed_toolbar<'a>(
     // its chips mid-word. The count follows the chips instead of being pushed
     // to the right edge, because a fill-width spacer in a wrapping row would
     // take a whole line to itself.
-    row![runs_on, kind, count]
+    let mut chips = row![feature];
+    // The kind splits speech to text's two stages, so it shows only there.
+    if filters.feature == crate::state::registry::FeatureFilter::SpeechToText {
+        chips = chips.push(kind);
+    }
+    chips
+        .push(runs_on)
+        .push(count)
         .spacing(spacing.space_m)
         .align_y(Alignment::Center)
         .wrap()
