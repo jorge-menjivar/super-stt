@@ -20,6 +20,6 @@ settings_dispatch!(
     UpdateBetaOptinState,
     "Read the update channel opt-in",
     "Answers with the configured opt-in \u{2014} whether the update check considers beta \
-builds or stable releases only. This is about Super STT itself, not about the \
+builds or stable releases only. This is about Super Voice itself, not about the \
 backends under `/registry`, which are versioned separately."
 );
