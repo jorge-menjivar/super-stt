@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Hermetic, offline end-to-end test: drives the real `super-stt-install`
+//! Hermetic, offline end-to-end test: drives the real `super-voice-install`
 //! binary through resolve → download → verify → stage against a mocked
 //! GitHub API (`GITHUB_API_BASE`, honored by `Github::from_env` /
 //! `accept_base_url` — loopback `http://` is allowed for exactly this),
@@ -64,9 +64,9 @@ fn tarball(dir: &std::path::Path, name: &str, files: &[(&str, &[u8])]) -> Vec<u8
 }
 
 /// The product's release tarball, covering every file `--components=all`
-/// requires of it, each named after Super Voice's slug as the installer
-/// derives it (super-engine-installer's `stage::build_manifest`): the three daemon binaries, the
-/// systemd unit, and the app binary, desktop file and icon. It carries no
+/// requires of it (super-engine-installer's `stage::build_manifest`): the
+/// three daemon binaries and the systemd unit, named after Super Voice's slug,
+/// and each of its two apps' binary, desktop file and icon. It carries no
 /// applet: that comes from the applet's own release. The app metainfo is
 /// optional in `build_manifest` and omitted.
 fn product_tarball(dir: &std::path::Path, name: &str) -> Vec<u8> {
@@ -77,14 +77,23 @@ fn product_tarball(dir: &std::path::Path, name: &str) -> Vec<u8> {
             ("super-voice-daemon", b"#!/bin/sh\necho fake\n"),
             ("super-voice-cli", b"#!/bin/sh\necho fake\n"),
             ("super-voice-consent", b"#!/bin/sh\necho fake\n"),
-            ("super-voice-app", b"#!/bin/sh\necho fake\n"),
+            ("super-stt-app", b"#!/bin/sh\necho fake\n"),
+            ("super-tts-app", b"#!/bin/sh\necho fake\n"),
             ("systemd/super-voice.service", b"[Unit]\nDescription=fake\n"),
             (
-                "resources/super-voice-app.desktop",
-                b"[Desktop Entry]\nName=Super Voice\n",
+                "resources/super-stt-app.desktop",
+                b"[Desktop Entry]\nName=Super STT\n",
             ),
             (
-                "resources/icons/hicolor/scalable/apps/super-voice-app.svg",
+                "resources/super-tts-app.desktop",
+                b"[Desktop Entry]\nName=Super TTS\n",
+            ),
+            (
+                "resources/icons/hicolor/scalable/apps/super-stt-app.svg",
+                b"<svg/>",
+            ),
+            (
+                "resources/icons/hicolor/scalable/apps/super-tts-app.svg",
                 b"<svg/>",
             ),
         ],
@@ -219,7 +228,7 @@ async fn dry_run_resolves_downloads_verifies_and_stages_against_a_mocked_release
     let out = tokio::task::spawn_blocking({
         let base = base.clone();
         move || {
-            std::process::Command::new(env!("CARGO_BIN_EXE_super-stt-install"))
+            std::process::Command::new(env!("CARGO_BIN_EXE_super-voice-install"))
                 .env("GITHUB_API_BASE", base)
                 .args([
                     "--non-interactive",

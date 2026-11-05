@@ -1,9 +1,9 @@
 [package]
-    name = "super-stt-install"
+    name = "super-voice-install"
     version.workspace = true
     authors.workspace = true
     edition.workspace = true
-    description = "Installer and self-updater for Super STT"
+    description = "Installer and self-updater for Super Voice"
     repository = "https://github.com/jorge-menjivar/super-stt"
     license = "GPL-3.0-only"
 

@@ -11,7 +11,7 @@ name: Release (Beta)
 # Differences from release.yml:
 #   1. Tarball names get a `-beta` suffix so the two channels can
 #      coexist on the same GitHub releases page without colliding
-#      (`super-stt-x86_64-unknown-linux-gnu-beta.tar.gz`).
+#      (`super-voice-x86_64-unknown-linux-gnu-beta.tar.gz`).
 #   2. The GitHub release is created with `prerelease: true` so the
 #      stable channel's `/releases/latest` query continues to skip
 #      betas, while the beta channel walks the full release list and
@@ -121,7 +121,7 @@ jobs:
             libdbus-1-dev \
             pkg-config
 
-      # Build all five binaries in one cargo invocation so the shared
+      # Build all six binaries in one cargo invocation so the shared
       # dependency graph compiles once, then assemble the tarball.
       - name: Build binaries
         run: |
@@ -130,7 +130,8 @@ jobs:
             --bin super-voice-cli \
             --bin super-voice-consent \
             --bin super-stt-app \
-            --bin super-stt-install
+            --bin super-tts-app \
+            --bin super-voice-install
 
       - name: Create tarball
         run: |
@@ -142,6 +143,7 @@ jobs:
           cp target/${{ matrix.target }}/release/super-voice-cli dist/
           cp target/${{ matrix.target }}/release/super-voice-consent dist/
           cp target/${{ matrix.target }}/release/super-stt-app dist/
+          cp target/${{ matrix.target }}/release/super-tts-app dist/
 
           # Include systemd service files
           mkdir -p dist/systemd
@@ -149,8 +151,10 @@ jobs:
 
           mkdir -p dist/resources
 
-          # Include desktop app resources
+          # Include both apps' desktop resources: launcher entries,
+          # metainfo, icons. Their icon trees merge.
           cp -r super-stt-app/resources/* dist/resources
+          cp -r super-tts-app/resources/* dist/resources
 
           # Remove any extra assets
           rm -rf dist/resources/assets
@@ -158,18 +162,18 @@ jobs:
           # `-beta` suffix isolates this artifact from the stable
           # channel's tarballs (so a future stable release on the
           # same tag doesn't get clobbered).
-          tar -czf super-stt-${{ matrix.target }}-beta.tar.gz -C dist .
+          tar -czf super-voice-${{ matrix.target }}-beta.tar.gz -C dist .
 
       - name: Stage installer binary
-        run: cp "target/${{ matrix.target }}/release/super-stt-install" "super-stt-install-${{ matrix.target }}"
+        run: cp "target/${{ matrix.target }}/release/super-voice-install" "super-voice-install-${{ matrix.target }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: super-stt-${{ matrix.target }}-beta
+          name: super-voice-${{ matrix.target }}-beta
           path: |
-            super-stt-${{ matrix.target }}-beta.tar.gz
-            super-stt-install-${{ matrix.target }}
+            super-voice-${{ matrix.target }}-beta.tar.gz
+            super-voice-install-${{ matrix.target }}
 
   create-release:
     name: Create Beta Release
@@ -200,7 +204,7 @@ jobs:
         with:
           files: |
             artifacts/**/*.tar.gz
-            artifacts/**/super-stt-install-*
+            artifacts/**/super-voice-install-*
             SHA256SUMS
           draft: false
           # The whole point of this workflow: mark every release it

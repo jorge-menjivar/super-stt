@@ -6,14 +6,14 @@ cli_name := 'super-voice-cli'
 consent_name := 'super-voice-consent'
 wrapper_name := 'voice'
 
-# The COSMIC applet Super STT shares with Super TTS. It lives in its own repo,
+# The COSMIC applet. It lives in its own repo,
 # super-libre/super-cosmic-applet, whose releases the installer installs.
 # `install-applet` builds it from a checkout of that repo: SHARED_APPLET_DIR,
-# else ../super-cosmic-applet. It replaces Super STT's own applet,
-# super-stt-cosmic-applet, whose files `install-applet` removes.
+# else ../super-cosmic-applet. It replaces Super STT's and Super TTS's own
+# applets, whose files `install-applet` removes.
 shared_applet := 'super-cosmic-applet'
 shared_applet_dir := env('SHARED_APPLET_DIR', '..' / 'super-cosmic-applet')
-old_applet := 'super-stt-cosmic-applet'
+old_applets := 'super-stt-cosmic-applet super-tts-cosmic-applet'
 
 # Installation paths — root-owned under /usr/local, matching the
 # release installers, so install/uninstall recipes escalate with sudo
@@ -69,13 +69,13 @@ service_dst := systemd_unit_dir / service_file
 # Named as a list rather than reached with `--workspace --exclude` so the
 # macOS gates say what they cover, and so a new portable crate has to be added
 # deliberately rather than silently skipped.
-macos_members := '-p super-voice-daemon -p super-voice-cli -p super-stt-shared -p super-voice-registry-types -p super-stt-install -p super-stt-app'
+macos_members := '-p super-voice-daemon -p super-voice-cli -p super-stt-shared -p super-voice-registry-types -p super-voice-install -p super-stt-app'
 
-# macOS ships as one app bundle, `Super STT.app`: the settings app is its
+# macOS ships as one app bundle, `Super Voice.app`: the settings app is its
 # executable, and the daemon and the CLI sit beside it in Contents/MacOS. The
 # daemon and the global shortcut run as the bundle's two LaunchAgents. See
 # `bundle-macos`.
-macos_bundle_name := 'Super STT.app'
+macos_bundle_name := 'Super Voice.app'
 macos_bundle_src := 'target' / 'release' / macos_bundle_name
 macos_bundle_dst := '/Applications' / macos_bundle_name
 # The CLI inside the installed bundle. `stt service` has to run as this copy:
@@ -88,10 +88,10 @@ macos_resources := 'super-stt-app' / 'resources' / 'macos'
 # user's GUI session to type, notify, and prompt for consent. It ships inside
 # the bundle, and launchd loads it from there once it is registered; see
 # super-voice-daemon/launchd/.
-launchd_label := 'ai.menjivar.super-stt'
+launchd_label := 'ai.menjivar.super-voice'
 
 # Code-signing identifier prefix for local macOS builds. See `codesign-macos`.
-macos_sign_prefix := 'ai.menjivar.super-stt'
+macos_sign_prefix := 'ai.menjivar.super-voice'
 launchd_plist_file := launchd_label + '.plist'
 launchd_plist_src := 'super-voice-daemon' / 'launchd' / launchd_plist_file
 # Where the agents were installed before the bundle existed, as loose plists
@@ -100,7 +100,7 @@ launchd_plist_src := 'super-voice-daemon' / 'launchd' / launchd_plist_file
 launchd_agent_dir := home_dir / 'Library' / 'LaunchAgents'
 launchd_plist_dst := launchd_agent_dir / launchd_plist_file
 # launchd has no journal, so the agents write their output to files here.
-macos_log_dir := home_dir / 'Library' / 'Logs' / 'super-stt'
+macos_log_dir := home_dir / 'Library' / 'Logs' / 'super-voice'
 # `launchctl` addresses a LaunchAgent by domain target, not by label alone.
 launchd_domain := 'gui/' + shell('id -u')
 launchd_target := launchd_domain + '/' + launchd_label
@@ -233,7 +233,7 @@ test-install:
 # runners (.github/workflows/install-e2e.yml); locally, run it in a container.
 # The script is super-engine's, fetched at the rev install-e2e.yml pins, so a
 # local run tests what CI does. It installs from the repo install.sh names.
-# Set SUPER_VOICE_INSTALLER_BIN to a built super-stt-install to run the local
+# Set SUPER_VOICE_INSTALLER_BIN to a built super-voice-install to run the local
 # pass too.
 # Usage: just test-install-e2e [stable|beta]
 [doc("End-to-end install test (DESTRUCTIVE: real install into /usr/local)")]
@@ -372,7 +372,7 @@ linux-only-gui:
         exit 1
     fi
 
-# Build Super STT.app into target/release: the settings app, the daemon and
+# Build Super Voice.app into target/release: the settings app, the daemon and
 # the CLI; the two LaunchAgents that run the daemon and the global shortcut;
 # and an icon rendered from the app's SVG. `just install` puts it in
 # /Applications.
@@ -491,7 +491,7 @@ macos-icon out:
 #
 # Opt in by exporting the name of a code-signing certificate in your keychain:
 #
-#   export SUPER_VOICE_SIGN_IDENTITY="Super STT Dev"
+#   export SUPER_VOICE_SIGN_IDENTITY="Super Voice Dev"
 #
 # Create that certificate once — Keychain Access -> Certificate Assistant ->
 # Create a Certificate, any name, type "Code Signing", self-signed is fine.
@@ -714,7 +714,7 @@ build-cli *args:
 
 # Build only the installer/self-updater
 build-install:
-    cargo build --release --bin super-stt-install
+    cargo build --release --bin super-voice-install
 
 # Build only the consent helper (co-located with the daemon binary)
 build-consent: linux-only-gui
@@ -880,17 +880,21 @@ install-app:
         exit 1
     fi
 
-    echo "Installing Super STT app to {{ app_dst }}"
+    # Text to speech's settings app, which ships beside speech to text's
+    # until the two merge. Linux only: the macOS bundle carries one app.
+    echo "Building the text-to-speech app..."
+    if ! cargo build --release --bin super-tts-app; then
+        echo "❌ Text-to-speech app build failed or was interrupted"
+        exit 1
+    fi
+
     sudo mkdir -p {{ bin_dir }}
-    sudo install -m755 {{ app_src }} {{ app_dst }}
-
-    # Install the desktop entry for application menu
-    echo "Installing desktop entry..."
-    sudo install -Dm0644 {{ app_desktop_file_src }} {{ app_desktop_file_dst }}
-
-    # Install the app icon
-    echo "Installing app icon..."
-    sudo install -Dm0644 {{ app_icon_src }} {{ app_icon_dst }}
+    for app in {{ app_name }} super-tts-app; do
+        echo "Installing $app to {{ bin_dir }}/$app"
+        sudo install -m755 "target/release/$app" "{{ bin_dir }}/$app"
+        sudo install -Dm0644 "$app/resources/$app.desktop" "{{ desktop_dir }}/$app.desktop"
+        sudo install -Dm0644 "$app/resources/icons/hicolor/scalable/apps/$app.svg" "{{ icons_dir }}/$app.svg"
+    done
 
     # Update desktop database
     if command -v update-desktop-database &> /dev/null; then
@@ -908,13 +912,11 @@ install-app:
     pkill -f '^cosmic-launcher$' 2>/dev/null || true
     pkill -f '^pop-launcher( |$)' 2>/dev/null || true
 
-    echo "✓ Super STT app installed: {{ app_dst }}"
-    echo "✓ Desktop entry installed: {{ app_desktop_file_dst }}"
-    echo "✓ App icon installed: {{ app_icon_dst }}"
+    echo "✓ Apps installed: {{ app_dst }}, {{ bin_dir }}/super-tts-app"
 
 # Build the shared COSMIC applet from its checkout and install it under
-# /usr/local, with that repo's own `just install`, then remove Super STT's own
-# applet it replaces. The release installer installs the applet's newest
+# /usr/local, with that repo's own `just install`, then remove the applets of
+# Super STT and Super TTS it replaces. The release installer installs the applet's newest
 # release instead.
 install-applet: linux-only-gui
     #!/usr/bin/env bash
@@ -937,10 +939,12 @@ install-applet: linux-only-gui
     echo "Building and installing the COSMIC applet from $dir..."
     just --justfile "$dir/justfile" --working-directory "$dir" install
 
-    # The shared applet replaces Super STT's own.
-    sudo rm -f '{{ bin_dir }}/{{ old_applet }}' '{{ icons_dir }}/{{ old_applet }}.svg'
-    for side in full left right; do
-        sudo rm -f "{{ desktop_dir }}/{{ old_applet }}-$side.desktop"
+    # The shared applet replaces Super STT's and Super TTS's own.
+    for applet in {{ old_applets }}; do
+        sudo rm -f "{{ bin_dir }}/$applet" "{{ icons_dir }}/$applet.svg"
+        for side in full left right; do
+            sudo rm -f "{{ desktop_dir }}/$applet-$side.desktop"
+        done
     done
 
     # Refresh the desktop/icon caches so the panel picks up the new applet
@@ -964,7 +968,7 @@ install-applet: linux-only-gui
     echo "  Super Applet (Full), (Left Side) or (Right Side)."
 
 
-# Install Super STT on macOS: the app bundle into /Applications, its two
+# Install Super Voice on macOS: the app bundle into /Applications, its two
 # LaunchAgents registered with launchd, and `stt` on the PATH. Called by
 # `just install`, `install-daemon` and `install-app` on Darwin, since the
 # bundle carries all three.
@@ -998,6 +1002,23 @@ install-macos:
         fi
     done
     sudo rm -f {{ daemon_dst }} {{ cli_dst }}
+
+    # Retire Super STT's install, which Super Voice replaces: its bundle, its
+    # two agents under their own labels, and its `stt` wrapper. Unregistered
+    # with its own CLI, as below, so launchd lets go of the jobs it loaded.
+    old_bundle="/Applications/Super STT.app"
+    if [ -x "$old_bundle/Contents/MacOS/super-stt-cli" ]; then
+        "$old_bundle/Contents/MacOS/super-stt-cli" service unregister || true
+    fi
+    for label in ai.menjivar.super-stt.hotkey ai.menjivar.super-stt; do
+        launchctl bootout "{{ launchd_domain }}/$label" 2>/dev/null || true
+        rm -f "{{ launchd_agent_dir }}/$label.plist"
+    done
+    if [ -d "$old_bundle" ]; then
+        echo "Removing Super STT.app, which Super Voice replaces..."
+        rm -rf "$old_bundle"
+    fi
+    sudo rm -f "{{ bin_dir }}/stt" "{{ bin_dir }}/super-stt-daemon" "{{ bin_dir }}/super-stt-cli"
 
     # Unregister what an earlier install registered, with that install's own
     # CLI. launchd keeps the job definition it loaded, so restarting the
@@ -1049,13 +1070,13 @@ install-macos:
 
     binding="${SUPER_VOICE_HOTKEY:-ctrl+alt+space}"
     echo ""
-    echo "✓ Super STT installed: {{ macos_bundle_dst }}"
+    echo "✓ Super Voice installed: {{ macos_bundle_dst }}"
     echo "✓ The daemon and the shortcut run in the background, and at every login."
     echo "  They are listed under System Settings › General › Login Items."
     echo "✓ Shortcut: $binding starts and stops a recording"
     echo "  Change it with SUPER_VOICE_HOTKEY=... just install"
     echo ""
-    echo "Open Super STT once, and allow its notifications when asked. Two more"
+    echo "Open Super Voice once, and allow its notifications when asked. Two more"
     echo "macOS permissions are needed, and neither can be granted from here:"
     echo ""
     echo "  • Accessibility — macOS asks when the daemon starts. If not, add"
@@ -1106,7 +1127,20 @@ install-daemon:
         exit 1
     fi
 
-    echo "Installing Super STT daemon as user service..."
+    echo "Installing the Super Voice daemon as a user service..."
+
+    # Retire Super STT's and Super TTS's installs, which Super Voice replaces:
+    # their daemons must not run beside this one. Stopped and disabled while
+    # their unit files are still there to disable, then removed.
+    for unit in super-stt.service super-tts.service; do
+        systemctl --user disable --now "$unit" 2>/dev/null || true
+        sudo rm -f "{{ systemd_unit_dir }}/$unit"
+        rm -f "$HOME/.config/systemd/user/$unit"
+    done
+    for old in super-stt super-stt-daemon super-stt-cli super-stt-consent super-stt-install stt \
+               super-tts-daemon super-tts-cli super-tts-consent super-tts-install tts; do
+        sudo rm -f "{{ bin_dir }}/$old"
+    done
 
     # Install binary
     echo "Installing daemon binary to {{ daemon_dst }}"
@@ -1228,7 +1262,7 @@ install-daemon:
         fi
     fi || true
 
-    echo "✓ Super STT installed to {{ daemon_dst }}"
+    echo "✓ Super Voice installed to {{ daemon_dst }}"
     echo "✓ Wrapper script created at {{ wrapper_dst }}"
     echo "✓ Convenience shortcut 'stt' created"
     echo ""
@@ -1357,7 +1391,7 @@ setup-cosmic-shortcut:
         echo '            Super,' >> "$COSMIC_SHORTCUTS_FILE"
         echo '        ],' >> "$COSMIC_SHORTCUTS_FILE"
         echo '        key: "space",' >> "$COSMIC_SHORTCUTS_FILE"
-        echo '        description: Some("Super STT"),' >> "$COSMIC_SHORTCUTS_FILE"
+        echo '        description: Some("Super Voice"),' >> "$COSMIC_SHORTCUTS_FILE"
         echo "    ): Spawn(\"$stt_command\")," >> "$COSMIC_SHORTCUTS_FILE"
         echo '}' >> "$COSMIC_SHORTCUTS_FILE"
     fi
@@ -1377,7 +1411,7 @@ install-all:
     fi
 
     echo ""
-    echo "🎉 Complete Super STT installation finished!"
+    echo "🎉 Super Voice installation finished!"
     echo ""
     echo "⚙️  Quick Setup Tips:"
     echo "-- If you're on COSMIC, the daemon installer already offered to set up Super+Space shortcut"
@@ -1390,10 +1424,10 @@ uninstall-app:
     if [ "$(uname -s)" = "Darwin" ]; then
         exec just uninstall-macos
     fi
-    echo "Uninstalling Super STT App..."
-    sudo rm -f {{ app_dst }}
-    sudo rm -f {{ app_desktop_file_dst }}
-    sudo rm -f {{ app_icon_dst }}
+    echo "Uninstalling the apps..."
+    for app in {{ app_name }} super-tts-app; do
+        sudo rm -f "{{ bin_dir }}/$app" "{{ desktop_dir }}/$app.desktop" "{{ icons_dir }}/$app.svg"
+    done
 
     # Update desktop database
     if command -v update-desktop-database &> /dev/null; then
@@ -1410,27 +1444,19 @@ uninstall-app:
     pkill -f '^cosmic-launcher$' 2>/dev/null || true
     pkill -f '^pop-launcher( |$)' 2>/dev/null || true
 
-    echo "✓ Super STT App uninstalled"
-    echo "✓ Desktop entry removed"
-    echo "✓ App icon removed"
+    echo "✓ Apps uninstalled, with their desktop entries and icons"
 
-# Uninstall the COSMIC applet: Super STT's own, and the shared one unless
-# Super TTS, which uses it too, is still installed.
+# Uninstall the COSMIC applet, and the applets of Super STT and Super TTS
+# it replaced.
 uninstall-applet:
     #!/usr/bin/env bash
     echo "Uninstalling the COSMIC applet..."
-    sudo rm -f '{{ bin_dir }}/{{ old_applet }}' '{{ icons_dir }}/{{ old_applet }}.svg'
-    for side in full left right; do
-        sudo rm -f "{{ desktop_dir }}/{{ old_applet }}-$side.desktop"
-    done
-    if [ -e '{{ bin_dir }}/super-tts-daemon' ]; then
-        echo "Super TTS is installed and uses the shared applet, so it stays."
-    else
-        sudo rm -f '{{ bin_dir }}/{{ shared_applet }}' '{{ icons_dir }}/{{ shared_applet }}.svg'
+    for applet in {{ shared_applet }} super-stt-cosmic-applet super-tts-cosmic-applet; do
+        sudo rm -f "{{ bin_dir }}/$applet" "{{ icons_dir }}/$applet.svg"
         for side in full left right; do
-            sudo rm -f "{{ desktop_dir }}/{{ shared_applet }}-$side.desktop"
+            sudo rm -f "{{ desktop_dir }}/$applet-$side.desktop"
         done
-    fi
+    done
 
     # Drop the entries from COSMIC's launcher caches without a relogin.
     pkill -f '^cosmic-app-library$' 2>/dev/null || true
@@ -1445,7 +1471,7 @@ uninstall-daemon:
     if [ "$(uname -s)" = "Darwin" ]; then
         exec just uninstall-macos
     fi
-    echo "Uninstalling Super STT daemon user service..."
+    echo "Uninstalling the Super Voice daemon user service..."
 
     # Stop and disable user service
     systemctl --user stop {{ service_name }} || true
@@ -1472,14 +1498,14 @@ uninstall-daemon:
     # Reload user systemd
     systemctl --user daemon-reload
 
-    echo "✓ Super STT Daemon user service uninstalled"
+    echo "✓ Super Voice daemon user service uninstalled"
 
-# Uninstall Super STT on macOS: the agents, the app bundle, and `stt`.
+# Uninstall Super Voice on macOS: the agents, the app bundle, and `voice`.
 # Called by `just uninstall`, `uninstall-daemon` and `uninstall-app` on Darwin.
 # Usage: just uninstall-macos
 uninstall-macos:
     #!/usr/bin/env bash
-    echo "Uninstalling Super STT..."
+    echo "Uninstalling Super Voice..."
 
     # Unregistering stops the agents and drops them from Login Items. It has
     # to be asked of the CLI inside the bundle, so before the bundle goes.
@@ -1499,7 +1525,7 @@ uninstall-macos:
 
     echo "Log directory {{ macos_log_dir }} preserved"
     echo ""
-    echo "✓ Super STT uninstalled"
+    echo "✓ Super Voice uninstalled"
     echo ""
     echo "macOS keeps its own record of the Accessibility and Microphone grants."
     echo "Remove the stale entries in System Settings › Privacy & Security if"
@@ -1531,7 +1557,7 @@ install-consent: linux-only-gui
 # Uninstall the consent helper.
 uninstall-consent:
     #!/usr/bin/env bash
-    echo "Uninstalling Super STT consent helper..."
+    echo "Uninstalling the consent helper..."
     sudo rm -f {{ consent_dst }}
     echo "✓ Consent helper uninstalled"
 
@@ -1565,19 +1591,19 @@ install-cli:
 
     sudo mkdir -p {{ bin_dir }}
     sudo install -m755 {{ cli_src }} {{ cli_dst }}
-    echo "✓ Super STT CLI installed: {{ cli_dst }}"
+    echo "✓ Super Voice CLI installed: {{ cli_dst }}"
 
 # Uninstall the CLI binary
 uninstall-cli:
     #!/usr/bin/env bash
-    echo "Uninstalling Super STT CLI..."
+    echo "Uninstalling the Super Voice CLI..."
     sudo rm -f {{ cli_dst }}
 
     # The `stt` wrapper is a thin exec of the CLI, so it is dead weight
     # without it — left in place it stays on PATH and fails at exec time
     # instead of reporting as uninstalled.
     sudo rm -f {{ wrapper_dst }}
-    echo "✓ Super STT CLI uninstalled"
+    echo "✓ Super Voice CLI uninstalled"
 
 # Uninstall daemon, app, applet, CLI, and consent helper
 uninstall:
@@ -1663,7 +1689,7 @@ status-daemon:
 status: status-daemon
     #!/usr/bin/env bash
     echo ""
-    echo "🔍 Super STT System Status"
+    echo "🔍 Super Voice System Status"
     echo "=========================="
     echo ""
 

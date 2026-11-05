@@ -6,7 +6,7 @@
     "super-voice-consent",
     "super-voice-daemon",
     "super-voice-indexer",
-    "super-stt-install",
+    "super-voice-install",
     "super-stt-shared",
     "super-tts-app",
     "super-tts-shared",
@@ -30,7 +30,7 @@
     "super-voice-cli",
     "super-voice-consent",
     "super-voice-daemon",
-    "super-stt-install",
+    "super-voice-install",
     "super-stt-shared",
     "super-tts-app",
     "super-tts-shared",
@@ -141,35 +141,35 @@
     # `just pin-engine <rev>`.
     super-engine-client      = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8cc91b21c82bcf2d275ee1e981c5ddae0d79afc5",
+      rev = "c19754dc6399b752a66ca1e4bfe1ca3bf048fdf3",
     }
     super-engine-daemon      = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8cc91b21c82bcf2d275ee1e981c5ddae0d79afc5",
+      rev = "c19754dc6399b752a66ca1e4bfe1ca3bf048fdf3",
     }
     super-engine-forge       = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8cc91b21c82bcf2d275ee1e981c5ddae0d79afc5",
+      rev = "c19754dc6399b752a66ca1e4bfe1ca3bf048fdf3",
     }
     super-engine-indexer     = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8cc91b21c82bcf2d275ee1e981c5ddae0d79afc5",
+      rev = "c19754dc6399b752a66ca1e4bfe1ca3bf048fdf3",
     }
     super-engine-installer   = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8cc91b21c82bcf2d275ee1e981c5ddae0d79afc5",
+      rev = "c19754dc6399b752a66ca1e4bfe1ca3bf048fdf3",
     }
     super-engine-protocol    = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8cc91b21c82bcf2d275ee1e981c5ddae0d79afc5",
+      rev = "c19754dc6399b752a66ca1e4bfe1ca3bf048fdf3",
     }
     super-engine-spec        = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8cc91b21c82bcf2d275ee1e981c5ddae0d79afc5",
+      rev = "c19754dc6399b752a66ca1e4bfe1ca3bf048fdf3",
     }
     super-engine-test-daemon = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8cc91b21c82bcf2d275ee1e981c5ddae0d79afc5",
+      rev = "c19754dc6399b752a66ca1e4bfe1ca3bf048fdf3",
     }
     thiserror                = "2.0"
     tokio                    = {

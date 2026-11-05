@@ -12,7 +12,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super_tts_shared::models::self_update::InstallerAsset;
 
-/// Mirror of super-tts-install's progress.rs wire shapes. The golden tests
+/// Mirror of super-voice-install's progress.rs wire shapes. The golden tests
 /// below pin both sides to the same strings — change them together.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -229,7 +229,7 @@ async fn stream_installer_events<R: tokio::io::AsyncRead + Unpin>(reader: R, tx:
 /// run under `base` (`cache_dir()/self-update`, shared across runs). The
 /// directory name embeds this process's pid plus 8 random bytes (via
 /// `super_voice_registry_types::verify::random_hex_suffix`, the same
-/// unpredictable-name pattern `super-tts-install`'s own `StagingGuard` uses
+/// unpredictable-name pattern `super-voice-install`'s own `StagingGuard` uses
 /// for its staging directory) so a same-UID process can neither predict nor
 /// pre-create/race it.
 ///
@@ -298,7 +298,7 @@ async fn sweep_stale_run_dirs(base: &Path, keep: &Path) {
     }
 }
 
-/// Create `dir` with mode `0700` (matching `super-tts-install`'s own staging
+/// Create `dir` with mode `0700` (matching `super-voice-install`'s own staging
 /// directory) off the async runtime, since `DirBuilder::create` is a
 /// blocking syscall.
 async fn create_run_dir(dir: &Path) -> Result<(), String> {
@@ -338,7 +338,7 @@ async fn verify_installer_checksum(bin: &Path, expected_hex: &str) -> Result<(),
 }
 
 /// Stream `url` to `dest`, reporting throttled `FetchProgress` events.
-/// Mirrors `super-tts-install`'s `download_to_file` chunk loop, including its
+/// Mirrors `super-voice-install`'s `download_to_file` chunk loop, including its
 /// guaranteed final emission (see the `any_progress`/`last_reported` check
 /// below) — keep the two in step per that function's own doc comment.
 async fn download_installer(url: &str, dest: &Path, tx: &mut Tx) -> Result<(), String> {
@@ -397,7 +397,7 @@ async fn download_installer(url: &str, dest: &Path, tx: &mut Tx) -> Result<(), S
     }
     // Drive tokio::fs::File's pending buffered write to completion before the
     // file is dropped and the (freshly chmod'd) binary is spawned — the same
-    // truncation hazard `super-tts-install::download::download_to_file`
+    // truncation hazard `super-voice-install::download::download_to_file`
     // guards against.
     file.flush()
         .await
@@ -547,7 +547,7 @@ mod tests {
     #[test]
     fn parses_installer_golden_lines() {
         let lines = [
-            r#"{"event":"phase","phase":"download","message":"downloading super-tts-x86_64-unknown-linux-gnu-beta.tar.gz"}"#,
+            r#"{"event":"phase","phase":"download","message":"downloading super-voice-x86_64-unknown-linux-gnu-beta.tar.gz"}"#,
             r#"{"event":"progress","phase":"download","bytes_done":512,"bytes_total":2048}"#,
             r#"{"event":"complete","installed_version":"v0.2.3-beta.1","components":["daemon","app"]}"#,
             r#"{"event":"error","code":"checksum_mismatch","message":"boom"}"#,
@@ -654,7 +654,7 @@ mod tests {
     }
 
     // ---- C6: `download_installer` must guarantee a final `FetchProgress`
-    // emission, mirroring `super-tts-install::download::download_to_file`'s
+    // emission, mirroring `super-voice-install::download::download_to_file`'s
     // own guarantee (its doc comment says to keep the two in step). ----
 
     #[tokio::test]
