@@ -371,8 +371,7 @@ fn control_row<'a>(
         && let Some(devices) =
             super::active::device_dropdown(stage.stage(), &backend.source, model, app)
     {
-        let note = super::active::build_note(app, stage.stage(), &backend.source);
-        rows.push(("Runs on", note, devices));
+        rows.push(("Runs on", None, devices));
     }
 
     // The voice, for the same model, before its language as on the running

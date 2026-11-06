@@ -262,40 +262,18 @@ fn running_accel(app: &AppModel, stage: Stage, source: &str) -> Option<String> {
     }
 }
 
-/// The line under a running model's Runs on row: the build downloading for
-/// it, else a note when it is not running on the framework picked.
+/// The line under a running model's Runs on row, when it is not running on
+/// the framework picked. Not while a switch is under way: the model is still on
+/// the old framework then because it has not moved yet, and the card's
+/// progress already says so.
 pub(super) fn device_note(app: &AppModel, stage: Stage, source: &str) -> Option<String> {
-    build_note(app, stage, source).or_else(|| {
-        super::fmt::running_note(
-            app.staged_picks.device(stage),
-            &running_accel(app, stage, source)?,
-        )
-    })
-}
-
-/// The line under a Runs on row while the build for the framework picked
-/// downloads, e.g. "Downloading the CUDA build · 45%".
-pub(super) fn build_note(app: &AppModel, stage: Stage, source: &str) -> Option<String> {
-    use super_voice_shared::registry::events::InstallPhase;
-    let pending = app
-        .models_page
-        .pending_build
-        .as_ref()
-        .filter(|p| p.downloading && p.stage == stage && p.source == source)?;
-    let name = super::fmt::accel_name(&pending.framework);
-    let Some(status) = app.registry.installs.get(source) else {
-        return Some(format!("Downloading the {name} build"));
-    };
-    Some(match (status.phase, status.bytes_total) {
-        (InstallPhase::Downloading, Some(total)) if total > 0 => {
-            let percent = status.bytes_done.saturating_mul(100) / total;
-            format!("Downloading the {name} build \u{b7} {percent}%")
-        }
-        (InstallPhase::Resolving | InstallPhase::Downloading, _) => {
-            format!("Downloading the {name} build")
-        }
-        _ => format!("Installing the {name} build"),
-    })
+    if !app.is_model_ready(stage) || app.build_downloading(stage) {
+        return None;
+    }
+    super::fmt::running_note(
+        app.staged_picks.device(stage),
+        &running_accel(app, stage, source)?,
+    )
 }
 
 /// Summary shown in the active-backend card when a model is currently
@@ -443,8 +421,7 @@ pub(super) fn staged_model_picker<'a>(
     if let Some(model) = staged_model
         && let Some(devices) = device_dropdown(Stage::Transcription, &backend.source, model, app)
     {
-        let note = build_note(app, Stage::Transcription, &backend.source);
-        rows.push(("Runs on", note, devices));
+        rows.push(("Runs on", None, devices));
     }
 
     // Per-model language, after the device — shown only for a staged
@@ -508,6 +485,9 @@ pub(super) fn staged_model_picker<'a>(
 /// post-processor's download belongs off the transcription card, and a
 /// transcription model's off the post-processing one, even while both run.
 pub(super) fn operation_status(app: &AppModel, stage: Stage) -> Option<Element<'_, Message>> {
+    if let Some(build) = card_build_progress(app, stage) {
+        return Some(build);
+    }
     match app.model_operations.get(stage) {
         ModelOperationState::Ready => None,
         ModelOperationState::Provisioning {
@@ -590,6 +570,53 @@ pub(super) fn card_provisioning_progress<'a>(
     ]
     .spacing(cosmic::theme::spacing().space_xs)
     .into()
+}
+
+/// The bar for a build the user agreed to download for `stage`, in the place
+/// the card shows a model's download, so the build and the restart that
+/// follows it read as one wait. No Cancel: an install runs to its end.
+// reason: display-only; the imprecision is cosmetic
+#[allow(clippy::cast_precision_loss)]
+fn card_build_progress(app: &AppModel, stage: Stage) -> Option<Element<'_, Message>> {
+    use super_voice_shared::registry::events::InstallPhase;
+    let pending = app
+        .models_page
+        .pending_build
+        .as_ref()
+        .filter(|p| p.downloading && p.stage == stage)?;
+    let name = super::fmt::accel_name(&pending.framework);
+    let status = app.registry.installs.get(&pending.source);
+    let (phase, done, total) = status.map_or((InstallPhase::Resolving, 0, None), |s| {
+        (s.phase, s.bytes_done, s.bytes_total.filter(|t| *t > 0))
+    });
+    let downloading = matches!(phase, InstallPhase::Resolving | InstallPhase::Downloading);
+    let (line, fraction) = match (downloading, total) {
+        (true, Some(total)) => {
+            let fraction = (done as f32 / total as f32).clamp(0.0, 1.0);
+            (
+                format!("Downloading the {name} build: {:.0}%", fraction * 100.0),
+                fraction,
+            )
+        }
+        (true, None) => (format!("Downloading the {name} build"), 0.0),
+        (false, _) => (format!("Installing the {name} build"), 1.0),
+    };
+    let bytes = match total {
+        Some(total) if downloading => {
+            let mb = |b: u64| b as f64 / (1024.0 * 1024.0);
+            format!("{:.1} / {:.1} MB", mb(done), mb(total))
+        }
+        _ => String::new(),
+    };
+    Some(
+        column![
+            text::body(line),
+            widget::determinate_linear(fraction.max(0.05)).width(Length::Fill),
+            text::caption(bytes),
+        ]
+        .spacing(cosmic::theme::spacing().space_xs)
+        .into(),
+    )
 }
 
 /// The card's title while a backend loads: "Initial setup" when the backend

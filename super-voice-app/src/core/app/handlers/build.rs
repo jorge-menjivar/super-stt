@@ -48,7 +48,7 @@ impl AppModel {
     }
 
     /// Whether `stage`'s backend is downloading a build the user agreed to.
-    pub(in crate::core::app) fn build_downloading(&self, stage: Stage) -> bool {
+    pub fn build_downloading(&self, stage: Stage) -> bool {
         self.models_page
             .pending_build
             .as_ref()
