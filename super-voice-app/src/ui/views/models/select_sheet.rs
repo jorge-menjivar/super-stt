@@ -19,38 +19,22 @@ use super::chips::{
 use super::surface::muted_text_color;
 
 /// The Transcription section's empty state, shown when no backend is selected:
-/// a soft glyph tile, a short prompt, and a primary "Select a backend" button
-/// that opens the [`select_backend_sheet`].
-///
-/// Centered horizontally but sized to its content — it is one section of two,
-/// and filling the page height would push the Post-processing heading to the
-/// bottom of the window.
-pub(super) fn no_backend_empty_state<'a>() -> Element<'a, Message> {
-    let spacing = cosmic::theme::spacing();
-    let ring = super::active::glyph_tile(72.0, 34.0, true);
-
-    let col = widget::column::with_capacity(4)
-        .align_x(Alignment::Center)
-        .spacing(spacing.space_xs)
-        .push(ring)
-        .push(text::title4("No backend selected"))
-        .push(
-            text::body("Select a backend to start transcribing.")
-                .class(cosmic::theme::Text::Color(muted_text_color())),
-        )
-        .push(
+/// the same [`empty_state`](super::surface::empty_state) every stage has, with
+/// the button that opens the [`select_backend_sheet`].
+pub(super) fn no_backend_empty_state<'a>(narrow: bool) -> Element<'a, Message> {
+    super::surface::empty_state(
+        narrow,
+        "No backend selected",
+        "Select a backend to start transcribing.",
+        Some(
             button::suggested("Select transcription backend")
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
                 .on_press(Message::Shell(ShellMessage::ToggleContextPage(
                     ContextPage::SelectBackend,
-                ))),
-        );
-
-    widget::container(col)
-        .center_x(Length::Fill)
-        .width(Length::Fill)
-        .padding([spacing.space_m, 0, spacing.space_m, 0])
-        .into()
+                )))
+                .into(),
+        ),
+    )
 }
 
 /// The "Select transcription backend" side sheet: a hint line plus one row per installed

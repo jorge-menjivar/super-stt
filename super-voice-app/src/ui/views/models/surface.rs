@@ -486,6 +486,30 @@ pub(super) fn card_header<'a>(
         .into()
 }
 
+/// What a stage shows before it has a backend: the card header it will have,
+/// with no card around it. The glyph tile, a title, the line under it, and the
+/// button that picks one, laid out like the card that replaces it, stacking
+/// the same way when `narrow`.
+///
+/// No card surface: a card frames a backend that exists, and a bordered
+/// surface holding only a prompt reads as a card whose contents failed to load.
+pub(super) fn empty_state<'a>(
+    narrow: bool,
+    title: &str,
+    caption: &str,
+    action: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let glyph = super::active::backend_glyph_tile();
+    let (title, caption) = (title.to_string(), Some(caption.to_string()));
+    let Some(action) = action else {
+        return row![glyph, card_title_block(title, "", caption)]
+            .spacing(cosmic::theme::spacing().space_s)
+            .align_y(cosmic::iced::Alignment::Center)
+            .into();
+    };
+    card_header(narrow, glyph, title, "", caption, action)
+}
+
 /// One of a card's control rows: its label, the line under the label when
 /// there is something to add, and the control.
 pub(super) type ControlRow<'a> = (&'static str, Option<String>, Element<'a, Message>);

@@ -14,10 +14,9 @@
 //! What names the stage on the section, from its prompts to its picker sheet,
 //! is in [`Copy`]; the rest is the same for every such stage.
 //!
-//! Before a backend is chosen there is no card at all, only a prompt and the
-//! button that opens the picker. A card frames a backend that exists; a
-//! bordered surface holding nothing but a prompt reads as a card whose contents
-//! failed to load.
+//! Before a backend is chosen there is no card at all, only the
+//! [`empty_state`] every stage has: the card's header without the card, and
+//! the button that opens the picker.
 
 use cosmic::Element;
 use cosmic::iced::widget::row;
@@ -37,14 +36,12 @@ use super::chips::{
     model_is_online, stage_device_support,
 };
 use super::surface::{
-    backend_description, card_divider, card_surface, muted_text_color, repo_button,
+    backend_description, card_divider, card_surface, empty_state, muted_text_color, repo_button,
 };
 
 /// What a section says that names its stage.
 struct Copy {
-    /// The prompt when nothing installed serves the stage.
-    none_installed: &'static str,
-    /// The prompt when something does but none is selected.
+    /// The prompt when no backend is selected.
     unselected: &'static str,
     /// The button that opens the picker sheet, and the sheet's title.
     select: &'static str,
@@ -61,8 +58,6 @@ struct Copy {
 fn copy(stage: BlockStage) -> Copy {
     match stage {
         BlockStage::PostProcessing => Copy {
-            none_installed: "Install a post-processor from the Library to clean up text before \
-                             it is typed and remove filler words.",
             unselected: "Optional. Clean up text before it is typed. Remove filler words. \
                          Improve punctuation and formatting.",
             select: "Select post-processor backend",
@@ -74,8 +69,6 @@ fn copy(stage: BlockStage) -> Copy {
                           to install one.",
         },
         BlockStage::Synthesis => Copy {
-            none_installed: "Install a text-to-speech backend from the Library to have text \
-                             read aloud.",
             unselected: "Select a backend to start speaking.",
             select: "Select synthesis backend",
             not_loaded: "The selected model isn't loaded. Text can't be spoken until it is.",
@@ -125,19 +118,14 @@ fn selected_backend(app: &AppModel, stage: BlockStage) -> Option<&BackendInfo> {
 pub(crate) fn section(app: &AppModel, stage: BlockStage, width: f32) -> Element<'_, Message> {
     let copy = copy(stage);
     let block = app.block(stage);
-    // Nothing installed serves one: say so, rather than offering a picker that
-    // opens an empty sheet.
-    // Only once the daemon has answered: while the question is in flight the
-    // section falls through to its normal prompt rather than flashing "install
-    // one" and then replacing it.
-    if stage_backends(app, stage).is_some_and(<[BackendInfo]>::is_empty) {
-        return prompt_row(copy.none_installed, None);
-    }
+    let narrow = width < super::surface::NARROW_CARD;
 
-    // Installed but none chosen: there is no backend to put in a card, so the
-    // section is the prompt and the button that opens the picker sheet.
+    // None chosen: there is no backend to put in a card, so the section is the
+    // empty state and the button that opens the picker sheet, as for
+    // transcription. With nothing installed that serves the stage, the sheet
+    // says so and points at the Library.
     let Some(backend) = selected_backend(app, stage) else {
-        return unselected_state(stage, &copy);
+        return unselected_state(stage, &copy, narrow);
     };
 
     let spacing = cosmic::theme::spacing();
@@ -446,13 +434,15 @@ fn card_model(app: &AppModel, stage: BlockStage, backend: &BackendInfo) -> Optio
     }
 }
 
-/// Shown when post-processors are installed but none is chosen: a prompt and
+/// Shown while no backend is chosen: the empty state every stage has, with
 /// the button that opens the picker sheet.
 ///
-/// The "Post-processing" heading above the section already names it, so the
-/// line only has to say what a post-processor is for.
-fn unselected_state<'a>(stage: BlockStage, copy: &Copy) -> Element<'a, Message> {
-    prompt_row(
+/// The heading above the section already names the stage, so the line only
+/// has to say what it is for.
+fn unselected_state<'a>(stage: BlockStage, copy: &Copy, narrow: bool) -> Element<'a, Message> {
+    empty_state(
+        narrow,
+        "No backend selected",
         copy.unselected,
         Some(
             button::suggested(copy.select)
@@ -463,24 +453,6 @@ fn unselected_state<'a>(stage: BlockStage, copy: &Copy) -> Element<'a, Message> 
                 .into(),
         ),
     )
-}
-
-/// A card-less line for the two states that name no backend: a muted prompt
-/// taking the width, with an optional action opposite it.
-fn prompt_row<'a>(caption: &'a str, action: Option<Element<'a, Message>>) -> Element<'a, Message> {
-    let spacing = cosmic::theme::spacing();
-    let mut line = widget::row::with_capacity(2)
-        .spacing(spacing.space_s)
-        .align_y(Alignment::Center)
-        .push(
-            text::body(caption)
-                .class(cosmic::theme::Text::Color(muted_text_color()))
-                .width(Length::Fill),
-        );
-    if let Some(action) = action {
-        line = line.push(action);
-    }
-    line.into()
 }
 
 /// A warning glyph plus text, for the not-loaded notice. Mirrors

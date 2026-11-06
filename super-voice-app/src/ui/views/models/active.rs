@@ -20,41 +20,29 @@ use super::language::language_button;
 use super::status::unmet_requirements;
 use super::surface::{card_divider, card_surface};
 
-/// A soft accent-tinted rounded square holding the "models" brain glyph.
-/// `tile` is the square's side, `glyph` the icon size; `radius_medium` picks the
-/// larger corner radius for the big empty-state ring vs. the small card tile.
-pub(super) fn glyph_tile<'a>(tile: f32, glyph: f32, radius_medium: bool) -> Element<'a, Message> {
+/// The leading glyph tile shared by every backend card, and by the empty state
+/// that stands in for one: a soft accent-tinted rounded square holding the
+/// "models" brain glyph. It gives each card a consistent anchor on the left
+/// that lines up with the two-line name/source block beside it.
+pub(super) fn backend_glyph_tile<'a>() -> Element<'a, Message> {
     let accent: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
     let mut fill = accent;
     fill.a = 0.16;
 
-    widget::container(icons::phosphor_tinted(icons::BRAIN, glyph, accent))
-        .center_x(Length::Fixed(tile))
-        .center_y(Length::Fixed(tile))
+    widget::container(icons::phosphor_tinted(icons::BRAIN, 22.0, accent))
+        .center_x(Length::Fixed(40.0))
+        .center_y(Length::Fixed(40.0))
         .class(cosmic::theme::Container::custom(move |theme| {
-            let radii = theme.cosmic().corner_radii;
             cosmic::iced::widget::container::Style {
                 background: Some(cosmic::iced::Background::Color(fill)),
                 border: cosmic::iced::Border {
-                    radius: if radius_medium {
-                        radii.radius_m
-                    } else {
-                        radii.radius_s
-                    }
-                    .into(),
+                    radius: theme.cosmic().corner_radii.radius_s.into(),
                     ..Default::default()
                 },
                 ..Default::default()
             }
         }))
         .into()
-}
-
-/// The leading glyph tile shared by every backend card: gives each card a
-/// consistent anchor on the left that lines up with the two-line name/source
-/// block beside it.
-pub(super) fn backend_glyph_tile<'a>() -> Element<'a, Message> {
-    glyph_tile(40.0, 22.0, false)
 }
 
 /// Assemble a backend card's header: the leading glyph tile, a two-line name +

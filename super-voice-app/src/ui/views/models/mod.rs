@@ -241,7 +241,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
                 .and_then(|source| app.backends.iter().find(|b| b.source == source))
             {
                 Some(backend) => active_backend_card(backend, app, width),
-                None => select_sheet::no_backend_empty_state(),
+                None => select_sheet::no_backend_empty_state(width < surface::NARROW_CARD),
             },
             Some(block) => stage_section::section(app, block, width),
         }
