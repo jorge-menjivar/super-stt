@@ -193,15 +193,19 @@ fn the_schema_takes_every_role_and_none() {
     assert!(v.is_valid(&v1), "v1 without a role validates");
 }
 
-/// `[backend].product` takes `super-voice` and nothing else, and v4 requires
-/// it. The schema half of `Manifest::parse`'s `OtherProduct` and
+/// `[backend].product` takes `super-voice`, or `super-stt`, which it
+/// continues, and nothing else, and v4 requires it. The schema half of `Manifest::parse`'s `OtherProduct` and
 /// `FieldRequiredByContract`.
 #[test]
-fn the_schema_takes_only_super_voice_and_requires_it() {
+fn the_schema_takes_super_voice_or_super_stt_and_requires_it() {
     let v = backend_validator();
     assert!(v.is_valid(&wasm_base()), "a Super Voice manifest validates");
 
-    for other in ["super-stt", "super-tts"] {
+    let mut continued = wasm_base();
+    continued["backend"]["product"] = json!("super-stt");
+    assert!(v.is_valid(&continued), "a Super STT manifest validates");
+
+    for other in ["super-tts", "super-voices"] {
         let mut manifest = wasm_base();
         manifest["backend"]["product"] = json!(other);
         assert!(!v.is_valid(&manifest), "a {other} manifest is refused");

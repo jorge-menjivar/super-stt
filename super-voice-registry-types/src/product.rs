@@ -528,6 +528,11 @@ impl Product for Voice {
 
     const SLUG: &'static str = "super-voice";
 
+    /// Super Voice continues Super STT, so a manifest written for Super STT is
+    /// one of its own: every backend published before the rename names it.
+    /// Super TTS's are not, since its contract line was its own.
+    const FORMER_SLUGS: &'static [&'static str] = &["super-stt"];
+
     const CONTRACT_FIELDS: &'static [ContractField<Contract>] = &[
         ContractField {
             since: Contract::V2,

@@ -268,6 +268,22 @@ fn a_manifest_names_super_voice() {
     assert_eq!(SUPER_VOICE.slug, Voice::SLUG);
 }
 
+/// A manifest written for Super STT is Super Voice's own, at every generation
+/// including v4, where the product is required. These are the backends
+/// published before the rename.
+#[test]
+fn a_super_stt_manifest_is_read_as_super_voices() {
+    for contract in ["v2", "v3", "v4"] {
+        let text = at(
+            contract,
+            "id = \"com.example.y\"\nproduct = \"super-stt\"",
+            "",
+        );
+        let m = Manifest::parse(&text).unwrap_or_else(|e| panic!("{contract}: {e}"));
+        assert_eq!(m.backend.product.as_deref(), Some("super-stt"));
+    }
+}
+
 /// The versions each generation is reported as needing are the releases
 /// that shipped them. A daemon that predates a generation shows this to the
 /// user as what to update to.
@@ -445,11 +461,11 @@ fn synthesis_requires_v4() {
     }
 }
 
-/// A manifest naming any product but Super Voice is refused, the two it
-/// replaces included.
+/// A manifest naming any product but Super Voice, or Super STT, which it
+/// continues, is refused. Super TTS's included: its `v1` is not this line's.
 #[test]
 fn a_manifest_for_another_product_is_refused() {
-    for product in ["super-stt", "super-tts", "super-voices"] {
+    for product in ["super-tts", "super-voices"] {
         let other = VALID.replace("\"super-voice\"", &format!("\"{product}\""));
         match Manifest::parse(&other) {
             Err(ManifestError::OtherProduct { declared, expected }) => {

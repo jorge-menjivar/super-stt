@@ -74,7 +74,7 @@ description = "Local Whisper speech-to-text."
 | `version`    | string | yes             | Backend version (semver).                                            |
 | `kind`       | string | yes             | `subprocess` or `wasm` — selects the transport.                       |
 | `entrypoint` | string | yes             | Path, relative to the backend directory, to the executable (`subprocess`) or the `.wasm` component (`wasm`). |
-| `product`    | string | **yes** from `contract = "v4"` | The product the backend is built for: `super-voice`. A manifest naming any other product is refused under every contract. Below `v4` it may be left out, and the backend is read as a Super Voice one; see [contract generations](#contract-generations). |
+| `product`    | string | **yes** from `contract = "v4"` | The product the backend is built for: `super-voice`, or `super-stt`, which Super Voice continues. A manifest naming any other product is refused under every contract. Below `v4` it may be left out, and the backend is read as a Super Voice one; see [contract generations](#contract-generations). |
 | `contract`   | string | yes             | The [contract generation](#contract-generations) the backend implements: `v1`, `v2`, `v3` or `v4`. Declare the lowest generation whose fields you use. Unknown values are rejected. |
 | `license`    | string | for publication | SPDX identifier of a current OSI-approved or FSF Free/Libre license (e.g. `Apache-2.0`, `MIT`, `GPL-3.0-only`), or the literal `other` for a license outside that set. Required for registry publication; optional for locally installed backends. |
 | `description`| string | yes             | One-line, human-readable summary shown in the registry/Browse listing. |
@@ -202,8 +202,11 @@ a file the user did not write and cannot be expected to edit. The `product`
 rule below is not exempt: a backend built for another product cannot run here
 however it got onto disk.
 
-`product` keeps other products' backends out. Super Voice refuses a manifest
-that names any product but `super-voice`, under every contract:
+`product` keeps other products' backends out. Super Voice reads a manifest
+naming `super-voice` or `super-stt` as its own, since it continues Super STT
+and every backend published before the rename names it. It refuses any other
+product under every contract, Super TTS's included, whose `v1` was a contract
+line of its own:
 
 ```
 this backend is built for super-tts, not super-voice
