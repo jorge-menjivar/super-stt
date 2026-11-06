@@ -44,6 +44,11 @@ backend directory and the following environment:
 | `CUDA_CACHE_PATH`          | Set to `<cache dir>/nv`. The NVIDIA driver keeps its PTX-to-SASS translations under `$HOME/.nv/ComputeCache` and ignores XDG, so it is the one consumer the line above misses — and `ProtectHome=read-only` would let it read a cache it can never write, redoing the translation on every load. |
 | `CUDA_CACHE_MAXSIZE`       | Bounds that cache. The driver's own default is around a gigabyte, and the cache is per backend, so the default would be inherited once per installed backend. |
 
+The daemon also sets the three under `SUPER_STT_` and `SUPER_TTS_`, with the
+same values, because backends published for Super STT and Super TTS read
+those names (`SUPER_STT_BACKEND_SOCKET` and so on). A new backend reads the
+`SUPER_VOICE_` ones.
+
 On startup the backend binds `SUPER_VOICE_BACKEND_SOCKET`, begins serving
 `/v1`, and reports `state: "starting"` from `GET /v1/status` until a
 [`POST /v1/prepare`](./contract.md#post-v1prepare) or `POST /v1/load`

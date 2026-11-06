@@ -31,6 +31,9 @@ pub static SUPER_VOICE: ProductSpec = ProductSpec {
     slug: "super-voice",
     short_name: "voice",
     env_prefix: "SUPER_VOICE",
+    // Backends published for the two products Super Voice continues read
+    // their contract variables under those products' names.
+    former_env_prefixes: &["SUPER_STT", "SUPER_TTS"],
     tcp_port: 7300,
     // Releases are published from this repo until it is renamed.
     repo: "github.com/jorge-menjivar/super-stt",
