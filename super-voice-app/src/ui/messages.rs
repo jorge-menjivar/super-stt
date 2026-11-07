@@ -212,6 +212,8 @@ pub enum ModelsPageMessage {
         source: String,
         phase: super_voice_shared::registry::events::InstallPhase,
         error: super_voice_shared::registry::events::InstallError,
+        /// The daemon's reason in words, when it has one.
+        reason: Option<String>,
     },
     /// User clicked Update on an Installed-tab card.
     UpdateBackend(String),

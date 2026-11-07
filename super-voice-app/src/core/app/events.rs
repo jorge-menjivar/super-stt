@@ -120,11 +120,13 @@ pub(super) fn settings_widget_event_to_message(
                         source,
                         phase,
                         error,
+                        reason,
                     } => Some(Message::ModelsPage(ModelsPageMessage::InstallFailed {
                         install_id,
                         source,
                         phase,
                         error,
+                        reason,
                     })),
                     RegistryEvent::RefreshCompleted { .. }
                     | RegistryEvent::RefreshFailed { .. } => None,

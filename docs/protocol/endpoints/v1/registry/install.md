@@ -186,10 +186,15 @@ Streamed on `GET /events`:
   "type": "registry.install.failed",
   "install_id": "ins_01HE5…",
   "source": "github.com/…",
-  "phase": "verifying",
-  "error": "asset_hash_mismatch"
+  "phase": "installing",
+  "error": "manifest_invalid",
+  "reason": "this backend is built for super-tts, not super-voice"
 }
 ```
+
+`reason` says in words what went wrong, when the daemon knows more than
+`error` does: for `manifest_invalid`, the rule the manifest broke. It is
+absent otherwise. Show `reason` when it is there, and branch on `error`.
 
 Typed `error` values:
 

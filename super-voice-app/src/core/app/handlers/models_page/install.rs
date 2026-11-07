@@ -45,6 +45,7 @@ impl AppModel {
                         bytes_done: 0,
                         bytes_total: None,
                         error: None,
+                        reason: None,
                     },
                 );
                 Task::none()
@@ -199,14 +200,16 @@ impl AppModel {
                 source,
                 phase,
                 error,
+                reason,
             } => {
                 if let Some(s) = self.registry.installs.get_mut(&source)
                     && s.install_id == install_id
                 {
-                    let reason = error.to_string();
                     s.error = Some(error);
+                    s.reason = reason;
                     s.phase = phase;
-                    self.fail_build(&source, &reason);
+                    let shown = s.failure().unwrap_or_default();
+                    self.fail_build(&source, &shown);
                 }
                 Task::none()
             }

@@ -102,11 +102,11 @@ pub(super) fn update_progress_chip(
     };
     let fg = muted_text_color();
     let chip = inert_chip(icons::ARROWS_CLOCKWISE, label, fg);
-    match &s.error {
+    match s.failure() {
         // The reason is too long for the chip and too important to drop.
-        Some(err) => super::surface::rounded_tooltip(
+        Some(failure) => super::surface::rounded_tooltip(
             chip,
-            text::body(format!("{err}")),
+            text::body(failure),
             widget::tooltip::Position::Top,
         ),
         None => chip,

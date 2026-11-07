@@ -220,6 +220,18 @@ pub struct InstallStatus {
     pub bytes_done: u64,
     pub bytes_total: Option<u64>,
     pub error: Option<InstallError>,
+    /// The daemon's reason for the failure, in words, when it gave one.
+    pub reason: Option<String>,
+}
+
+impl InstallStatus {
+    /// What to tell the user about a failed install: the daemon's reason when
+    /// it gave one, else what the error says. `None` while it has not failed.
+    #[must_use]
+    pub fn failure(&self) -> Option<String> {
+        let error = self.error.as_ref()?;
+        Some(self.reason.clone().unwrap_or_else(|| error.to_string()))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -336,5 +348,35 @@ mod role_filter_tests {
         assert!(!stt(RoleFilter::All, &[]));
         assert!(!stt(RoleFilter::Transcription, &[]));
         assert!(!admits(FeatureFilter::TextToSpeech, RoleFilter::All, []));
+    }
+}
+
+#[cfg(test)]
+mod install_status_tests {
+    use super::InstallStatus;
+    /// A failed install reads as the daemon's reason when it gave one, and as
+    /// what the error says when it did not.
+    #[test]
+    fn a_failed_install_reads_as_its_reason() {
+        use super_voice_shared::registry::events::{InstallError, InstallPhase};
+        let mut s = InstallStatus {
+            install_id: "ins_1".into(),
+            phase: InstallPhase::Installing,
+            bytes_done: 0,
+            bytes_total: None,
+            error: None,
+            reason: None,
+        };
+        assert_eq!(s.failure(), None, "not failed");
+        s.error = Some(InstallError::ManifestInvalid);
+        assert_eq!(
+            s.failure().as_deref(),
+            Some("the backend manifest was missing or invalid")
+        );
+        s.reason = Some("this backend is built for super-tts, not super-voice".into());
+        assert_eq!(
+            s.failure().as_deref(),
+            Some("this backend is built for super-tts, not super-voice")
+        );
     }
 }

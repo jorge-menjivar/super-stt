@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use super_engine_daemon::registry::install as engine;
 pub use super_engine_daemon::registry::install::{Pipeline, PipelineError};
 use super_voice_registry_types::Voice;
-use super_voice_shared::registry::events::{InstallError, InstallPhase};
+use super_voice_shared::registry::events::{InstallFailure, InstallPhase};
 
 use crate::registry::compat::Selection;
 use crate::registry::index_schema::IndexBackend;
@@ -16,12 +16,12 @@ use crate::registry::index_schema::IndexBackend;
 /// Run an install. See `super_engine_daemon::registry::install::run`.
 ///
 /// # Errors
-/// Returns `(InstallPhase, InstallError)` on failure.
+/// Returns an [`InstallFailure`] on failure.
 pub async fn run<F>(
     p: &Pipeline<F>,
     entry: &IndexBackend,
     selection: &Selection,
-) -> Result<String, (InstallPhase, InstallError)>
+) -> Result<String, InstallFailure>
 where
     F: Fn(InstallPhase, Option<(u64, Option<u64>)>) + Send + Sync,
 {
@@ -32,12 +32,12 @@ where
 /// `super_engine_daemon::registry::install::run_local`.
 ///
 /// # Errors
-/// Returns `(InstallPhase, InstallError)` on failure.
+/// Returns an [`InstallFailure`] on failure.
 pub async fn run_local<F>(
     p: &Pipeline<F>,
     entry: &IndexBackend,
     src_dir: &Path,
-) -> Result<String, (InstallPhase, InstallError)>
+) -> Result<String, InstallFailure>
 where
     F: Fn(InstallPhase, Option<(u64, Option<u64>)>) + Send + Sync,
 {
