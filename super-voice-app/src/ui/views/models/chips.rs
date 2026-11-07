@@ -150,6 +150,56 @@ pub(super) struct StageCompute {
     pub cpu: bool,
 }
 
+/// The facts row a stage shows for one of its backends: what its models run
+/// on, then how many of them the stage can run. The same on the stage's card
+/// and on that backend's row in the stage's picker, so a backend reads the
+/// same before and after it is chosen.
+///
+/// The count is of the stage's narrowed models, not everything the backend
+/// ships: a backend serving two transcription models and a post-processor
+/// offers two to transcription. The Library card holds the full inventory.
+pub(super) fn stage_chips(
+    app: &crate::core::app::AppModel,
+    stage: crate::state::Stage,
+    backend: &crate::daemon::backends::BackendInfo,
+) -> Option<Element<'static, Message>> {
+    let spacing = cosmic::theme::spacing();
+    let egress = backend_is_online(backend).then(|| CloudEgress {
+        hosts: backend.allowed_hosts.as_slice(),
+        user_url: backend_has_user_url(backend),
+    });
+    let compute = stage_device_support(app.device_offers.backend(stage, &backend.source), backend);
+    let caps = capability_chips(compute.gpu, compute.cpu, egress, true);
+    let count = app.stage_catalog.models(stage, &backend.source).len();
+    if caps.is_none() && count == 0 {
+        return None;
+    }
+    let mut chips = row![].spacing(spacing.space_xxs).align_y(Alignment::Center);
+    if let Some(caps) = caps {
+        chips = chips.push(caps);
+    }
+    if count > 0 {
+        chips = chips.push(count_chip(model_count_label(stage, count)));
+    }
+    // Wraps rather than squeezes: in a picker row beside its Select button a
+    // chip that runs out of width would break its label mid-chip.
+    Some(chips.wrap().vertical_spacing(spacing.space_xxs).into())
+}
+
+/// "1 model", "9 models", "1 post-processor": what a stage calls its models.
+fn model_count_label(stage: crate::state::Stage, count: usize) -> String {
+    use crate::state::Stage;
+    let (one, many) = match stage {
+        Stage::PostProcessing => ("post-processor", "post-processors"),
+        Stage::Transcription | Stage::Synthesis => ("model", "models"),
+    };
+    if count == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{count} {many}")
+    }
+}
+
 /// What a stage's backend can run its models on.
 ///
 /// `offered` is the daemon's own answer for the stage's selected backend —

@@ -11,10 +11,7 @@ use crate::state::Stage;
 use crate::ui::icons;
 use crate::ui::messages::{DownloadMessage, Message, ModelsPageMessage, StageMessage};
 
-use super::chips::{
-    CloudEgress, backend_has_user_url, backend_is_online, capability_chips, count_chip,
-    model_is_online, requirement_warning, stage_device_support,
-};
+use super::chips::{model_is_online, requirement_warning, stage_chips};
 use super::fmt::{no_viable_device_warning, vram_warning};
 use super::language::language_button;
 use super::status::unmet_requirements;
@@ -83,7 +80,6 @@ pub(super) fn active_backend_card<'a>(
     width: f32,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
-    let online = backend_is_online(backend);
     let source = backend.source.clone();
     let model_loaded = !app.current_source.is_empty() && app.current_source == backend.source;
     let missing = unmet_requirements(&app.backend_secret_configured, backend);
@@ -120,36 +116,11 @@ pub(super) fn active_backend_card<'a>(
         .spacing(spacing.space_s)
         .push(header);
 
-    // Capability chips advertise the backend's compute: GPU / CPU for local
-    // models, Cloud for online ones (with the hosts it reaches on hover); a
-    // trailing "N models" count chip rounds out the row.
-    let egress = online.then(|| CloudEgress {
-        hosts: backend.allowed_hosts.as_slice(),
-        user_url: backend_has_user_url(backend),
-    });
+    // What the backend runs on and how many models it offers this stage, as
+    // its row in the picker showed it, then the update chip.
     let mut chip_row = row![].spacing(spacing.space_xxs).align_y(Alignment::Center);
-    let compute = stage_device_support(
-        app.device_offers
-            .backend(Stage::Transcription, &backend.source),
-        backend,
-    );
-    if let Some(chips) = capability_chips(compute.gpu, compute.cpu, egress, true) {
+    if let Some(chips) = stage_chips(app, Stage::Transcription, backend) {
         chip_row = chip_row.push(chips);
-    }
-    // Count what this stage can run, not everything the backend ships — a
-    // backend serving two transcription models and a post-processor offers two
-    // here, and the Library card is where the full inventory belongs.
-    let model_count = app
-        .stage_catalog
-        .models(Stage::Transcription, &backend.source)
-        .len();
-    if model_count > 0 {
-        let label = if model_count == 1 {
-            "1 model".to_string()
-        } else {
-            format!("{model_count} models")
-        };
-        chip_row = chip_row.push(count_chip(label));
     }
     // The update chip is the action as well as the sign, which is what lets it
     // work here: this card has no overflow menu, so without it a waiting

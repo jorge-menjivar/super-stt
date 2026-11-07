@@ -31,10 +31,7 @@ use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage, StageMessage};
 
 use super::active::backend_glyph_tile;
-use super::chips::{
-    CloudEgress, backend_has_user_url, backend_is_online, capability_chips, count_chip,
-    model_is_online, stage_device_support,
-};
+use super::chips::model_is_online;
 use super::surface::{
     backend_description, card_divider, card_surface, empty_state, muted_text_color, repo_button,
 };
@@ -47,8 +44,6 @@ struct Copy {
     select: &'static str,
     /// The notice for a stage switched on whose model is not running.
     not_loaded: &'static str,
-    /// The count chip's noun, singular and plural.
-    count: (&'static str, &'static str),
     /// The line above the sheet's rows.
     sheet_caption: &'static str,
     /// The sheet when nothing installed serves the stage.
@@ -62,7 +57,6 @@ fn copy(stage: BlockStage) -> Copy {
                          Improve punctuation and formatting.",
             select: "Select post-processor backend",
             not_loaded: "The selected model isn't loaded — transcripts are used as they are.",
-            count: ("post-processor", "post-processors"),
             sheet_caption: "Pick which backend cleans up your transcripts. Add and manage \
                             backends in your Library.",
             sheet_empty: "No installed backend provides a post-processor. Open the Library \
@@ -72,7 +66,6 @@ fn copy(stage: BlockStage) -> Copy {
             unselected: "Select a backend to start speaking.",
             select: "Select synthesis backend",
             not_loaded: "The selected model isn't loaded. Text can't be spoken until it is.",
-            count: ("model", "models"),
             sheet_caption: "Pick which backend powers speech. Add and manage backends in your \
                             Library.",
             sheet_empty: "No installed backend provides text to speech. Open the Library to \
@@ -138,7 +131,7 @@ pub(crate) fn section(app: &AppModel, stage: BlockStage, width: f32) -> Element<
             width < super::surface::NARROW_CARD,
         ));
 
-    if let Some(chips) = chip_row(stage, &copy, backend, app) {
+    if let Some(chips) = super::chips::stage_chips(app, stage.stage(), backend) {
         card = card.push(chips);
     }
 
@@ -213,45 +206,6 @@ fn header<'a>(
         backend_description(app, &source),
         actions.into(),
     )
-}
-
-/// Capability chips for the selected backend, plus a count of the
-/// post-processors it serves. Same row the transcription card carries, so the
-/// two read alike.
-fn chip_row<'a>(
-    stage: BlockStage,
-    copy: &Copy,
-    backend: &'a BackendInfo,
-    app: &AppModel,
-) -> Option<Element<'a, Message>> {
-    let spacing = cosmic::theme::spacing();
-    let egress = backend_is_online(backend).then(|| CloudEgress {
-        hosts: backend.allowed_hosts.as_slice(),
-        user_url: backend_has_user_url(backend),
-    });
-    let compute = stage_device_support(
-        app.device_offers.backend(stage.stage(), &backend.source),
-        backend,
-    );
-    let caps = capability_chips(compute.gpu, compute.cpu, egress, true);
-    let count = stage_models(app, stage, backend).len();
-    if caps.is_none() && count == 0 {
-        return None;
-    }
-    let mut chips = row![].spacing(spacing.space_xxs).align_y(Alignment::Center);
-    if let Some(caps) = caps {
-        chips = chips.push(caps);
-    }
-    if count > 0 {
-        let (one, many) = copy.count;
-        let label = if count == 1 {
-            format!("1 {one}")
-        } else {
-            format!("{count} {many}")
-        };
-        chips = chips.push(count_chip(label));
-    }
-    Some(chips.into())
 }
 
 /// The model the card's pickers act on: the staged pick when it belongs to this
@@ -470,8 +424,9 @@ fn notice(message: &str) -> Element<'_, Message> {
 /// `stage`'s picker sheet: one row per installed backend that can fill it.
 /// The selected one is flagged; every other row carries a Select button.
 ///
-/// The twin of [`select_backend_sheet`](super::select_backend_sheet), and
-/// deliberately the same shape.
+/// The twin of [`select_backend_sheet`](super::select_backend_sheet), and the
+/// same shape: both draw each backend with
+/// [`picker_row`](super::select_sheet::picker_row).
 pub fn sheet(app: &AppModel, stage: BlockStage) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let muted = muted_text_color();
@@ -496,72 +451,14 @@ pub fn sheet(app: &AppModel, stage: BlockStage) -> Element<'_, Message> {
     }
 
     for backend in eligible {
-        col = col.push(sheet_row(
-            stage,
+        col = col.push(super::select_sheet::picker_row(
+            app,
+            stage.stage(),
             backend,
             selected == Some(backend.source.as_str()),
         ));
     }
     col.into()
-}
-
-/// One backend row inside the picker sheet: glyph + name + the models it
-/// serves in the stage, then either a "Selected" flag or a Select button.
-fn sheet_row(
-    stage: BlockStage,
-    backend: &BackendInfo,
-    is_selected: bool,
-) -> Element<'static, Message> {
-    let spacing = cosmic::theme::spacing();
-    let muted = muted_text_color();
-
-    // Already narrowed: the stage's backend list carries only the models that
-    // stage can run, so the row shows them without filtering anything.
-    let models: Vec<String> = backend.models.iter().map(|m| m.name.clone()).collect();
-    let mut meta = widget::column::with_capacity(2)
-        .spacing(spacing.space_xxxs)
-        .width(Length::Fill)
-        .push(text::body(backend.name.clone()));
-    if !models.is_empty() {
-        meta = meta.push(
-            text::caption(models.join(" \u{00b7} ")).class(cosmic::theme::Text::Color(muted)),
-        );
-    }
-
-    let trailing: Element<'static, Message> = if is_selected {
-        text::caption("Selected")
-            .class(cosmic::theme::Text::Accent)
-            .into()
-    } else {
-        button::suggested("Select")
-            .on_press(Message::Stage(StageMessage::SelectBackend {
-                stage: stage.stage(),
-                source: backend.source.clone(),
-            }))
-            .into()
-    };
-
-    let inner = row![backend_glyph_tile(), meta, trailing]
-        .spacing(spacing.space_s)
-        .align_y(Alignment::Center);
-
-    widget::container(inner)
-        .padding(spacing.space_xs)
-        .width(Length::Fill)
-        .class(cosmic::theme::Container::custom(move |theme| {
-            let cosmic = theme.cosmic();
-            let component = &theme.current_container().component;
-            cosmic::iced::widget::container::Style {
-                background: Some(cosmic::iced::Background::Color(component.base.into())),
-                border: cosmic::iced::Border {
-                    radius: cosmic.corner_radii.radius_s.into(),
-                    width: 1.0,
-                    color: super::surface::accent_border_color(theme, is_selected),
-                },
-                ..Default::default()
-            }
-        }))
-        .into()
 }
 
 #[cfg(test)]

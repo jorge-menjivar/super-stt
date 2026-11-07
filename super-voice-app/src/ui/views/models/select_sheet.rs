@@ -12,10 +12,6 @@ use crate::ui::icons;
 use crate::ui::messages::{Message, ShellMessage, StageMessage};
 
 use super::active::backend_glyph_tile;
-use super::chips::{
-    CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chips,
-};
 use super::surface::muted_text_color;
 
 /// The Transcription section's empty state, shown when no backend is selected:
@@ -75,7 +71,9 @@ pub fn select_backend_sheet(app: &AppModel) -> Element<'_, Message> {
     }
 
     for backend in eligible {
-        col = col.push(select_backend_row(
+        col = col.push(picker_row(
+            app,
+            Stage::Transcription,
             backend,
             active == Some(backend.source.as_str()),
         ));
@@ -83,38 +81,37 @@ pub fn select_backend_sheet(app: &AppModel) -> Element<'_, Message> {
     col.into()
 }
 
-/// One backend row inside the sheet: glyph + name + capability chips, then
-/// either an "Active" flag or a Select button.
-fn select_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, Message> {
+/// One backend's row in a stage's picker sheet, the same for every stage: the
+/// glyph, the name, and the facts row its card will show (what it runs on,
+/// how many models it offers this stage), then a "Selected" flag or the
+/// Select button.
+///
+/// `backend` is the stage's narrowed entry (`/{feature}/pipeline/{n}/backend/list`),
+/// so its models are the ones this stage can use.
+pub(super) fn picker_row(
+    app: &AppModel,
+    stage: Stage,
+    backend: &BackendInfo,
+    is_selected: bool,
+) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
-    let online = backend_is_online(backend);
-    let egress = online.then(|| CloudEgress {
-        hosts: backend.allowed_hosts.as_slice(),
-        user_url: backend_has_user_url(backend),
-    });
-
     let mut meta = widget::column::with_capacity(2)
         .spacing(spacing.space_xxxs)
         .width(Length::Fill)
         .push(text::body(backend.name.clone()));
-    if let Some(chips) = capability_chips(
-        backend_supports_gpu(backend),
-        backend_supports_cpu(backend),
-        egress,
-        true,
-    ) {
+    if let Some(chips) = super::chips::stage_chips(app, stage, backend) {
         meta = meta.push(chips);
     }
 
-    let trailing: Element<'static, Message> = if is_active {
-        text::caption("Active")
+    let trailing: Element<'static, Message> = if is_selected {
+        text::caption("Selected")
             .class(cosmic::theme::Text::Accent)
             .into()
     } else {
         button::suggested("Select")
             .leading_icon(icons::phosphor_handle(icons::PLAY))
             .on_press(Message::Stage(StageMessage::SelectBackend {
-                stage: Stage::Transcription,
+                stage,
                 source: backend.source.clone(),
             }))
             .into()
@@ -135,7 +132,7 @@ fn select_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static
                 border: cosmic::iced::Border {
                     radius: cosmic.corner_radii.radius_s.into(),
                     width: 1.0,
-                    color: super::surface::accent_border_color(theme, is_active),
+                    color: super::surface::accent_border_color(theme, is_selected),
                 },
                 ..Default::default()
             }
