@@ -18,11 +18,14 @@ use super::chips::{
 };
 use super::surface::{card_divider, card_surface, card_title_block, repo_button};
 
-/// The Library's Installed tab: a filter toolbar over every backend the daemon
-/// discovered on disk, one card each. The active backend is included too —
-/// activation lives on the Models page, so the Library is a flat catalog of
-/// what's installed.
-pub(super) fn installed_tab(app: &AppModel) -> Element<'_, Message> {
+/// The Library's Installed tab, as its filter toolbar and its cards: every
+/// backend the daemon discovered on disk, one card each. The active backend is
+/// included too, since activation lives on the Models page and the Library is a
+/// flat catalog of what's installed.
+///
+/// Split like the Browse tab's (`download_split`), so the page pins the toolbar
+/// above the scroll area and only the cards scroll.
+pub(super) fn installed_split(app: &AppModel) -> (Element<'_, Message>, Element<'_, Message>) {
     let spacing = cosmic::theme::spacing();
     let filters = &app.models_page.installed_filters;
 
@@ -48,12 +51,7 @@ pub(super) fn installed_tab(app: &AppModel) -> Element<'_, Message> {
             .into()
     };
 
-    widget::column::with_capacity(2)
-        .spacing(spacing.space_s)
-        .width(Length::Fill)
-        .push(installed_toolbar(filters, cards_shown(app, filters)))
-        .push(body)
-        .into()
+    (installed_toolbar(filters, cards_shown(app, filters)), body)
 }
 
 /// Whether an installed backend survives the Installed tab's filters.

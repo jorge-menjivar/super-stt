@@ -18,7 +18,7 @@ mod voice;
 
 use active::active_backend_card;
 use download::download_split;
-use installed::installed_tab;
+use installed::installed_split;
 use status::{ModelStatus, stage_status};
 use surface::{bordered_scroll_view, muted_text_color, tab_bar_container, toolbar_container};
 use tabs::models_tab_switcher;
@@ -296,16 +296,13 @@ pub fn library_page(app: &AppModel) -> Element<'_, Message> {
     header = header.push(page_container(title_row));
     header = header.push(tab_bar_container(models_tab_switcher(app)));
 
-    // Browse pins its search + filter toolbar above the scroll area; Installed
-    // has no toolbar. Either way, only the card list scrolls.
-    let tab_body = match active_tab {
-        ModelsTab::Installed => installed_tab(app),
-        ModelsTab::Download => {
-            let (toolbar, cards) = download_split(app);
-            header = header.push(toolbar_container(toolbar));
-            cards
-        }
+    // Each tab pins its toolbar above the scroll area, so only the card list
+    // scrolls.
+    let (toolbar, tab_body) = match active_tab {
+        ModelsTab::Installed => installed_split(app),
+        ModelsTab::Download => download_split(app),
     };
+    header = header.push(toolbar_container(toolbar));
 
     widget::column::with_capacity(2)
         .push(header)
