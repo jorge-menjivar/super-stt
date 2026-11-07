@@ -4,7 +4,7 @@ use crate::core::app::{AppModel, DeviceState};
 use crate::state::device_offers::{PP_STAGE, STT_STAGE};
 use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message, UpdateMessage};
 use cosmic::prelude::*;
-use log::{debug, info, warn};
+use log::{info, warn};
 use super_stt_shared::models::protocol::{DaemonStatusEvent, NotificationEvent};
 
 /// How a `SettingsChanged { setting }` SSE event should refresh the Updates
@@ -46,7 +46,6 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         match message {
             DaemonMessage::DaemonEventsReceived(events) => {
-                debug!("Received {} daemon events", events.len());
                 // Process EVERY event and collect their tasks. Returning on the
                 // first event that yields a task dropped the rest of the batch
                 // (and left `last_event_timestamp` stuck before them) — latent
@@ -316,10 +315,6 @@ impl AppModel {
             )
             .ok()?;
 
-        debug!(
-            "Received download progress event: {}% for {}",
-            progress.percentage, progress.model_name
-        );
         self.apply_download_progress(&progress);
 
         // Handle download completion/failure. The `error` case is fully
