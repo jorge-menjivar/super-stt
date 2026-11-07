@@ -49,3 +49,54 @@ macro_rules! fl {
         i18n_embed_fl::fl!($crate::i18n::LANGUAGE_LOADER, $message_id, $($args), *)
     }};
 }
+
+/// Localized display names stay in the UI; the shared enums keep their wire values.
+pub fn recording_stop_mode_name(
+    mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
+) -> String {
+    use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+    match mode {
+        RecordingStopMode::SilenceOnly => crate::fl!("stop-silence"),
+        RecordingStopMode::SilenceAndManual => crate::fl!("stop-silence-manual"),
+        RecordingStopMode::ManualOnly => crate::fl!("stop-manual"),
+    }
+}
+
+pub fn notification_method_name(
+    method: super_stt_shared::models::notification_method::NotificationMethod,
+) -> String {
+    use super_stt_shared::models::notification_method::NotificationMethod;
+    match method {
+        NotificationMethod::Auto => crate::fl!("auto-recommended"),
+        NotificationMethod::Desktop => crate::fl!("desktop-notification"),
+        NotificationMethod::Typed => crate::fl!("type-into-window"),
+        NotificationMethod::Off => crate::fl!("off"),
+    }
+}
+
+pub fn write_method_name(method: super_stt_shared::models::write_method::WriteMethod) -> String {
+    use super_stt_shared::models::write_method::WriteMethod;
+    match method {
+        WriteMethod::Auto => crate::fl!("auto-recommended"),
+        WriteMethod::XdgDesktopPortal => crate::fl!("xdg-desktop-portal"),
+        WriteMethod::Ydotool => "ydotool".to_string(),
+        WriteMethod::BuiltIn => crate::fl!("built-in"),
+    }
+}
+
+pub fn audio_theme_name(theme: super_stt_shared::models::theme::AudioTheme) -> String {
+    use super_stt_shared::models::theme::AudioTheme;
+    match theme {
+        AudioTheme::Classic => crate::fl!("theme-classic"),
+        AudioTheme::Gentle => crate::fl!("theme-gentle"),
+        AudioTheme::Minimal => crate::fl!("theme-minimal"),
+        AudioTheme::SciFi => crate::fl!("theme-scifi"),
+        AudioTheme::Musical => crate::fl!("theme-musical"),
+        AudioTheme::Nature => crate::fl!("theme-nature"),
+        AudioTheme::Retro => crate::fl!("theme-retro"),
+        AudioTheme::Silent => crate::fl!("theme-silent"),
+    }
+}
+
+#[cfg(test)]
+mod tests;

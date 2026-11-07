@@ -24,15 +24,15 @@ pub fn page<'a>(
         .collect();
     let theme_names: Vec<String> = non_silent_themes
         .iter()
-        .map(|t| AudioTheme::pretty_name(t))
+        .map(|t| crate::i18n::audio_theme_name(**t))
         .collect();
     let selected_index = non_silent_themes
         .iter()
         .position(|t| *t == selected_audio_theme);
 
-    let mut section = settings::section().title("Audio").add(
-        settings::item::builder("Audio Feedback")
-            .description("Play sounds when recording starts and stops")
+    let mut section = settings::section().title(crate::fl!("audio")).add(
+        settings::item::builder(crate::fl!("audio-feedback"))
+            .description(crate::fl!("play-sounds-when-recording-starts-and-stops"))
             .control(
                 cosmic::widget::toggler(audio_enabled)
                     .on_toggle(|b| Message::Recording(RecordingMessage::AudioFeedbackToggled(b))),
@@ -43,7 +43,7 @@ pub fn page<'a>(
         let non_silent_clone: Vec<AudioTheme> =
             non_silent_themes.iter().copied().copied().collect();
         let theme_control: Element<'a, Message> = if non_silent_themes.is_empty() {
-            text::caption("Loading themes...").into()
+            text::caption(crate::fl!("loading-themes")).into()
         } else {
             widget::dropdown(theme_names, selected_index, move |index| {
                 if let Some(&theme) = non_silent_clone.get(index) {
@@ -78,24 +78,26 @@ pub fn page<'a>(
 
         section = section
             .add(
-                settings::item::builder("Theme")
-                    .description("Sound theme for recording feedback")
+                settings::item::builder(crate::fl!("theme"))
+                    .description(crate::fl!("sound-theme-for-recording-feedback"))
                     .control(theme_control),
             )
             .add(
-                settings::item::builder("Volume")
+                settings::item::builder(crate::fl!("volume"))
                     .flex_control(volume_control)
                     .align_items(Alignment::Center),
             );
     }
 
     let lang_label = app_primary_language.map_or_else(
-        || "Automatic".to_string(),
+        || crate::fl!("automatic"),
         crate::ui::languages::friendly_name,
     );
-    let language_section = settings::section().title("Language").add(
-        settings::item::builder("Primary Language")
-            .description("Default transcription language for models that support it")
+    let language_section = settings::section().title(crate::fl!("language")).add(
+        settings::item::builder(crate::fl!("primary-language"))
+            .description(crate::fl!(
+                "default-transcription-language-for-models-that-support"
+            ))
             .control(
                 widget::button::standard(lang_label).on_press(Message::Language(
                     LanguageMessage::OpenLanguagePicker { model: None },
@@ -112,5 +114,5 @@ pub fn page<'a>(
     blocks.push(section.into());
     blocks.push(language_section.into());
 
-    page_layout("Customization", settings::view_column(blocks))
+    page_layout(crate::fl!("customization"), settings::view_column(blocks))
 }

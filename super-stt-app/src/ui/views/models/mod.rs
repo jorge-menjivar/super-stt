@@ -93,27 +93,27 @@ pub(crate) fn pill_label_tinted<'a>(
 /// the longer description so the indicator isn't color-only.
 pub(crate) fn status_pill(app: &AppModel) -> Element<'_, Message> {
     use surface::rounded_tooltip;
-    let (color_fn, short, detail): (fn(&cosmic::Theme) -> cosmic::iced::Color, &str, &str) =
+    let (color_fn, short, detail): (fn(&cosmic::Theme) -> cosmic::iced::Color, String, String) =
         match model_status(app) {
             ModelStatus::None => (
                 |t| t.cosmic().palette.neutral_5.into(),
-                "No backend",
-                "No backend selected",
+                crate::fl!("no-backend"),
+                crate::fl!("no-backend-selected"),
             ),
             ModelStatus::Blocked => (
                 |t| t.cosmic().destructive.base.into(),
-                "Incomplete",
-                "Backend configuration incomplete",
+                crate::fl!("incomplete"),
+                crate::fl!("backend-configuration-incomplete"),
             ),
             ModelStatus::Idle => (
                 |t| t.cosmic().warning.base.into(),
-                "Idle",
-                "Backend ready — pick a model",
+                crate::fl!("idle"),
+                crate::fl!("backend-ready-pick-a-model"),
             ),
             ModelStatus::Ready => (
                 |t| t.cosmic().success.base.into(),
-                "Ready",
-                "Model loaded and ready",
+                crate::fl!("ready"),
+                crate::fl!("model-loaded-and-ready"),
             ),
         };
 
@@ -161,14 +161,18 @@ pub(crate) fn gpu_summary(app: &AppModel) -> Option<Element<'_, Message>> {
         .gpu_info
         .iter()
         .map(|g| match (g.used_bytes, g.free_bytes) {
-            (Some(used), Some(free)) => format!(
-                "{}\n{} used · {} free · {} total",
-                g.name,
-                fmt_gib(used),
-                fmt_gib(free),
-                fmt_gib(g.total_bytes),
+            (Some(used), Some(free)) => crate::fl!(
+                "gpu-memory-summary",
+                value0 = g.name.as_str(),
+                value1 = fmt_gib(used),
+                value2 = fmt_gib(free),
+                value3 = fmt_gib(g.total_bytes)
             ),
-            _ => format!("{}\n{} total", g.name, fmt_gib(g.total_bytes)),
+            _ => crate::fl!(
+                "gpu-memory-total",
+                value0 = g.name.as_str(),
+                value1 = fmt_gib(g.total_bytes)
+            ),
         })
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -204,7 +208,7 @@ pub(crate) fn gpu_summary(app: &AppModel) -> Option<Element<'_, Message>> {
 pub fn page(app: &AppModel) -> Element<'_, Message> {
     let title_row = widget::row::with_capacity(1)
         .align_y(Alignment::Center)
-        .push(text::title3("Models").width(Length::Fill));
+        .push(text::title3(crate::fl!("models")).width(Length::Fill));
 
     // The active backend's card when one is selected (and still installed);
     // otherwise the empty state that opens the "Select a backend" sheet.
@@ -224,11 +228,13 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
     // their natural height instead, so a short window scrolls rather than
     // truncates. Only the body scrolls; the page title stays put.
     let body = widget::column::with_capacity(4)
-        .push(page_container(section_heading("Transcription")))
+        .push(page_container(section_heading(crate::fl!("transcription"))))
         .push(transcription)
         // The post-processor is selected independently of the transcription
         // backend, so its section is shown whether or not one is selected.
-        .push(page_container(section_heading("Post-processing")))
+        .push(page_container(section_heading(crate::fl!(
+            "post-processing"
+        ))))
         .push(page_container(post_processing::section(app)));
 
     widget::column::with_capacity(2)
@@ -245,7 +251,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
 
 /// A Models-page section heading. One helper so the two sections cannot drift
 /// apart in weight or spacing.
-fn section_heading(label: &str) -> Element<'_, Message> {
+fn section_heading(label: String) -> Element<'static, Message> {
     widget::row::with_capacity(1)
         .align_y(Alignment::Center)
         .push(text::title4(label).width(Length::Fill))
@@ -266,7 +272,7 @@ pub fn library_page(app: &AppModel) -> Element<'_, Message> {
     let mut header = widget::column::with_capacity(3);
     let title_row = widget::row::with_capacity(1)
         .align_y(Alignment::Center)
-        .push(text::title3("Library").width(Length::Fill));
+        .push(text::title3(crate::fl!("library")).width(Length::Fill));
     header = header.push(page_container(title_row));
     header = header.push(tab_bar_container(models_tab_switcher(app)));
 

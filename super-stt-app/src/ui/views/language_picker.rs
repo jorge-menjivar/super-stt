@@ -18,7 +18,7 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
     let mut langs: Vec<(Option<String>, String)> = Vec::new();
     if let Some((stage, ref src, ref mdl)) = app.language.language_picker_target {
         // Per-model sheet.
-        pinned.push((None, "Follow global".to_string())); // clear → DELETE
+        pinned.push((None, crate::fl!("follow-global"))); // clear → DELETE
         // What the daemon will accept for this model, from
         // `/language/list` — `auto` included, which is why it is not pinned
         // here the way the global sheet pins it. Offering a general BCP-47 list
@@ -56,9 +56,12 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
         .collect();
 
     // Search field pinned at the top.
-    let search = text_input("Search languages…", &app.language.language_picker_query)
-        .on_input(|s| Message::Language(LanguageMessage::LanguagePickerQueryChanged(s)))
-        .width(Length::Fill);
+    let search = text_input(
+        crate::fl!("search-languages-progress"),
+        &app.language.language_picker_query,
+    )
+    .on_input(|s| Message::Language(LanguageMessage::LanguagePickerQueryChanged(s)))
+    .width(Length::Fill);
 
     let mut list = column::with_capacity(rows.len()).spacing(spacing.space_xxs);
     for (tag, label) in rows {

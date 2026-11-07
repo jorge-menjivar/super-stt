@@ -70,8 +70,7 @@ pub(super) fn download_split(app: &AppModel) -> (Element<'_, Message>, Element<'
     let toolbar = download_toolbar(app, result_count(cards.len()));
 
     let list = if cards.is_empty() {
-        text::body("No backends match your search. Try clearing filters or adding one manually.")
-            .into()
+        text::body(crate::fl!("no-backends-match-your-search-try-clearing")).into()
     } else {
         // Two backends per row with a 12px (space_xs) gap. Cards are width-Fill,
         // so each pair splits the row 50/50; a lone trailing card is padded with a
@@ -106,12 +105,15 @@ pub(super) fn download_toolbar<'a>(
     let spacing = cosmic::theme::spacing();
     let filters = &app.registry.filters;
 
-    let search = widget::search_input("Search backends or models\u{2026}", &filters.search)
-        .on_input(|x| Message::ModelsPage(ModelsPageMessage::RegistrySearchChanged(x)))
-        .on_clear(Message::ModelsPage(
-            ModelsPageMessage::RegistrySearchChanged(String::new()),
-        ))
-        .width(Length::Fill);
+    let search = widget::search_input(
+        crate::fl!("search-backends-or-models-progress"),
+        &filters.search,
+    )
+    .on_input(|x| Message::ModelsPage(ModelsPageMessage::RegistrySearchChanged(x)))
+    .on_clear(Message::ModelsPage(
+        ModelsPageMessage::RegistrySearchChanged(String::new()),
+    ))
+    .width(Length::Fill);
 
     // One overflow menu rather than two competing buttons. Browse is how a
     // backend is meant to be added, so refreshing the catalog and installing
@@ -140,7 +142,7 @@ pub(super) fn download_toolbar<'a>(
         Message::ModelsPage(ModelsPageMessage::RegistryRoleFilter(r))
     });
     let show_incompat = cosmic::widget::toggler(filters.include_incompatible)
-        .label("Show incompatible".to_string())
+        .label(crate::fl!("show-incompatible"))
         .spacing(spacing.space_xs)
         .on_toggle(|x| Message::ModelsPage(ModelsPageMessage::RegistryIncludeIncompatible(x)));
 
@@ -208,17 +210,20 @@ pub(super) fn registry_entry_matches(
 pub(super) fn download_empty_state(app: &AppModel) -> Element<'_, Message> {
     use crate::state::registry::RefreshOutcome;
     let msg = match &app.registry.last_refresh {
-        Some(RefreshOutcome::Failed(e)) => format!("Couldn't reach the registry: {e}"),
-        Some(RefreshOutcome::Ok) => "No installable backends match your filters.".to_string(),
-        None => "Loading registry\u{2026}".to_string(),
+        Some(RefreshOutcome::Failed(e)) => crate::fl!("registry-unreachable", e = e.as_str()),
+        Some(RefreshOutcome::Ok) => {
+            crate::fl!("no-installable-backends-match-your-filters")
+        }
+        None => crate::fl!("loading-registry-progress"),
     };
     let updated_label = app.registry.generated_at.as_deref().map_or_else(
-        || "Catalog not loaded".into(),
-        |t| format!("Catalog updated {t}"),
+        || crate::fl!("catalog-not-loaded"),
+        |t| crate::fl!("catalog-updated", t = (t).to_string()),
     );
     column![
         text::body(msg),
-        button::standard("Retry").on_press(Message::ModelsPage(ModelsPageMessage::RefreshRegistry)),
+        button::standard(crate::fl!("retry"))
+            .on_press(Message::ModelsPage(ModelsPageMessage::RefreshRegistry)),
         widget::text(updated_label).size(10),
     ]
     .spacing(cosmic::theme::spacing().space_s)
@@ -277,25 +282,25 @@ pub(super) fn download_card<'a>(
     // Footer: contextual note on the left, Install button on the right.
     let install_action: Element<'a, Message> = if let Some(s) = in_flight {
         let label = match &s.error {
-            Some(_) => "Failed".to_string(),
-            None => format!("Installing\u{2026} ({})", phase_label(s.phase)),
+            Some(_) => crate::fl!("failed"),
+            None => crate::fl!("install-backend-progress", value0 = phase_label(s.phase)),
         };
         button::standard(label).into()
     } else if entry.compatibility.compatible {
-        button::suggested("Install")
+        button::suggested(crate::fl!("install"))
             .on_press(Message::ModelsPage(ModelsPageMessage::InstallBackend(
                 entry.source.clone(),
             )))
             .into()
     } else if entry.compatibility.needs_client_update {
-        button::standard("Update Super STT").into()
+        button::standard(crate::fl!("update-super-stt")).into()
     } else {
-        button::standard("Not compatible").into()
+        button::standard(crate::fl!("not-compatible")).into()
     };
 
     let note: Element<'a, Message> = if let Some(s) = in_flight {
         match (&s.error, s.bytes_total) {
-            (Some(err), _) => text::caption(format!("Failed: {err}"))
+            (Some(err), _) => text::caption(crate::fl!("failed-detail", err = (err).to_string()))
                 .class(cosmic::theme::Text::Color(muted))
                 .into(),
             (None, Some(total)) if total > 0 => {
@@ -309,7 +314,7 @@ pub(super) fn download_card<'a>(
     } else if let Some(err) = start_error {
         row![
             icons::phosphor_destructive(icons::WARNING, 14.0),
-            text::caption(format!("Failed to start: {err}")),
+            text::caption(crate::fl!("failed-start", err = err.as_str())),
         ]
         .spacing(spacing.space_xxs)
         .align_y(Alignment::Center)
@@ -317,13 +322,16 @@ pub(super) fn download_card<'a>(
     } else if !entry.compatibility.compatible {
         let (lead, fallback) = if entry.compatibility.needs_client_update {
             (
-                "Needs a newer Super STT",
-                "this backend needs a newer Super STT",
+                crate::fl!("needs-a-newer-super-stt"),
+                crate::fl!("this-backend-needs-a-newer-super-stt"),
             )
         } else {
-            ("Not compatible", "incompatible hardware or OS")
+            (
+                crate::fl!("not-compatible"),
+                crate::fl!("incompatible-hardware-or-os"),
+            )
         };
-        let reason = entry.compatibility.reason.as_deref().unwrap_or(fallback);
+        let reason = entry.compatibility.reason.as_deref().unwrap_or(&fallback);
         row![
             icons::phosphor_destructive(icons::WARNING, 14.0),
             text::caption(format!("{lead}: {reason}")),
@@ -332,7 +340,7 @@ pub(super) fn download_card<'a>(
         .align_y(Alignment::Center)
         .into()
     } else if entry.secrets.iter().any(|s| s.required) {
-        text::caption("API key required")
+        text::caption(crate::fl!("api-key-required"))
             .class(cosmic::theme::Text::Color(muted))
             .into()
     } else {
@@ -360,7 +368,7 @@ fn browse_overflow_menu() -> Element<'static, Message> {
         .spacing(spacing.space_xxxs)
         .push(super::surface::menu_item(
             icons::ARROWS_CLOCKWISE,
-            "Refresh catalog",
+            crate::fl!("refresh-catalog"),
             Message::ModelsPage(ModelsPageMessage::RefreshRegistry),
         ))
         // Git-branch rather than a download glyph: the drawer's default source
@@ -368,7 +376,7 @@ fn browse_overflow_menu() -> Element<'static, Message> {
         // every backend card.
         .push(super::surface::menu_item(
             icons::GIT_BRANCH,
-            "Install manually\u{2026}",
+            crate::fl!("install-manually-progress"),
             Message::Shell(ShellMessage::ToggleContextPage(ContextPage::AddBackend)),
         ));
 
@@ -377,14 +385,14 @@ fn browse_overflow_menu() -> Element<'static, Message> {
 
 /// Human-readable label for an [`InstallPhase`], shown inside the "Installing…"
 /// button while a backend install is in progress.
-pub(super) fn phase_label(p: super_stt_shared::registry::events::InstallPhase) -> &'static str {
+pub(super) fn phase_label(p: super_stt_shared::registry::events::InstallPhase) -> String {
     use super_stt_shared::registry::events::InstallPhase;
     match p {
-        InstallPhase::Resolving => "resolving",
-        InstallPhase::Downloading => "downloading",
-        InstallPhase::Verifying => "verifying",
-        InstallPhase::Extracting => "extracting",
-        InstallPhase::Installing => "installing",
-        InstallPhase::Rescanning => "finishing",
+        InstallPhase::Resolving => crate::fl!("registry-phase-resolving"),
+        InstallPhase::Downloading => crate::fl!("registry-phase-downloading"),
+        InstallPhase::Verifying => crate::fl!("registry-phase-verifying"),
+        InstallPhase::Extracting => crate::fl!("registry-phase-extracting"),
+        InstallPhase::Installing => crate::fl!("registry-phase-installing"),
+        InstallPhase::Rescanning => crate::fl!("registry-phase-finishing"),
     }
 }
