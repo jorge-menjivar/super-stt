@@ -33,13 +33,13 @@ pub(super) fn no_backend_empty_state<'a>() -> Element<'a, Message> {
         .align_x(Alignment::Center)
         .spacing(spacing.space_xs)
         .push(ring)
-        .push(text::title4("No backend selected"))
+        .push(text::title4(crate::fl!("no-backend-selected")))
         .push(
-            text::body("Select a backend to start transcribing.")
+            text::body(crate::fl!("select-a-backend-to-start-transcribing"))
                 .class(cosmic::theme::Text::Color(muted_text_color())),
         )
         .push(
-            button::suggested("Select transcription backend")
+            button::suggested(crate::fl!("select-transcription-backend"))
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
                 .on_press(Message::Shell(ShellMessage::ToggleContextPage(
                     ContextPage::SelectBackend,
@@ -73,19 +73,18 @@ pub fn select_backend_sheet(app: &AppModel) -> Element<'_, Message> {
         .spacing(spacing.space_xs)
         .width(Length::Fill)
         .push(
-            text::caption(
-                "Pick which backend powers transcription. Add and manage backends in your Library.",
-            )
+            text::caption(crate::fl!(
+                "pick-which-backend-powers-transcription-add-and"
+            ))
             .class(cosmic::theme::Text::Color(muted)),
         );
 
     if eligible.is_empty() {
         return col
             .push(text::body(if answered.is_none() {
-                "Loading…"
+                crate::fl!("loading-progress")
             } else {
-                "No installed backend provides a transcription model. Open the Library to \
-                 install one."
+                crate::fl!("no-installed-backend-provides-a-transcription-model")
             }))
             .into();
     }
@@ -123,11 +122,11 @@ fn select_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static
     }
 
     let trailing: Element<'static, Message> = if is_active {
-        text::caption("Active")
+        text::caption(crate::fl!("active"))
             .class(cosmic::theme::Text::Accent)
             .into()
     } else {
-        button::suggested("Select")
+        button::suggested(crate::fl!("select"))
             .leading_icon(icons::phosphor_handle(icons::PLAY))
             .on_press(Message::Stage(StageMessage::SelectBackend {
                 stage: STT_STAGE,

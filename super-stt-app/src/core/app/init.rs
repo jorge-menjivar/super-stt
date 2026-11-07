@@ -17,43 +17,43 @@ fn build_nav() -> nav_bar::Model {
     // Models is the primary page (the active backend) — first in the rail and
     // active on launch. Library (manage/install backends) sits directly below.
     nav.insert()
-        .text("Models")
+        .text(crate::fl!("models"))
         .data::<crate::state::Page>(crate::state::Page::Models)
         .icon(icons::phosphor(icons::BRAIN))
         .activate();
 
     nav.insert()
-        .text("Library")
+        .text(crate::fl!("library"))
         .data::<crate::state::Page>(crate::state::Page::Library)
         .icon(icons::phosphor(icons::BOOKS));
 
     nav.insert()
-        .text("Contexts")
+        .text(crate::fl!("contexts"))
         .data::<crate::state::Page>(crate::state::Page::Contexts)
         .icon(icons::phosphor(icons::CARDS));
 
     nav.insert()
-        .text("Customization")
+        .text(crate::fl!("customization"))
         .data::<crate::state::Page>(crate::state::Page::Customization)
         .icon(icons::phosphor(icons::GEAR));
 
     nav.insert()
-        .text("Recording")
+        .text(crate::fl!("recording"))
         .data::<crate::state::Page>(crate::state::Page::Recording)
         .icon(icons::phosphor(icons::MICROPHONE));
 
     nav.insert()
-        .text("Input Simulation")
+        .text(crate::fl!("input-simulation"))
         .data::<crate::state::Page>(crate::state::Page::InputSimulation)
         .icon(icons::phosphor(icons::KEYBOARD));
 
     nav.insert()
-        .text("Connection")
+        .text(crate::fl!("connection"))
         .data::<crate::state::Page>(crate::state::Page::Connection)
         .icon(icons::phosphor(icons::PLUG));
 
     nav.insert()
-        .text("Updates")
+        .text(crate::fl!("updates"))
         .data::<crate::state::Page>(crate::state::Page::Updates)
         .icon(icons::phosphor(icons::ARROWS_CLOCKWISE));
 
@@ -121,9 +121,9 @@ impl AppModel {
             current_model: String::new(),
             current_source: String::new(),
             current_model_epoch: 0,
-            model_operations: crate::state::model_operations::ModelOperations::opening(
-                "Loading initial model state...".to_string(),
-            ),
+            model_operations: crate::state::model_operations::ModelOperations::opening(crate::fl!(
+                "loading-initial-model-state"
+            )),
 
             // Initialize device state
             current_device: String::new(), // Empty until loaded from daemon

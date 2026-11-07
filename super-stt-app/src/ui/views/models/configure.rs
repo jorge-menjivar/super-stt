@@ -38,9 +38,9 @@ pub fn configure_sheet<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Eleme
     if backend.secrets.is_empty() && backend.options.is_empty() {
         body.push(
             text::body(if backend.accepts_context {
-                "This backend has no other settings."
+                crate::fl!("this-backend-has-no-other-settings")
             } else {
-                "This backend has nothing to configure."
+                crate::fl!("this-backend-has-nothing-to-configure")
             })
             .into(),
         );
@@ -110,15 +110,17 @@ fn context_row<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, M
     let contexts = app.contexts.choices();
     let mut labels: Vec<String> = Vec::with_capacity(contexts.len() + 2);
     labels.push(match app.contexts.active.as_deref() {
-        Some(id) => format!(
-            "Follow the active context ({})",
-            app.contexts
+        Some(id) => crate::fl!(
+            "follow-active-context",
+            value0 = (app
+                .contexts
                 .get(id)
-                .map_or_else(|| id.to_string(), DictationContext::display_name)
+                .map_or_else(|| id.to_string(), DictationContext::display_name))
+            .clone()
         ),
-        None => "Follow the active context (none right now)".to_string(),
+        None => crate::fl!("follow-the-active-context-none-right-now"),
     });
-    labels.push("No context".to_string());
+    labels.push(crate::fl!("no-context"));
     labels.extend(contexts.iter().map(|(_, name)| name.clone()));
 
     let selected = match state.map(|s| s.mode) {
@@ -148,14 +150,14 @@ fn context_row<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, M
     });
 
     let hint = state.and_then(|s| s.context.as_ref()).map_or_else(
-        || "Nothing is sent to this backend right now.".to_string(),
-        |context| format!("Sending {}.", context.display_name()),
+        || crate::fl!("nothing-is-sent-to-this-backend-right"),
+        |context| crate::fl!("sending-context", value0 = context.display_name()),
     );
 
     widget::column::with_capacity(2)
         .spacing(spacing.space_xxs)
         .push(config_label(
-            "Dictation context".to_string(),
+            crate::fl!("dictation-context"),
             Some(hint),
             false,
         ))
@@ -214,8 +216,8 @@ pub(super) fn secret_row<'a>(
         let remove_source = source_owned.clone();
         let remove_name = name_owned.clone();
         row![
-            text::body("Configured").width(Length::Fill),
-            widget::button::destructive("Remove").on_press(Message::Backend(
+            text::body(crate::fl!("configured")).width(Length::Fill),
+            widget::button::destructive(crate::fl!("remove")).on_press(Message::Backend(
                 BackendMessage::BackendSecretRemoved {
                     source: remove_source,
                     name: remove_name,
@@ -228,7 +230,7 @@ pub(super) fn secret_row<'a>(
     } else {
         let input_source = source_owned.clone();
         let input_name = name_owned.clone();
-        let field = widget::text_input("Enter API key...", input)
+        let field = widget::text_input(crate::fl!("enter-api-key"), input)
             .on_input(move |value| {
                 Message::Backend(BackendMessage::BackendSecretInputChanged {
                     source: input_source.clone(),
@@ -238,7 +240,7 @@ pub(super) fn secret_row<'a>(
             })
             .password()
             .width(Length::Fill);
-        let save = widget::button::standard("Save").on_press(Message::Backend(
+        let save = widget::button::standard(crate::fl!("save")).on_press(Message::Backend(
             BackendMessage::BackendSecretSaved {
                 source: source_owned,
                 name: name_owned,
@@ -319,7 +321,7 @@ pub(super) fn choice_option_row<'a>(
             })
         },
     )
-    .placeholder("Select");
+    .placeholder(crate::fl!("select"));
 
     let mut item = settings::item::builder(display);
     if !option.description.is_empty() {
@@ -346,9 +348,13 @@ pub(super) fn option_row<'a>(
         && !default.is_empty()
     {
         if hint.is_empty() {
-            hint = format!("Default: {default}");
+            hint = crate::fl!("setting-default", default = default.as_str());
         } else {
-            hint = format!("{hint} (default: {default})");
+            hint = crate::fl!(
+                "setting-hint-default",
+                hint = hint.as_str(),
+                default = default.as_str()
+            );
         }
     }
 
@@ -368,7 +374,7 @@ pub(super) fn option_row<'a>(
             })
         })
         .width(Length::Fill);
-    let save = widget::button::standard("Save").on_press(Message::Backend(
+    let save = widget::button::standard(crate::fl!("save")).on_press(Message::Backend(
         BackendMessage::BackendOptionSaved {
             source: save_source,
             name: save_name,
@@ -380,7 +386,7 @@ pub(super) fn option_row<'a>(
     let control: Element<'a, Message> = if has_override {
         let reset_source = source.to_string();
         let reset_name = option.name.clone();
-        let reset = widget::button::standard("Reset").on_press(Message::Backend(
+        let reset = widget::button::standard(crate::fl!("reset")).on_press(Message::Backend(
             BackendMessage::BackendOptionReset {
                 source: reset_source,
                 name: reset_name,

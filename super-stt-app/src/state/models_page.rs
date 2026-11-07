@@ -33,12 +33,12 @@ impl Default for ModelsPageState {
         let mut models_tabs = segmented_button::SingleSelectModel::default();
         models_tabs
             .insert()
-            .text("Installed")
+            .text(crate::fl!("installed"))
             .data(ModelsTab::Installed)
             .activate();
         models_tabs
             .insert()
-            .text("Browse")
+            .text(crate::fl!("browse"))
             .data(ModelsTab::Download);
         Self {
             models_tabs,

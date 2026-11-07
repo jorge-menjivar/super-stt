@@ -64,7 +64,7 @@ impl AppModel {
                     views::about::page(),
                     Message::Shell(ShellMessage::ToggleContextPage(ContextPage::About)),
                 )
-                .title("About"),
+                .title(crate::fl!("about")),
             ),
             // The Add-backend sheet is scoped to the Library page (its Browse
             // tab) while the daemon is connected; navigating away or a dropped
@@ -80,7 +80,7 @@ impl AppModel {
                         views::models::add_backend_sheet(self),
                         Message::Shell(ShellMessage::ToggleContextPage(ContextPage::AddBackend)),
                     )
-                    .title("Install manually")
+                    .title(crate::fl!("install-manually"))
                     // Outside the scrollable body: a resolved preview is tall
                     // enough to scroll the Install button off the bottom.
                     .footer(views::models::add_backend_footer(self))
@@ -99,7 +99,7 @@ impl AppModel {
                             ContextPage::SelectPostProcessor,
                         )),
                     )
-                    .title("Select post-processor backend")
+                    .title(crate::fl!("select-post-processor-backend"))
                 })
             }
             // The "Select a backend" sheet is scoped to the Models page: it
@@ -112,16 +112,16 @@ impl AppModel {
                         views::models::select_backend_sheet(self),
                         Message::Shell(ShellMessage::ToggleContextPage(ContextPage::SelectBackend)),
                     )
-                    .title("Select transcription backend")
+                    .title(crate::fl!("select-transcription-backend"))
                 })
             }
             // Language picker sheet — a search-box + scrollable selectable list
             // for setting the global Primary Language or the active-model override.
             ContextPage::LanguagePicker => {
                 let title = if self.language.language_picker_target.is_some() {
-                    "Model language"
+                    crate::fl!("model-language")
                 } else {
-                    "Primary Language"
+                    crate::fl!("primary-language")
                 };
                 Some(
                     context_drawer::context_drawer(
@@ -153,7 +153,10 @@ impl AppModel {
                         views::models::configure_sheet(backend, self),
                         Message::ModelsPage(ModelsPageMessage::CloseBackendConfig),
                     )
-                    .title(format!("{} configuration", backend.name))
+                    .title(crate::fl!(
+                        "backend-configuration",
+                        name = backend.name.clone()
+                    ))
                 })
             }
         }
@@ -179,7 +182,7 @@ impl AppModel {
             .contexts
             .draft
             .as_ref()
-            .map_or_else(|| "Edit context".to_string(), views::contexts::editor_title);
+            .map_or_else(|| crate::fl!("edit-context"), views::contexts::editor_title);
         let body = views::contexts::editor_sheet(self)?;
         Some(
             context_drawer::context_drawer(body, Message::Contexts(ContextsMessage::CancelEdit))
