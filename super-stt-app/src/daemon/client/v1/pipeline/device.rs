@@ -65,7 +65,12 @@ pub async fn set_model_device(stage: u32, model: String, device: String) -> Http
         let path = path.clone();
         let body = body.clone();
         async move {
-            let resp = transport::settings_post(socket, &token, &path, &body).await?;
+            // No timeout, as for a load: the daemon answers once the reload is
+            // done, and a first load on a GPU builds its kernels, which can
+            // take minutes. Giving up at a fixed timeout dropped the
+            // connection, the daemon cancelled the reload halfway, and the
+            // stage was left with nothing loaded.
+            let resp = transport::settings_post_no_timeout(socket, &token, &path, &body).await?;
             require_unit(resp, "set_model_device")
         }
     })
