@@ -24,7 +24,9 @@ use crate::ui::languages::friendly_name;
 use crate::ui::messages::{Message, VoicesMessage};
 
 /// The picker's first row: no script, read your own words.
-const FREE_ROW: &str = "No script — read your own words";
+fn free_row() -> String {
+    crate::fl!("no-script-read-your-own-words")
+}
 
 /// The Voices tab.
 pub fn page(app: &AppModel) -> Element<'_, Message> {
@@ -51,34 +53,43 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
 fn capability_section(state: &VoicesState) -> Element<'_, Message> {
     let (status, detail) = match state.model.as_ref() {
         None => (
-            "No model loaded".to_string(),
-            "Voices you add are kept. Load a model that clones to speak in them.".to_string(),
+            crate::fl!("no-model-loaded"),
+            crate::fl!("voices-you-add-are-kept"),
         ),
         Some(model) if !model.clones => (
-            format!("{} does not clone", model.name),
-            "This model speaks only in its own preset voices. Your saved voices are untouched \
-             and become available when a cloning model is loaded."
-                .to_string(),
+            crate::fl!("model-does-not-clone", model = model.name.as_str()),
+            crate::fl!("this-model-speaks-only-in-its-own-preset-voices").to_string(),
         ),
         Some(model) => {
             let budget = model.clone_ref_seconds.map_or_else(
-                || "any length of reference audio".to_string(),
-                |s| format!("up to {s:.0} seconds of reference audio"),
+                || crate::fl!("any-length-of-reference-audio"),
+                |s| {
+                    crate::fl!(
+                        "up-to-seconds-of-reference-audio",
+                        seconds = format!("{s:.0}")
+                    )
+                },
             );
             let transcript = if model.needs_transcript {
-                " It also needs the transcript of what the recording says."
+                format!(" {}", crate::fl!("it-also-needs-the-transcript"))
             } else {
-                ""
+                String::new()
             };
             (
-                format!("{} clones voices", model.name),
-                format!("It uses {budget} from each recording.{transcript}"),
+                crate::fl!("model-clones-voices", model = model.name.as_str()),
+                format!(
+                    "{}{transcript}",
+                    crate::fl!(
+                        "it-uses-budget-from-each-recording",
+                        budget = budget.as_str()
+                    )
+                ),
             )
         }
     };
 
     settings::section()
-        .title("Active model")
+        .title(crate::fl!("active-model-title"))
         .add(note(status, detail))
         .into()
 }
@@ -106,28 +117,28 @@ fn add_section<'a>(state: &'a VoicesState, language: Option<&str>) -> Element<'a
     }
 
     let controls = row![
-        button::suggested("Record").on_press(Message::Voices(VoicesMessage::StartRecording)),
-        button::standard("Import a WAV file…").on_press(Message::Voices(VoicesMessage::ImportFile)),
+        button::suggested(crate::fl!("record"))
+            .on_press(Message::Voices(VoicesMessage::StartRecording)),
+        button::standard(crate::fl!("import-a-wav-file"))
+            .on_press(Message::Voices(VoicesMessage::ImportFile)),
     ]
     .spacing(cosmic::theme::spacing().space_xs)
     .align_y(Alignment::Center);
 
     let script = state.script(language);
     let mut section = settings::section()
-        .title("Add a voice")
+        .title(crate::fl!("add-a-voice"))
         .add(script_picker(state, language));
     if let Some(script) = script {
         section = section.add(script_card(script, 16.0, Some(script_meta(script, state))));
     }
     section
         .add(
-            settings::item::builder("New recording")
+            settings::item::builder(crate::fl!("new-recording"))
                 .description(if script.is_some() {
-                    "Press Record and read the script above at your normal speaking pace, \
-                     somewhere quiet. Recording stops on its own after two minutes."
+                    crate::fl!("press-record-and-read-the-script")
                 } else {
-                    "Read a couple of sentences in a normal speaking voice, somewhere quiet. \
-                     Recording stops on its own after two minutes."
+                    crate::fl!("read-a-couple-of-sentences")
                 })
                 .control(controls),
         )
@@ -143,7 +154,7 @@ fn add_section<'a>(state: &'a VoicesState, language: Option<&str>) -> Element<'a
 fn script_picker(state: &VoicesState, language: Option<&str>) -> Element<'static, Message> {
     let offered = scripts::offered(language);
     let mut labels: Vec<String> = Vec::with_capacity(offered.len() + 1);
-    labels.push(FREE_ROW.to_string());
+    labels.push(free_row());
     labels.extend(
         offered
             .iter()
@@ -161,7 +172,7 @@ fn script_picker(state: &VoicesState, language: Option<&str>) -> Element<'static
         _ => chosen.and_then(|script| ids.iter().position(|id| *id == Some(script.id))),
     };
 
-    settings::item::builder("Script")
+    settings::item::builder(crate::fl!("script"))
         .description(picker_description(chosen, language))
         .control(widget::dropdown(labels, selected, move |index| {
             Message::Voices(VoicesMessage::ScriptSelected(
@@ -175,19 +186,17 @@ fn script_picker(state: &VoicesState, language: Option<&str>) -> Element<'static
 /// in the language the voice will be asked to speak.
 fn picker_description(chosen: Option<&'static Script>, language: Option<&str>) -> String {
     let Some(script) = chosen else {
-        return "Nothing to read. Record in your own words, then type them in afterwards."
-            .to_string();
+        return crate::fl!("nothing-to-read").to_string();
     };
     match language.filter(|tag| !scripts::same_language(script, tag)) {
         // Either the catalog has no script in this language yet, or the user
         // deliberately picked another one. The sentence is true of both, and a
         // reference read in the wrong language is worth one line of caption.
-        Some(tag) => format!(
-            "{} Note that this script is in {}, and the daemon is set to speak {} — a clone \
-             matches best when the reference is read in the language it will speak.",
-            script.blurb,
-            friendly_name(script.language),
-            friendly_name(tag),
+        Some(tag) => crate::fl!(
+            "script-language-note",
+            blurb = script.blurb,
+            script_language = friendly_name(script.language),
+            speak_language = friendly_name(tag)
         ),
         None => script.blurb.to_string(),
     }
@@ -250,12 +259,15 @@ fn script_card(
 /// produced worse clones.
 fn script_meta(script: &Script, state: &VoicesState) -> String {
     let seconds = script.estimated_seconds();
-    let pace = format!("About {seconds:.0} seconds at an unhurried pace.");
+    let pace = crate::fl!(
+        "about-seconds-at-an-unhurried-pace",
+        seconds = format!("{seconds:.0}")
+    );
     match state.clone_ref_seconds() {
-        Some(budget) if !script.fits(Some(budget)) => format!(
-            "{pace} That is longer than the {budget:.0} s this model takes, and it would be \
-             given the words it never hears — pick a shorter script, or stop reading at \
-             {budget:.0} seconds."
+        Some(budget) if !script.fits(Some(budget)) => crate::fl!(
+            "script-longer-than-budget",
+            pace = pace.as_str(),
+            budget = format!("{budget:.0}")
         ),
         _ => pace,
     }
@@ -265,12 +277,17 @@ fn script_meta(script: &Script, state: &VoicesState) -> String {
 /// level, and Stop.
 fn recording_section<'a>(state: &'a VoicesState, language: Option<&str>) -> Element<'a, Message> {
     let elapsed = state.recorder.as_ref().map_or_else(
-        || format!("{:.0} s", state.recording_seconds),
+        || {
+            crate::fl!(
+                "seconds-short",
+                seconds = format!("{:.0}", state.recording_seconds)
+            )
+        },
         |r| {
-            format!(
-                "{:.0} s of {:.0} s",
-                state.recording_seconds,
-                r.max_seconds()
+            crate::fl!(
+                "seconds-of-seconds",
+                elapsed = format!("{:.0}", state.recording_seconds),
+                max = format!("{:.0}", r.max_seconds())
             )
         },
     );
@@ -292,18 +309,19 @@ fn recording_section<'a>(state: &'a VoicesState, language: Option<&str>) -> Elem
         .width(Length::Fixed(320.0));
     let meter = row![
         level,
-        button::destructive("Stop").on_press(Message::Voices(VoicesMessage::StopRecording)),
+        button::destructive(crate::fl!("stop"))
+            .on_press(Message::Voices(VoicesMessage::StopRecording)),
     ]
     .spacing(cosmic::theme::spacing().space_xs)
     .align_y(Alignment::Center);
 
-    let mut section = settings::section().title("Recording");
+    let mut section = settings::section().title(crate::fl!("recording"));
     if let Some(script) = state.script(language) {
         section = section.add(script_card(script, 19.0, None));
     }
     section
-        .add(settings::item("Elapsed", text::body(elapsed)))
-        .add(settings::flex_item("Input level", meter))
+        .add(settings::item(crate::fl!("elapsed"), text::body(elapsed)))
+        .add(settings::flex_item(crate::fl!("input-level"), meter))
         .into()
 }
 
@@ -312,7 +330,7 @@ fn pending_section(state: &VoicesState) -> Element<'_, Message> {
     let Some(pending) = state.pending.as_ref() else {
         // Unreachable: `add_section` checks before calling. An empty section
         // beats a panic in a view.
-        return settings::section().title("Add a voice").into();
+        return settings::section().title(crate::fl!("add-a-voice")).into();
     };
 
     let summary = if pending.seconds > 0.0 {
@@ -321,19 +339,19 @@ fn pending_section(state: &VoicesState) -> Element<'_, Message> {
         pending.origin.describe()
     };
 
-    let label_input = widget::text_input("Name this voice", &state.label_input)
+    let label_input = widget::text_input(crate::fl!("name-this-voice"), &state.label_input)
         .on_input(|s| Message::Voices(VoicesMessage::LabelChanged(s)))
         .width(Length::Fill);
 
     let mut save = button::suggested(if state.saving {
-        "Saving…"
+        crate::fl!("saving-progress")
     } else {
-        "Save voice"
+        crate::fl!("save-voice")
     });
     if state.can_save() {
         save = save.on_press(Message::Voices(VoicesMessage::Save));
     }
-    let mut discard = button::destructive("Discard");
+    let mut discard = button::destructive(crate::fl!("discard"));
     if !state.saving {
         discard = discard.on_press(Message::Voices(VoicesMessage::DiscardPending));
     }
@@ -346,7 +364,7 @@ fn pending_section(state: &VoicesState) -> Element<'_, Message> {
     // the first four words of it is a field the user cannot check. Laid out
     // like `note`, which is the section's full width.
     let spacing = cosmic::theme::spacing();
-    let transcript = column![text::heading("Transcript")]
+    let transcript = column![text::heading(crate::fl!("transcript"))]
         .spacing(spacing.space_xxs)
         .width(Length::Fill);
     // A built-in script is shown, not offered for editing. Its wording is the
@@ -357,29 +375,28 @@ fn pending_section(state: &VoicesState) -> Element<'_, Message> {
     // rather than leaving the locked field unexplained.
     let transcript = match pending.script {
         Some(script) => transcript
-            .push(text::caption(
-                "From the built-in script you read, and saved exactly as written. To write \
-                 your own words, discard this and record again with “No script”.",
-            ))
+            .push(text::caption(crate::fl!("from-the-built-in-script")))
             .push(script_card(script, 16.0, None)),
         None => transcript
             .push(text::caption(if state.needs_transcript() {
-                "Required by the loaded model: type exactly what the recording says."
+                crate::fl!("required-by-the-loaded-model")
             } else {
-                "Optional. Some models clone from the words as well as the sound — \
-                 adding it now means the voice works with those too."
+                crate::fl!("optional-some-models-clone-from-the-words")
             }))
             .push(
-                widget::text_input("What the recording says", &state.transcript_input)
-                    .on_input(|s| Message::Voices(VoicesMessage::TranscriptChanged(s)))
-                    .width(Length::Fill),
+                widget::text_input(
+                    crate::fl!("what-the-recording-says"),
+                    &state.transcript_input,
+                )
+                .on_input(|s| Message::Voices(VoicesMessage::TranscriptChanged(s)))
+                .width(Length::Fill),
             ),
     };
 
     settings::section()
-        .title("New voice")
-        .add(settings::item("Sample", text::body(summary)))
-        .add(settings::flex_item("Name", label_input))
+        .title(crate::fl!("new-voice"))
+        .add(settings::item(crate::fl!("sample"), text::body(summary)))
+        .add(settings::flex_item(crate::fl!("name"), label_input))
         .add(transcript)
         .add(settings::flex_item("", actions))
         .into()
@@ -387,20 +404,21 @@ fn pending_section(state: &VoicesState) -> Element<'_, Message> {
 
 /// The stored library, one row per voice.
 fn library_section(state: &VoicesState) -> Element<'_, Message> {
-    let mut section = settings::section().title("Saved voices");
+    let mut section = settings::section().title(crate::fl!("saved-voices"));
 
     if !state.loaded {
         return section
-            .add(settings::item("", text::body("Reading the library…")))
+            .add(settings::item(
+                "",
+                text::body(crate::fl!("reading-the-library")),
+            ))
             .into();
     }
     if state.voices.is_empty() {
         return section
             .add(note(
-                "No voices yet".to_string(),
-                "Record or import a sample above, and it appears here with the id you pass \
-                 to any app that speaks through Super Voice."
-                    .to_string(),
+                crate::fl!("no-voices-yet"),
+                crate::fl!("record-or-import-a-sample").to_string(),
             ))
             .into();
     }
@@ -422,13 +440,15 @@ fn voice_row<'a>(voice: &'a VoiceInfo, state: &'a VoicesState) -> Element<'a, Me
     let spacing = cosmic::theme::spacing();
 
     if let Some(label) = renaming {
-        let field = widget::text_input("Name this voice", label)
+        let field = widget::text_input(crate::fl!("name-this-voice"), label)
             .on_input(|s| Message::Voices(VoicesMessage::RenameChanged(s)))
             .on_submit(|_| Message::Voices(VoicesMessage::CommitRename))
             .width(Length::Fill);
         let actions = row![
-            button::suggested("Save").on_press(Message::Voices(VoicesMessage::CommitRename)),
-            button::standard("Cancel").on_press(Message::Voices(VoicesMessage::CancelRename)),
+            button::suggested(crate::fl!("save"))
+                .on_press(Message::Voices(VoicesMessage::CommitRename)),
+            button::standard(crate::fl!("cancel"))
+                .on_press(Message::Voices(VoicesMessage::CancelRename)),
         ]
         .spacing(spacing.space_xs)
         .align_y(Alignment::Center);
@@ -456,7 +476,11 @@ fn voice_row<'a>(voice: &'a VoiceInfo, state: &'a VoicesState) -> Element<'a, Me
         // says what it is doing rather than leaving a dead-looking page to
         // invite that press.
         let busy = state.is_busy(&voice.voice_id);
-        let mut preview = button::standard(if busy { "Preparing…" } else { "Preview" });
+        let mut preview = button::standard(if busy {
+            crate::fl!("preparing-progress")
+        } else {
+            crate::fl!("preview")
+        });
         if !state.any_busy() {
             preview = preview.on_press(Message::Voices(VoicesMessage::Preview(
                 voice.voice_id.clone(),
@@ -465,14 +489,16 @@ fn voice_row<'a>(voice: &'a VoiceInfo, state: &'a VoicesState) -> Element<'a, Me
         actions = actions.push(preview);
     }
     if !deleting {
-        actions = actions.push(button::standard("Rename").on_press(Message::Voices(
-            VoicesMessage::BeginRename {
-                id: voice.id.clone(),
-                label: voice.label.clone(),
-            },
-        )));
         actions = actions.push(
-            button::destructive("Delete")
+            button::standard(crate::fl!("rename")).on_press(Message::Voices(
+                VoicesMessage::BeginRename {
+                    id: voice.id.clone(),
+                    label: voice.label.clone(),
+                },
+            )),
+        );
+        actions = actions.push(
+            button::destructive(crate::fl!("delete"))
                 .on_press(Message::Voices(VoicesMessage::Delete(voice.id.clone()))),
         );
     }
@@ -487,7 +513,7 @@ fn voice_row<'a>(voice: &'a VoiceInfo, state: &'a VoicesState) -> Element<'a, Me
 /// carries a transcript, and the id an app would use.
 fn describe(voice: &VoiceInfo, deleting: bool, busy: bool) -> String {
     if deleting {
-        return "Deleting…".to_string();
+        return crate::fl!("deleting-progress");
     }
     if busy {
         // Handing a clip to the model means encoding it there, which is seconds
@@ -495,15 +521,17 @@ fn describe(voice: &VoiceInfo, deleting: bool, busy: bool) -> String {
         // is the difference between a slow page and a broken one — and it is
         // said for a preparation the daemon started as well as for a preview
         // asked for here, since the wait is the same either way.
-        return "Getting the model ready to speak in this voice…".to_string();
+        return crate::fl!("getting-the-model-ready");
     }
     let transcript = if voice.transcript.is_some() {
-        "with transcript"
+        crate::fl!("with-transcript")
     } else {
-        "no transcript"
+        crate::fl!("no-transcript")
     };
-    format!(
-        "{:.1} s · {transcript} · {}",
-        voice.duration_seconds, voice.voice_id
+    crate::fl!(
+        "voice-meta",
+        seconds = format!("{:.1}", voice.duration_seconds),
+        transcript = transcript,
+        id = voice.voice_id.as_str()
     )
 }

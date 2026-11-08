@@ -30,7 +30,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
     body = body.push(intro(app));
 
     if !state.loaded {
-        body = body.push(text::body("Loading…"));
+        body = body.push(text::body(crate::fl!("loading-progress")));
     } else if state.items.is_empty() {
         body = body.push(empty_state());
     } else {
@@ -47,7 +47,8 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
     body = body.push(
         row![
             horizontal_space(),
-            button::suggested("New context").on_press(Message::Contexts(ContextsMessage::Create)),
+            button::suggested(crate::fl!("new-context"))
+                .on_press(Message::Contexts(ContextsMessage::Create)),
         ]
         .width(Length::Fill),
     );
@@ -63,10 +64,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
 fn intro(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let mut lines = widget::column::with_capacity(2).spacing(spacing.space_xxs);
-    lines = lines.push(text::body(
-        "A context tells a model what you are dictating. Words you use often \
-         get heard correctly instead of guessed at.",
-    ));
+    lines = lines.push(text::body(crate::fl!("a-context-tells-a-model-what-you")));
 
     // Which backends will actually use it. A context reaching nothing is the
     // one failure the user cannot see, so say it here rather than let them
@@ -75,17 +73,14 @@ fn intro(app: &AppModel) -> Element<'_, Message> {
     let note = if app.backends.is_empty() {
         None
     } else if accepting == 0 {
-        Some(
-            "None of your installed backends can use one yet. A context is still \
-             saved, and takes effect as soon as one can."
-                .to_string(),
-        )
+        Some(crate::fl!("none-of-your-installed-backends-can-use"))
     } else if accepting == app.backends.len() {
         None
     } else {
-        Some(format!(
-            "{accepting} of your {} installed backends can use one.",
-            app.backends.len()
+        Some(crate::fl!(
+            "context-supported-count",
+            accepting = (accepting).to_string(),
+            value0 = (app.backends.len()).to_string()
         ))
     };
     if let Some(note) = note {
@@ -99,11 +94,10 @@ fn empty_state<'a>() -> Element<'a, Message> {
     card(
         widget::column::with_capacity(2)
             .spacing(spacing.space_xxs)
-            .push(text::body("No contexts yet."))
-            .push(muted(text::caption(
-                "Add one for the kind of thing you dictate most \u{2014} code, email, \
-                 someone's name the model keeps getting wrong.",
-            ))),
+            .push(text::body(crate::fl!("no-contexts-yet")))
+            .push(muted(text::caption(crate::fl!(
+                "add-one-for-the-kind-of-thing"
+            )))),
         false,
     )
 }
@@ -126,12 +120,12 @@ fn context_card<'a>(context: &'a DictationContext, app: &'a AppModel) -> Element
     // "Use" is the primary action on a card that is not in force; on the one
     // that is, there is nothing to press, so the badge above says so instead.
     if !is_active {
-        title_row = title_row.push(button::standard("Use").on_press(Message::Contexts(
-            ContextsMessage::Activate(Some(context.id.clone())),
-        )));
+        title_row = title_row.push(button::standard(crate::fl!("use")).on_press(
+            Message::Contexts(ContextsMessage::Activate(Some(context.id.clone()))),
+        ));
     }
     title_row = title_row.push(
-        button::standard("Edit")
+        button::standard(crate::fl!("edit"))
             .on_press(Message::Contexts(ContextsMessage::Edit(context.id.clone()))),
     );
     title_row = title_row.push(delete_control(context, confirming));
@@ -161,8 +155,9 @@ fn delete_control(context: &DictationContext, confirming: bool) -> Element<'_, M
     let spacing = cosmic::theme::spacing();
     if confirming {
         row![
-            button::text("Cancel").on_press(Message::Contexts(ContextsMessage::DeleteCancelled)),
-            button::destructive("Delete").on_press(Message::Contexts(
+            button::text(crate::fl!("cancel"))
+                .on_press(Message::Contexts(ContextsMessage::DeleteCancelled)),
+            button::destructive(crate::fl!("delete")).on_press(Message::Contexts(
                 ContextsMessage::DeleteConfirmed(context.id.clone())
             )),
         ]
@@ -182,7 +177,7 @@ fn delete_control(context: &DictationContext, confirming: bool) -> Element<'_, M
 /// The "In use" marker on the active card.
 fn active_badge<'a>() -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
-    widget::container(text::caption("In use"))
+    widget::container(text::caption(crate::fl!("in-use")))
         .padding([0, spacing.space_xxs])
         .class(cosmic::theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
@@ -205,9 +200,9 @@ fn active_badge<'a>() -> Element<'a, Message> {
 /// list as a fake row would make it deletable and editable, which it is not.
 fn use_none_row<'a>(already_none: bool) -> Element<'a, Message> {
     let label = if already_none {
-        text::caption("No context is in use.")
+        text::caption(crate::fl!("no-context-is-in-use"))
     } else {
-        text::caption("Dictating something these do not cover?")
+        text::caption(crate::fl!("dictating-something-these-do-not-cover"))
     };
     let mut r = row![muted(label), horizontal_space()]
         .spacing(cosmic::theme::spacing().space_xs)
@@ -215,7 +210,8 @@ fn use_none_row<'a>(already_none: bool) -> Element<'a, Message> {
         .width(Length::Fill);
     if !already_none {
         r = r.push(
-            button::text("Use none").on_press(Message::Contexts(ContextsMessage::Activate(None))),
+            button::text(crate::fl!("use-none"))
+                .on_press(Message::Contexts(ContextsMessage::Activate(None))),
         );
     }
     r.into()
@@ -226,14 +222,14 @@ fn summary_line(context: &DictationContext) -> String {
     let mut parts = Vec::new();
     match context.vocabulary.len() {
         0 => {}
-        1 => parts.push("1 term".to_string()),
-        n => parts.push(format!("{n} terms")),
+        1 => parts.push(crate::fl!("count-1-term")),
+        n => parts.push(crate::fl!("terms-count", n = (n).to_string())),
     }
     if !context.prompt.trim().is_empty() {
-        parts.push("a prompt".to_string());
+        parts.push(crate::fl!("a-prompt"));
     }
     if parts.is_empty() {
-        return "Empty \u{2014} nothing is sent for this one.".to_string();
+        return crate::fl!("empty-nothing-is-sent-for-this-one");
     }
     parts.join(" \u{b7} ")
 }
@@ -249,7 +245,11 @@ fn preview_terms(vocabulary: &[String]) -> String {
         .join(", ");
     match vocabulary.len().saturating_sub(SHOWN) {
         0 => head,
-        rest => format!("{head} and {rest} more"),
+        rest => crate::fl!(
+            "context-more-terms",
+            head = head.as_str(),
+            rest = (rest).to_string()
+        ),
     }
 }
 
@@ -273,7 +273,7 @@ mod tests {
     fn the_summary_names_the_halves_a_context_actually_has() {
         assert_eq!(
             summary_line(&context("Be terse.", &["kubectl", "rebase"])),
-            "2 terms \u{b7} a prompt"
+            "\u{2068}2\u{2069} terms \u{b7} a prompt"
         );
         assert_eq!(summary_line(&context("", &["kubectl"])), "1 term");
         assert_eq!(summary_line(&context("Be terse.", &[])), "a prompt");
@@ -290,6 +290,9 @@ mod tests {
         assert_eq!(preview_terms(&few.map(String::from)), "a, b, c");
 
         let many: Vec<String> = (1..=9).map(|n| n.to_string()).collect();
-        assert_eq!(preview_terms(&many), "1, 2, 3, 4, 5, 6 and 3 more");
+        assert_eq!(
+            preview_terms(&many),
+            "\u{2068}1, 2, 3, 4, 5, 6\u{2069} and \u{2068}3\u{2069} more"
+        );
     }
 }

@@ -40,9 +40,9 @@ pub(super) fn installed_split(app: &AppModel) -> (Element<'_, Message>, Element<
     // different fixes, so they get different sentences.
     let body: Element<'_, Message> = if cards.is_empty() {
         if app.backends.is_empty() {
-            text::body("No backends installed. Open the Browse tab to install one.").into()
+            text::body(crate::fl!("no-backends-installed-open-the-browse-tab")).into()
         } else {
-            text::body("No installed backends match these filters.").into()
+            text::body(crate::fl!("no-installed-backends-match-these-filters")).into()
         }
     } else {
         column(cards)
@@ -97,7 +97,12 @@ fn installed_toolbar<'a>(
     let kind = super::chips::role_filter_chips(filters.role, |r| {
         Message::ModelsPage(ModelsPageMessage::InstalledRoleFilter(r))
     });
-    let count = text::caption(format!("{shown} of {total}")).class(cosmic::theme::Text::Color(
+    let count = text::caption(crate::fl!(
+        "filtered-count",
+        shown = (shown).to_string(),
+        total = (total).to_string()
+    ))
+    .class(cosmic::theme::Text::Color(
         super::surface::muted_text_color(),
     ));
 
@@ -171,9 +176,11 @@ pub(super) fn installed_card<'a>(
     }
     actions = actions
         .push(repo_button(&source))
-        .push(button::standard("Configure").on_press(Message::ModelsPage(
-            ModelsPageMessage::OpenBackendConfig(source.clone()),
-        )))
+        .push(
+            button::standard(crate::fl!("configure")).on_press(Message::ModelsPage(
+                ModelsPageMessage::OpenBackendConfig(source.clone()),
+            )),
+        )
         .push(overflow);
     let header = row![
         backend_glyph_tile(),
@@ -230,7 +237,7 @@ pub(super) fn installed_card<'a>(
     match app.registry.uninstall_errors.get(source.as_str()) {
         Some(err) => column(vec![
             surface,
-            text::caption(format!("Uninstall failed: {err}")).into(),
+            text::caption(crate::fl!("uninstall-failed", err = err.as_str())).into(),
         ])
         .spacing(cosmic::theme::spacing().space_xxxs)
         .width(Length::Fill)
@@ -249,7 +256,7 @@ pub(super) fn installed_card<'a>(
 pub(super) fn installed_overflow_menu(source: &str) -> Element<'static, Message> {
     let col = widget::column::with_capacity(1).push(super::surface::menu_item(
         icons::X,
-        "Uninstall",
+        crate::fl!("uninstall"),
         Message::ModelsPage(ModelsPageMessage::UninstallBackend(source.to_string())),
     ));
 

@@ -73,15 +73,15 @@ pub enum Section {
 impl Section {
     /// The heading a feature's section shows above its tabs.
     #[must_use]
-    pub const fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            Self::SpeechToText => "Speech to text",
-            Self::TextToSpeech => "Text to speech",
-            Self::Models => "Models",
-            Self::Library => "Library",
-            Self::Customization => "Customization",
-            Self::Connection => "Connection",
-            Self::Updates => "Updates",
+            Self::SpeechToText => crate::fl!("speech-to-text"),
+            Self::TextToSpeech => crate::fl!("text-to-speech"),
+            Self::Models => crate::fl!("models"),
+            Self::Library => crate::fl!("library"),
+            Self::Customization => crate::fl!("customization"),
+            Self::Connection => crate::fl!("connection"),
+            Self::Updates => crate::fl!("updates"),
         }
     }
 
@@ -117,18 +117,18 @@ impl Section {
 impl Page {
     /// The page's name: its tab's label, or its nav entry's.
     #[must_use]
-    pub const fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            Self::Models => "Models",
-            Self::Library => "Library",
-            Self::Recording => "Recording",
-            Self::InputSimulation => "Input Simulation",
-            Self::Contexts => "Contexts",
-            Self::Speech => "Speech",
-            Self::Voices => "Voices",
-            Self::Customization => "Customization",
-            Self::Connection => "Connection",
-            Self::Updates => "Updates",
+            Self::Models => crate::fl!("models"),
+            Self::Library => crate::fl!("library"),
+            Self::Recording => crate::fl!("recording"),
+            Self::InputSimulation => crate::fl!("input-simulation"),
+            Self::Contexts => crate::fl!("contexts"),
+            Self::Speech => crate::fl!("speech-page"),
+            Self::Voices => crate::fl!("voices"),
+            Self::Customization => crate::fl!("customization"),
+            Self::Connection => crate::fl!("connection"),
+            Self::Updates => crate::fl!("updates"),
         }
     }
 }

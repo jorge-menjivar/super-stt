@@ -27,13 +27,13 @@ use super::surface::muted;
 #[must_use]
 pub fn editor_title(draft: &ContextDraft) -> String {
     if draft.is_new {
-        "New context".to_string()
+        crate::fl!("new-context")
     } else {
         let name = draft.name.trim();
         if name.is_empty() {
-            "Edit context".to_string()
+            crate::fl!("edit-context")
         } else {
-            format!("Edit {name}")
+            crate::fl!("context-edit", name = (name).to_string())
         }
     }
 }
@@ -64,9 +64,9 @@ fn name_field(draft: &ContextDraft) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     widget::column::with_capacity(2)
         .spacing(spacing.space_xxs)
-        .push(text::heading("Name"))
+        .push(text::heading(crate::fl!("name")))
         .push(
-            widget::text_input("Coding", &draft.name)
+            widget::text_input(crate::fl!("coding"), &draft.name)
                 .on_input(|v| Message::Contexts(ContextsMessage::NameChanged(v))),
         )
         .into()
@@ -81,11 +81,10 @@ fn prompt_field(draft: &ContextDraft) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     widget::column::with_capacity(3)
         .spacing(spacing.space_xxs)
-        .push(text::heading("Prompt"))
-        .push(muted(text::caption(
-            "Instructions, for a model that follows them. Most speech models do not \
-             \u{2014} for those, the words below are what helps.",
-        )))
+        .push(text::heading(crate::fl!("prompt")))
+        .push(muted(text::caption(crate::fl!(
+            "instructions-for-a-model-that-follows-them"
+        ))))
         .push(
             widget::text_editor(&draft.prompt)
                 .height(Length::Fixed(120.0))
@@ -114,17 +113,16 @@ fn vocabulary_field(draft: &ContextDraft) -> Element<'_, Message> {
         .spacing(spacing.space_xxs)
         .push(
             row![
-                text::heading("Words to listen for"),
+                text::heading(crate::fl!("words-to-listen-for")),
                 horizontal_space(),
                 muted(text::caption(count_label(filled))),
             ]
             .align_y(Alignment::Center)
             .width(Length::Fill),
         )
-        .push(muted(text::caption(
-            "Names, jargon, anything the model keeps mishearing. Press Enter for the \
-             next one.",
-        )))
+        .push(muted(text::caption(crate::fl!(
+            "names-jargon-anything-the-model-keeps-mishearing"
+        ))))
         .push(
             widget::scrollable(column(rows).spacing(spacing.space_xxs).width(Length::Fill))
                 .height(Length::Fixed(220.0)),
@@ -168,13 +166,14 @@ fn term_row<'a>(
 fn actions(draft: &ContextDraft) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let save = if draft.saving {
-        button::suggested("Saving\u{2026}")
+        button::suggested(crate::fl!("saving-progress"))
     } else {
-        button::suggested("Save").on_press(Message::Contexts(ContextsMessage::Save))
+        button::suggested(crate::fl!("save")).on_press(Message::Contexts(ContextsMessage::Save))
     };
     row![
         horizontal_space(),
-        button::standard("Cancel").on_press(Message::Contexts(ContextsMessage::CancelEdit)),
+        button::standard(crate::fl!("cancel"))
+            .on_press(Message::Contexts(ContextsMessage::CancelEdit)),
         save,
     ]
     .spacing(spacing.space_xs)
@@ -186,8 +185,8 @@ fn actions(draft: &ContextDraft) -> Element<'_, Message> {
 /// "0 words" / "1 word" / "12 words".
 fn count_label(filled: usize) -> String {
     match filled {
-        1 => "1 word".to_string(),
-        n => format!("{n} words"),
+        1 => crate::fl!("count-1-word"),
+        n => crate::fl!("words-count", n = (n).to_string()),
     }
 }
 
@@ -207,7 +206,7 @@ mod tests {
             name: "Coding".to_string(),
             ..DictationContext::default()
         });
-        assert_eq!(editor_title(&existing), "Edit Coding");
+        assert_eq!(editor_title(&existing), "Edit \u{2068}Coding\u{2069}");
 
         // A name cleared mid-edit must not render as "Edit ".
         let mut unnamed = existing;
@@ -217,8 +216,8 @@ mod tests {
 
     #[test]
     fn the_count_is_singular_at_one() {
-        assert_eq!(count_label(0), "0 words");
+        assert_eq!(count_label(0), "\u{2068}0\u{2069} words");
         assert_eq!(count_label(1), "1 word");
-        assert_eq!(count_label(12), "12 words");
+        assert_eq!(count_label(12), "\u{2068}12\u{2069} words");
     }
 }

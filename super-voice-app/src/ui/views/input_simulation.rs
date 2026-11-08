@@ -30,7 +30,7 @@ pub fn page<'a>(
     let methods = WriteMethod::supported_on_this_platform();
     let method_names: Vec<String> = methods
         .iter()
-        .map(|m| m.pretty_name().to_string())
+        .map(|m| crate::i18n::write_method_name(*m))
         .collect();
     let selected_index = methods.iter().position(|m| *m == write_method);
 
@@ -39,23 +39,25 @@ pub fn page<'a>(
         blocks.push(error_banner(message));
     }
 
-    let mut method_section = settings::section().title("Input Simulation").add(
-        settings::item::builder("Write Method")
-            .description("Controls how transcribed text is typed into applications")
-            .control(widget::dropdown(
-                method_names,
-                selected_index,
-                move |index| Message::WriteMethod(WriteMethodMessage::Changed(methods[index])),
-            )),
-    );
+    let mut method_section = settings::section()
+        .title(crate::fl!("input-simulation"))
+        .add(
+            settings::item::builder(crate::fl!("write-method"))
+                .description(crate::fl!("controls-how-transcribed-text-is-typed-into"))
+                .control(widget::dropdown(
+                    method_names,
+                    selected_index,
+                    move |index| Message::WriteMethod(WriteMethodMessage::Changed(methods[index])),
+                )),
+        );
 
     // "Auto" names a chain, not a backend, so the configured value alone never
     // says what is really typing. A test is the only thing that resolves it.
     if let Some(resolved) = resolved {
         method_section = method_section.add(
-            settings::item::builder("Active backend")
-                .description("What the last test actually typed through")
-                .control(text::body(resolved.pretty_name())),
+            settings::item::builder(crate::fl!("active-backend"))
+                .description(crate::fl!("what-the-last-test-actually-typed-through"))
+                .control(text::body(crate::i18n::write_method_name(resolved))),
         );
     }
     blocks.push(method_section.into());
@@ -69,11 +71,11 @@ pub fn page<'a>(
 /// whatever window the user switches to.
 fn test_section(test_text: &str, countdown: Option<u8>) -> Element<'_, Message> {
     let test_row = row![
-        widget::text_input("Typed text lands here…", test_text)
+        widget::text_input(crate::fl!("typed-text-lands-here-progress"), test_text)
             .id(test_field_id())
             .on_input(|text| Message::WriteMethod(WriteMethodMessage::TestInput(text)))
             .width(Length::Fill),
-        button::suggested("Type test text")
+        button::suggested(crate::fl!("type-test-text"))
             .on_press(Message::WriteMethod(WriteMethodMessage::Test)),
     ]
     .align_y(Alignment::Center)
@@ -82,31 +84,28 @@ fn test_section(test_text: &str, countdown: Option<u8>) -> Element<'_, Message> 
     // Mid-countdown the only useful action is calling it off: starting a second
     // test would race the first into whichever window won the focus.
     let delayed_control: Element<'_, Message> = if let Some(secs) = countdown {
-        button::destructive(format!("Cancel — typing in {secs}…"))
-            .on_press(Message::WriteMethod(WriteMethodMessage::TestCancel))
-            .into()
+        button::destructive(crate::fl!(
+            "cancel-typing-countdown",
+            secs = (secs).to_string()
+        ))
+        .on_press(Message::WriteMethod(WriteMethodMessage::TestCancel))
+        .into()
     } else {
-        button::standard("Start countdown")
+        button::standard(crate::fl!("start-countdown"))
             .on_press(Message::WriteMethod(WriteMethodMessage::TestDelayed))
             .into()
     };
 
     settings::section()
-        .title("Test")
+        .title(crate::fl!("test"))
         .add(
-            settings::item::builder("Typing test")
-                .description(
-                    "Types a short string into the field using the same writing method \
-                    that will be used by the daemon.",
-                )
+            settings::item::builder(crate::fl!("typing-test"))
+                .description(crate::fl!("types-a-short-string-into-the-field"))
                 .flex_control(test_row),
         )
         .add(
-            settings::item::builder("Test another window")
-                .description(
-                    "Counts down before typing, so you can switch to the app you \
-                    actually dictate into.",
-                )
+            settings::item::builder(crate::fl!("test-another-window"))
+                .description(crate::fl!("counts-down-before-typing-so-you-can"))
                 .control(delayed_control),
         )
         .into()

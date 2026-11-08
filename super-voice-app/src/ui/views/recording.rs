@@ -22,23 +22,26 @@ fn settings_section(
         RecordingStopMode::SilenceAndManual,
         RecordingStopMode::ManualOnly,
     ];
-    let mode_names: Vec<String> = modes.iter().map(|m| m.pretty_name().to_string()).collect();
+    let mode_names: Vec<String> = modes
+        .iter()
+        .map(|m| crate::i18n::recording_stop_mode_name(*m))
+        .collect();
     let selected_index = modes.iter().position(|m| *m == recording_stop_mode);
 
     settings::section()
-        .title("Settings")
+        .title(crate::fl!("settings"))
         .add(
-            settings::item::builder("Stop Mode")
-                .description("Controls how to stop transcribing")
+            settings::item::builder(crate::fl!("stop-mode"))
+                .description(crate::fl!("controls-how-to-stop-transcribing"))
                 .control(widget::dropdown(mode_names, selected_index, move |index| {
                     Message::RecordingStopMode(RecordingStopModeMessage::Changed(modes[index]))
                 })),
         )
         .add(
-            settings::item::builder("Preview Typing")
-                .description(
-                    "Shows transcription as you speak. Experimental, may affect performance.",
-                )
+            settings::item::builder(crate::fl!("preview-typing"))
+                .description(crate::fl!(
+                    "shows-transcription-as-you-speak-experimental-may"
+                ))
                 .control(
                     cosmic::widget::toggler(preview_typing_enabled)
                         .on_toggle(|b| Message::PreviewTyping(PreviewTypingMessage::Toggled(b))),
@@ -71,10 +74,10 @@ fn live_tail(text: &str, max_chars: usize) -> String {
 ///
 /// A window preview restarts every few seconds, which looks like text being
 /// lost unless the line says it only ever shows the last few seconds.
-fn live_caption(source: PreviewSource) -> &'static str {
+fn live_caption(source: PreviewSource) -> String {
     match source {
-        PreviewSource::Stream => "so far",
-        PreviewSource::Window => "last few seconds",
+        PreviewSource::Stream => crate::fl!("so-far"),
+        PreviewSource::Window => crate::fl!("last-few-seconds"),
     }
 }
 
@@ -91,18 +94,18 @@ fn test_section<'a>(
     let recording_text = match recording_status {
         RecordingStatus::Recording => {
             if is_speech_detected {
-                "🎤 Speech"
+                crate::fl!("speech")
             } else {
-                "🔇 Silence"
+                crate::fl!("silence")
             }
         }
-        RecordingStatus::Idle => "⏹️ Not recording",
+        RecordingStatus::Idle => crate::fl!("not-recording"),
     };
 
     let record_button = match recording_status {
-        RecordingStatus::Recording => button::destructive("Stop Recording")
+        RecordingStatus::Recording => button::destructive(crate::fl!("stop-recording"))
             .on_press(Message::Recording(RecordingMessage::StopRecording)),
-        RecordingStatus::Idle => button::suggested("Test Recording")
+        RecordingStatus::Idle => button::suggested(crate::fl!("test-recording"))
             .on_press(Message::Recording(RecordingMessage::StartRecording)),
     };
 
@@ -143,7 +146,7 @@ fn test_section<'a>(
     // sitting against the bottom of it with a gap above.
     let transcription_widget = {
         let content = if transcription_text.is_empty() {
-            "Transcriptions will appear here after test recordings...".to_string()
+            crate::fl!("transcriptions-will-appear-here-after-test-recordings")
         } else {
             transcription_text.to_string()
         };
@@ -154,10 +157,13 @@ fn test_section<'a>(
     };
 
     settings::section()
-        .title("Test")
-        .add(settings::item("Status", text::body(recording_text)))
-        .add(settings::flex_item("Audio Level", audio_widget))
-        .add(settings::flex_item("Live", live_widget))
+        .title(crate::fl!("test"))
+        .add(settings::item(
+            crate::fl!("status"),
+            text::body(recording_text),
+        ))
+        .add(settings::flex_item(crate::fl!("audio-level"), audio_widget))
+        .add(settings::flex_item(crate::fl!("live"), live_widget))
         .add(transcription_widget)
         .into()
 }

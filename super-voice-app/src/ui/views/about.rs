@@ -18,7 +18,7 @@ pub fn page() -> Element<'static, Message> {
 
     let icon = widget::svg(widget::svg::Handle::from_memory(APP_ICON));
 
-    let title = widget::text::title3("Super Voice");
+    let title = widget::text::title3(crate::fl!("app-title"));
 
     let hash = env!("VERGEN_GIT_SHA");
     let short_hash: String = hash.chars().take(7).collect();
@@ -32,11 +32,15 @@ pub fn page() -> Element<'static, Message> {
         icon,
         title,
         link,
-        button::link(format!("Git: {short_hash} ({date})"))
-            .on_press(Message::Shell(ShellMessage::LaunchUrl(format!(
-                "{REPOSITORY}/commits/{hash}"
-            ))))
-            .padding(0),
+        button::link(crate::fl!(
+            "git-commit",
+            short_hash = short_hash.as_str(),
+            date = (date).to_string()
+        ))
+        .on_press(Message::Shell(ShellMessage::LaunchUrl(format!(
+            "{REPOSITORY}/commits/{hash}"
+        ))))
+        .padding(0),
     ]
     .align_x(Alignment::Center)
     .spacing(space_xxs)

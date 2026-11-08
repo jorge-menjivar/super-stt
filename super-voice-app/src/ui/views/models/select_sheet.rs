@@ -20,10 +20,10 @@ use super::surface::muted_text_color;
 pub(super) fn no_backend_empty_state<'a>(narrow: bool) -> Element<'a, Message> {
     super::surface::empty_state(
         narrow,
-        "No backend selected",
-        "Select a backend to start transcribing.",
+        crate::fl!("no-backend-selected"),
+        crate::fl!("select-a-backend-to-start-transcribing"),
         Some(
-            button::suggested("Select transcription backend")
+            button::suggested(crate::fl!("select-transcription-backend"))
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
                 .on_press(Message::Shell(ShellMessage::ToggleContextPage(
                     ContextPage::SelectBackend,
@@ -53,19 +53,18 @@ pub fn select_backend_sheet(app: &AppModel) -> Element<'_, Message> {
         .spacing(spacing.space_xs)
         .width(Length::Fill)
         .push(
-            text::caption(
-                "Pick which backend powers transcription. Add and manage backends in your Library.",
-            )
+            text::caption(crate::fl!(
+                "pick-which-backend-powers-transcription-add-and"
+            ))
             .class(cosmic::theme::Text::Color(muted)),
         );
 
     if eligible.is_empty() {
         return col
             .push(text::body(if answered.is_none() {
-                "Loading…"
+                crate::fl!("loading-progress")
             } else {
-                "No installed backend provides a transcription model. Open the Library to \
-                 install one."
+                crate::fl!("no-installed-backend-provides-a-transcription-model")
             }))
             .into();
     }
@@ -104,11 +103,11 @@ pub(super) fn picker_row(
     }
 
     let trailing: Element<'static, Message> = if is_selected {
-        text::caption("Selected")
+        text::caption(crate::fl!("selected"))
             .class(cosmic::theme::Text::Accent)
             .into()
     } else {
-        button::suggested("Select")
+        button::suggested(crate::fl!("select"))
             .leading_icon(icons::phosphor_handle(icons::PLAY))
             .on_press(Message::Stage(StageMessage::SelectBackend {
                 stage,

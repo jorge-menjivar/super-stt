@@ -50,13 +50,60 @@ macro_rules! fl {
     }};
 }
 
-#[cfg(test)]
-mod tests {
-    /// The loader finds its fallback language under the crate's own name. A
-    /// rename that leaves the file under the old one panics the app at
-    /// startup, and nothing else starts the app in a test.
-    #[test]
-    fn the_fallback_language_loads() {
-        let _ = &*super::LANGUAGE_LOADER;
+/// Localized display names stay in the UI; the shared enums keep their wire values.
+pub fn recording_stop_mode_name(
+    mode: super_voice_shared::models::recording_stop_mode::RecordingStopMode,
+) -> String {
+    use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+    match mode {
+        RecordingStopMode::SilenceOnly => crate::fl!("stop-silence"),
+        RecordingStopMode::SilenceAndManual => crate::fl!("stop-silence-manual"),
+        RecordingStopMode::ManualOnly => crate::fl!("stop-manual"),
     }
 }
+
+pub fn notification_method_name(
+    method: super_voice_shared::models::notification_method::NotificationMethod,
+) -> String {
+    use super_voice_shared::models::notification_method::NotificationMethod;
+    match method {
+        NotificationMethod::Auto => crate::fl!("auto-recommended"),
+        NotificationMethod::Desktop => crate::fl!("desktop-notification"),
+        NotificationMethod::Typed => crate::fl!("type-into-window"),
+        NotificationMethod::Off => crate::fl!("off"),
+    }
+}
+
+pub fn write_method_name(method: super_voice_shared::models::write_method::WriteMethod) -> String {
+    use super_voice_shared::models::write_method::WriteMethod;
+    match method {
+        WriteMethod::Auto => crate::fl!("auto-recommended"),
+        WriteMethod::XdgDesktopPortal => crate::fl!("xdg-desktop-portal"),
+        WriteMethod::Ydotool => "ydotool".to_string(),
+        WriteMethod::BuiltIn => crate::fl!("built-in"),
+    }
+}
+
+pub fn audio_theme_name(theme: super_voice_shared::models::theme::AudioTheme) -> String {
+    use super_voice_shared::models::theme::AudioTheme;
+    match theme {
+        AudioTheme::Classic => crate::fl!("theme-classic"),
+        AudioTheme::Gentle => crate::fl!("theme-gentle"),
+        AudioTheme::Minimal => crate::fl!("theme-minimal"),
+        AudioTheme::SciFi => crate::fl!("theme-scifi"),
+        AudioTheme::Musical => crate::fl!("theme-musical"),
+        AudioTheme::Nature => crate::fl!("theme-nature"),
+        AudioTheme::Retro => crate::fl!("theme-retro"),
+        AudioTheme::Silent => crate::fl!("theme-silent"),
+    }
+}
+
+/// `text` without the Unicode isolation marks Fluent puts around each
+/// variable it fills in, for a test that compares a message with plain text.
+#[cfg(test)]
+pub fn without_isolation(text: &str) -> String {
+    text.replace(['\u{2068}', '\u{2069}'], "")
+}
+
+#[cfg(test)]
+mod tests;

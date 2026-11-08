@@ -27,15 +27,15 @@ pub fn page<'a>(
         .collect();
     let theme_names: Vec<String> = non_silent_themes
         .iter()
-        .map(|t| AudioTheme::pretty_name(t))
+        .map(|t| crate::i18n::audio_theme_name(**t))
         .collect();
     let selected_index = non_silent_themes
         .iter()
         .position(|t| *t == selected_audio_theme);
 
-    let mut section = settings::section().title("Audio").add(
-        settings::item::builder("Audio Feedback")
-            .description("Play sounds when recording or speech starts and stops")
+    let mut section = settings::section().title(crate::fl!("audio")).add(
+        settings::item::builder(crate::fl!("audio-feedback"))
+            .description(crate::fl!("play-sounds-when-recording-or-speech-starts"))
             .control(
                 cosmic::widget::toggler(audio_enabled)
                     .on_toggle(|b| Message::Recording(RecordingMessage::AudioFeedbackToggled(b))),
@@ -46,7 +46,7 @@ pub fn page<'a>(
         let non_silent_clone: Vec<AudioTheme> =
             non_silent_themes.iter().copied().copied().collect();
         let theme_control: Element<'a, Message> = if non_silent_themes.is_empty() {
-            text::caption("Loading themes...").into()
+            text::caption(crate::fl!("loading-themes")).into()
         } else {
             widget::dropdown(theme_names, selected_index, move |index| {
                 if let Some(&theme) = non_silent_clone.get(index) {
@@ -81,24 +81,24 @@ pub fn page<'a>(
 
         section = section
             .add(
-                settings::item::builder("Theme")
-                    .description("Sound theme for recording and speech")
+                settings::item::builder(crate::fl!("theme"))
+                    .description(crate::fl!("sound-theme-for-recording-and-speech"))
                     .control(theme_control),
             )
             .add(
-                settings::item::builder("Volume")
+                settings::item::builder(crate::fl!("volume"))
                     .flex_control(volume_control)
                     .align_items(Alignment::Center),
             );
     }
 
     let lang_label = app_primary_language.map_or_else(
-        || "Automatic".to_string(),
+        || crate::fl!("automatic"),
         crate::ui::languages::friendly_name,
     );
-    let language_section = settings::section().title("Language").add(
-        settings::item::builder("Primary Language")
-            .description("Default language for models that support it")
+    let language_section = settings::section().title(crate::fl!("language")).add(
+        settings::item::builder(crate::fl!("primary-language"))
+            .description(crate::fl!("default-language-for-models-that-support-it"))
             .control(
                 widget::button::standard(lang_label).on_press(Message::Language(
                     LanguageMessage::OpenLanguagePicker { model: None },
@@ -116,7 +116,7 @@ pub fn page<'a>(
     blocks.push(language_section.into());
     blocks.push(notifications_section(notification_method));
 
-    page_layout("Customization", settings::view_column(blocks))
+    page_layout(crate::fl!("customization"), settings::view_column(blocks))
 }
 
 /// Notifications section: how either feature's failures reach the user. One
@@ -130,18 +130,15 @@ fn notifications_section(notification_method: NotificationMethod) -> Element<'st
     ];
     let method_names: Vec<String> = methods
         .iter()
-        .map(|m| m.pretty_name().to_string())
+        .map(|m| crate::i18n::notification_method_name(*m))
         .collect();
     let selected_index = methods.iter().position(|m| *m == notification_method);
 
     settings::section()
-        .title("Notifications")
+        .title(crate::fl!("notifications"))
         .add(
-            settings::item::builder("Failure Notices")
-                .description(
-                    "How recording and speech failures are reported. Desktop \
-                     notifications work on any desktop with a notification server.",
-                )
+            settings::item::builder(crate::fl!("failure-notices"))
+                .description(crate::fl!("how-recording-and-speech-failures-are-reported"))
                 .control(widget::dropdown(
                     method_names,
                     selected_index,

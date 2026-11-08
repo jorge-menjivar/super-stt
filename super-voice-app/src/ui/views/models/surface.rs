@@ -161,7 +161,7 @@ pub(super) fn card_surface<'a>(
 /// action in the row that throws something away, and a bare glyph would sit in
 /// the row looking as harmless as Configure. The tooltip carries the label the
 /// icon drops, so the action stays discoverable.
-pub(super) fn deselect_button(tooltip_text: &str, message: Message) -> Element<'_, Message> {
+pub(super) fn deselect_button(tooltip_text: String, message: Message) -> Element<'static, Message> {
     // The icon is left untinted so it takes the pill's foreground colour;
     // tinting it destructive would paint red on red.
     let button = widget::button::icon(icons::phosphor_handle(icons::X))
@@ -226,7 +226,7 @@ pub(super) fn menu_surface<'a>(
 /// without one, a menu of short verbs reads as a wall of text.
 pub(super) fn menu_item(
     glyph: &'static [u8],
-    label: &'static str,
+    label: String,
     message: Message,
 ) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
@@ -306,7 +306,7 @@ pub(super) fn repo_button(source: &str) -> Element<'static, Message> {
     rounded_tooltip(
         widget::button::icon(icons::phosphor_handle(icons::GIT_BRANCH))
             .on_press(Message::Shell(ShellMessage::LaunchUrl(url))),
-        text::body("Open repository"),
+        text::body(crate::fl!("open-repository")),
         widget::tooltip::Position::Top,
     )
 }
@@ -493,14 +493,14 @@ pub(super) fn card_header<'a>(
 ///
 /// No card surface: a card frames a backend that exists, and a bordered
 /// surface holding only a prompt reads as a card whose contents failed to load.
-pub(super) fn empty_state<'a>(
+pub(super) fn empty_state(
     narrow: bool,
-    title: &str,
-    caption: &str,
-    action: Option<Element<'a, Message>>,
-) -> Element<'a, Message> {
+    title: String,
+    caption: String,
+    action: Option<Element<'_, Message>>,
+) -> Element<'_, Message> {
     let glyph = super::active::backend_glyph_tile();
-    let (title, caption) = (title.to_string(), Some(caption.to_string()));
+    let caption = Some(caption);
     let Some(action) = action else {
         return row![glyph, card_title_block(title, "", caption)]
             .spacing(cosmic::theme::spacing().space_s)
@@ -512,7 +512,7 @@ pub(super) fn empty_state<'a>(
 
 /// One of a card's control rows: its label, the line under the label when
 /// there is something to add, and the control.
-pub(super) type ControlRow<'a> = (&'static str, Option<String>, Element<'a, Message>);
+pub(super) type ControlRow<'a> = (String, Option<String>, Element<'a, Message>);
 
 /// A card's controls: one labeled settings row per choice (the model, its
 /// device, voice and language), then the buttons at the end.

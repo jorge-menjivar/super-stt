@@ -24,10 +24,12 @@ pub fn build_dialog(app: &AppModel) -> Option<Element<'_, Message>> {
             .title(title)
             .body(body)
             .primary_action(
-                button::suggested("Download").on_press(Message::Stage(StageMessage::ConfirmBuild)),
+                button::suggested(crate::fl!("download"))
+                    .on_press(Message::Stage(StageMessage::ConfirmBuild)),
             )
             .secondary_action(
-                button::standard("Cancel").on_press(Message::Stage(StageMessage::CancelBuild)),
+                button::standard(crate::fl!("cancel"))
+                    .on_press(Message::Stage(StageMessage::CancelBuild)),
             )
             .into(),
     )
@@ -74,17 +76,23 @@ fn loaded_here(app: &AppModel, pending: &PendingBuild) -> bool {
 
 /// The words, apart from the state they are read from.
 fn question(backend: &str, framework: &str, size: Option<u64>, running: bool) -> (String, String) {
-    let title = format!("Download the {framework} build?");
-    let mut sentences = vec![format!(
-        "{backend} needs its {framework} build to run on {framework}."
+    let title = crate::fl!("download-the-build-question", framework = framework);
+    let mut sentences = vec![crate::fl!(
+        "backend-needs-its-build",
+        backend = backend,
+        framework = framework
     )];
     if let Some(size) = size {
-        sentences.push(format!("The download is {}.", super::fmt::fmt_size(size)));
+        sentences.push(crate::fl!(
+            "the-download-is-size",
+            size = super::fmt::fmt_size(size)
+        ));
     }
-    sentences.push("Your downloaded models are kept.".to_string());
+    sentences.push(crate::fl!("your-downloaded-models-are-kept"));
     if running {
-        sentences.push(format!(
-            "The model restarts on {framework} when it is done."
+        sentences.push(crate::fl!(
+            "the-model-restarts-on-framework",
+            framework = framework
         ));
     }
     (title, sentences.join(" "))
@@ -92,7 +100,17 @@ fn question(backend: &str, framework: &str, size: Option<u64>, running: bool) ->
 
 #[cfg(test)]
 mod tests {
-    use super::question;
+    use crate::i18n::without_isolation;
+
+    fn question(
+        backend: &str,
+        framework: &str,
+        size: Option<u64>,
+        running: bool,
+    ) -> (String, String) {
+        let (title, body) = super::question(backend, framework, size, running);
+        (without_isolation(&title), without_isolation(&body))
+    }
 
     #[test]
     fn the_question_names_the_build_and_its_size() {

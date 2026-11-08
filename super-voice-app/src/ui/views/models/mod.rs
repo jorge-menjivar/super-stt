@@ -105,12 +105,12 @@ pub(crate) fn feature_status_pills(app: &AppModel) -> Element<'_, Message> {
     row![
         feature_pill(
             icons::MICROPHONE,
-            "Speech to text",
+            &crate::fl!("speech-to-text"),
             stage_status(app, crate::state::Stage::Transcription),
         ),
         feature_pill(
             icons::SPEAKER_HIGH,
-            "Text to speech",
+            &crate::fl!("text-to-speech"),
             stage_status(app, crate::state::Stage::Synthesis),
         ),
     ]
@@ -121,7 +121,7 @@ pub(crate) fn feature_status_pills(app: &AppModel) -> Element<'_, Message> {
 
 fn feature_pill<'a>(
     glyph: &'static [u8],
-    feature: &'static str,
+    feature: &str,
     status: ModelStatus,
 ) -> Element<'a, Message> {
     // 14px like the GPU pill's glyph, so both pills keep the bar's height.
@@ -181,14 +181,18 @@ pub(crate) fn gpu_summary(app: &AppModel, compact: bool) -> Option<Element<'_, M
         .gpu_info
         .iter()
         .map(|g| match (g.used_bytes, g.free_bytes) {
-            (Some(used), Some(free)) => format!(
-                "{}\n{} used · {} free · {} total",
-                g.name,
-                fmt_gib(used),
-                fmt_gib(free),
-                fmt_gib(g.total_bytes),
+            (Some(used), Some(free)) => crate::fl!(
+                "gpu-memory-summary",
+                value0 = g.name.as_str(),
+                value1 = fmt_gib(used),
+                value2 = fmt_gib(free),
+                value3 = fmt_gib(g.total_bytes)
             ),
-            _ => format!("{}\n{} total", g.name, fmt_gib(g.total_bytes)),
+            _ => crate::fl!(
+                "gpu-memory-total",
+                value0 = g.name.as_str(),
+                value1 = fmt_gib(g.total_bytes)
+            ),
         })
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -223,7 +227,7 @@ pub(crate) fn gpu_summary(app: &AppModel, compact: bool) -> Option<Element<'_, M
 pub fn page(app: &AppModel) -> Element<'_, Message> {
     let title_row = widget::row::with_capacity(1)
         .align_y(Alignment::Center)
-        .push(text::title3("Models").width(Length::Fill));
+        .push(text::title3(crate::fl!("models")).width(Length::Fill));
 
     let stage = app.models_page.pipeline_step;
     // Measured where the card is drawn, so a wide window with the side panel
@@ -271,7 +275,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
 }
 
 /// The heading over the open step's card.
-fn section_heading(label: &str) -> Element<'_, Message> {
+fn section_heading(label: String) -> Element<'static, Message> {
     widget::row::with_capacity(1)
         .align_y(Alignment::Center)
         .push(text::title4(label).width(Length::Fill))
@@ -292,7 +296,7 @@ pub fn library_page(app: &AppModel) -> Element<'_, Message> {
     let mut header = widget::column::with_capacity(3);
     let title_row = widget::row::with_capacity(1)
         .align_y(Alignment::Center)
-        .push(text::title3("Library").width(Length::Fill));
+        .push(text::title3(crate::fl!("library")).width(Length::Fill));
     header = header.push(page_container(title_row));
     header = header.push(tab_bar_container(models_tab_switcher(app)));
 

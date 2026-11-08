@@ -58,7 +58,7 @@ pub(super) fn update_chip(
     let chip = widget::button::custom(
         row![
             icons::phosphor_tinted(icons::ARROWS_CLOCKWISE, 14.0, fg),
-            text::caption("Update").class(cosmic::theme::Text::Color(fg)),
+            text::caption(crate::fl!("update")).class(cosmic::theme::Text::Color(fg)),
         ]
         .spacing(spacing.space_xxxs)
         .align_y(Alignment::Center),
@@ -73,7 +73,10 @@ pub(super) fn update_chip(
     if tooltips {
         super::surface::rounded_tooltip(
             chip,
-            text::body(format!("Update to {version}")),
+            text::body(crate::fl!(
+                "update-to-version",
+                version = (version).to_string()
+            )),
             widget::tooltip::Position::Top,
         )
     } else {
@@ -91,13 +94,16 @@ pub(super) fn update_progress_chip(
     s: &crate::state::registry::InstallStatus,
 ) -> Element<'static, Message> {
     let label = match (&s.error, s.bytes_total) {
-        (Some(_), _) => "Update failed".to_string(),
+        (Some(_), _) => crate::fl!("update-failed"),
         (None, Some(total)) if total > 0 => {
-            format!("Updating\u{2026} {}%", (s.bytes_done * 100) / total)
+            crate::fl!(
+                "update-backend-percent",
+                value0 = ((s.bytes_done * 100) / total).to_string()
+            )
         }
-        _ => format!(
-            "Updating\u{2026} ({})",
-            super::download::phase_label(s.phase)
+        _ => crate::fl!(
+            "update-backend-progress",
+            value0 = super::download::phase_label(s.phase)
         ),
     };
     let fg = muted_text_color();
@@ -189,14 +195,15 @@ pub(super) fn stage_chips(
 /// "1 model", "9 models", "1 post-processor": what a stage calls its models.
 fn model_count_label(stage: crate::state::Stage, count: usize) -> String {
     use crate::state::Stage;
-    let (one, many) = match stage {
-        Stage::PostProcessing => ("post-processor", "post-processors"),
-        Stage::Transcription | Stage::Synthesis => ("model", "models"),
-    };
-    if count == 1 {
-        format!("1 {one}")
-    } else {
-        format!("{count} {many}")
+    match (stage, count) {
+        (Stage::PostProcessing, 1) => crate::fl!("count-1-post-processor"),
+        (Stage::PostProcessing, _) => {
+            crate::fl!("post-processors-count", count = count.to_string())
+        }
+        (Stage::Transcription | Stage::Synthesis, 1) => crate::fl!("count-1-model"),
+        (Stage::Transcription | Stage::Synthesis, _) => {
+            crate::fl!("models-count", model_count = count.to_string())
+        }
     }
 }
 
@@ -272,10 +279,10 @@ pub(super) fn backend_has_user_url(backend: &crate::daemon::backends::BackendInf
 /// lower alpha so the chip reads as a tag, not a button.
 pub(super) fn capability_chip(
     icon: &'static [u8],
-    label: &'static str,
+    label: impl Into<String>,
     fg: cosmic::iced::Color,
 ) -> Element<'static, Message> {
-    inert_chip(icon, label.to_string(), fg)
+    inert_chip(icon, label.into(), fg)
 }
 
 /// The chip shape itself, for a label only known at runtime. `capability_chip`
@@ -353,9 +360,13 @@ pub(super) fn model_device_chips(devices: &[String]) -> Vec<Element<'static, Mes
     let has = |want: &str| devices.iter().any(|d| d == want);
 
     [
-        (has("gpu"), icons::GRAPHICS_CARD, "Accelerated on GPU"),
-        (has("cpu"), icons::CPU, "Runs on the CPU"),
-        (has("none"), icons::CLOUD, "Runs in the cloud"),
+        (
+            has("gpu"),
+            icons::GRAPHICS_CARD,
+            crate::fl!("accelerated-on-gpu"),
+        ),
+        (has("cpu"), icons::CPU, crate::fl!("runs-on-the-cpu")),
+        (has("none"), icons::CLOUD, crate::fl!("runs-in-the-cloud")),
     ]
     .into_iter()
     .filter(|(present, _, _)| *present)
@@ -452,7 +463,7 @@ pub(super) fn model_tag(name: String) -> Element<'static, Message> {
 /// you want.
 pub(super) struct RoleGroup {
     /// Human label for the role, e.g. `"Speech to text"`.
-    pub label: &'static str,
+    pub label: String,
     /// The model names in this group, in catalog order.
     pub names: Vec<String>,
 }
@@ -462,11 +473,11 @@ pub(super) struct RoleGroup {
 /// An unknown role — one a newer backend declares and this build has no name
 /// for — reads as speech-to-text, matching the wire default and the daemon's
 /// own reading of a missing value.
-pub(super) fn role_label(role: &str) -> &'static str {
+pub(super) fn role_label(role: &str) -> String {
     match role {
-        "post_processor" => "Post-processing",
-        "synthesis" => "Text to speech",
-        _ => "Speech to text",
+        "post_processor" => crate::fl!("post-processing"),
+        "synthesis" => crate::fl!("text-to-speech"),
+        _ => crate::fl!("speech-to-text"),
     }
 }
 
@@ -480,23 +491,23 @@ pub(super) fn role_groups<'a>(models: impl Iterator<Item = (&'a str, &'a str)>) 
     let mut post_processing = Vec::new();
     let mut synthesis = Vec::new();
     for (name, role) in models {
-        match role_label(role) {
-            "Post-processing" => post_processing.push(name.to_string()),
-            "Text to speech" => synthesis.push(name.to_string()),
+        match role {
+            "post_processor" => post_processing.push(name.to_string()),
+            "synthesis" => synthesis.push(name.to_string()),
             _ => transcription.push(name.to_string()),
         }
     }
     [
         RoleGroup {
-            label: "Speech to text",
+            label: role_label("transcription"),
             names: transcription,
         },
         RoleGroup {
-            label: "Post-processing",
+            label: role_label("post_processor"),
             names: post_processing,
         },
         RoleGroup {
-            label: "Text to speech",
+            label: crate::fl!("text-to-speech"),
             names: synthesis,
         },
     ]
@@ -530,7 +541,7 @@ pub(super) fn models_inventory(groups: &[RoleGroup]) -> Option<Element<'static, 
         .iter()
         .map(|group| {
             let mut inventory =
-                row![text::caption(group.label).class(cosmic::theme::Text::Color(muted))]
+                row![text::caption(group.label.clone()).class(cosmic::theme::Text::Color(muted))]
                     .spacing(spacing.space_xxs)
                     .align_y(Alignment::Center);
             for name in group.names.iter().take(MAX_MODEL_TAGS) {
@@ -574,18 +585,18 @@ pub(super) fn cloud_chip(
     egress: CloudEgress<'_>,
 ) -> Element<'static, Message> {
     use super::surface::rounded_tooltip;
-    let chip = capability_chip(icons::CLOUD, "Cloud", fg);
+    let chip = capability_chip(icons::CLOUD, crate::fl!("cloud"), fg);
     if egress.hosts.is_empty() && !egress.user_url {
         return chip;
     }
     let mut popup = widget::column::with_capacity(egress.hosts.len() + 2)
-        .push(text::body("Transmits audio to:"))
+        .push(text::body(crate::fl!("transmits-audio-to")))
         .spacing(cosmic::theme::spacing().space_xxxs);
     for host in egress.hosts {
         popup = popup.push(text::body(format!("• {host}")));
     }
     if egress.user_url {
-        popup = popup.push(text::body("• another URL you set"));
+        popup = popup.push(text::body(crate::fl!("another-url-you-set")));
     }
     rounded_tooltip(chip, popup, widget::tooltip::Position::Top)
 }
@@ -620,7 +631,7 @@ pub(super) fn capability_chips(
         chips.push(if tooltips {
             rounded_tooltip(
                 chip,
-                text::body("Accelerated on GPU"),
+                text::body(crate::fl!("accelerated-on-gpu")),
                 widget::tooltip::Position::Top,
             )
         } else {
@@ -632,7 +643,7 @@ pub(super) fn capability_chips(
         chips.push(if tooltips {
             rounded_tooltip(
                 chip,
-                text::body("Runs on the CPU"),
+                text::body(crate::fl!("runs-on-the-cpu")),
                 widget::tooltip::Position::Top,
             )
         } else {
@@ -643,7 +654,7 @@ pub(super) fn capability_chips(
         chips.push(if tooltips {
             cloud_chip(neutral, egress)
         } else {
-            capability_chip(icons::CLOUD, "Cloud", neutral)
+            capability_chip(icons::CLOUD, crate::fl!("cloud"), neutral)
         });
     }
     if chips.is_empty() {
@@ -673,21 +684,21 @@ pub(super) fn feature_filter_chips(
     on_pick: fn(FeatureFilter) -> Message,
 ) -> Element<'static, Message> {
     chip_group(
-        "Feature",
+        &crate::fl!("feature"),
         false,
         vec![
             (
-                "All",
+                crate::fl!("all"),
                 current == FeatureFilter::All,
                 on_pick(FeatureFilter::All),
             ),
             (
-                "Speech to text",
+                crate::fl!("speech-to-text"),
                 current == FeatureFilter::SpeechToText,
                 on_pick(FeatureFilter::SpeechToText),
             ),
             (
-                "Text to speech",
+                crate::fl!("text-to-speech"),
                 current == FeatureFilter::TextToSpeech,
                 on_pick(FeatureFilter::TextToSpeech),
             ),
@@ -705,17 +716,21 @@ pub(super) fn role_filter_chips(
     on_pick: fn(RoleFilter) -> Message,
 ) -> Element<'static, Message> {
     chip_group(
-        "Kind",
+        &crate::fl!("kind"),
         false,
         vec![
-            ("All", current == RoleFilter::All, on_pick(RoleFilter::All)),
             (
-                "Transcription",
+                crate::fl!("all"),
+                current == RoleFilter::All,
+                on_pick(RoleFilter::All),
+            ),
+            (
+                crate::fl!("transcription"),
                 current == RoleFilter::Transcription,
                 on_pick(RoleFilter::Transcription),
             ),
             (
-                "Post-processing",
+                crate::fl!("post-processing"),
                 current == RoleFilter::PostProcessing,
                 on_pick(RoleFilter::PostProcessing),
             ),
@@ -732,12 +747,20 @@ pub(super) fn runs_on_chips(
     on_pick: fn(Option<bool>) -> Message,
 ) -> Element<'static, Message> {
     chip_group(
-        "Runs on",
+        &crate::fl!("runs-on"),
         false,
         vec![
-            ("All", current.is_none(), on_pick(None)),
-            ("Local", current == Some(false), on_pick(Some(false))),
-            ("Cloud", current == Some(true), on_pick(Some(true))),
+            (crate::fl!("all"), current.is_none(), on_pick(None)),
+            (
+                crate::fl!("local"),
+                current == Some(false),
+                on_pick(Some(false)),
+            ),
+            (
+                crate::fl!("cloud"),
+                current == Some(true),
+                on_pick(Some(true)),
+            ),
         ],
     )
 }
@@ -745,7 +768,7 @@ pub(super) fn runs_on_chips(
 pub(super) fn chip_group(
     label: &str,
     neutral: bool,
-    chips: Vec<(&'static str, bool, Message)>,
+    chips: Vec<(String, bool, Message)>,
 ) -> Element<'static, Message> {
     use cosmic::widget::button;
     let spacing = cosmic::theme::spacing();
@@ -795,9 +818,9 @@ pub(super) fn chip_group(
 pub(super) fn result_count<'a>(shown: usize) -> Element<'a, Message> {
     let muted = muted_text_color();
     let label = if shown == 1 {
-        "1 backend found".to_string()
+        crate::fl!("count-1-backend-found")
     } else {
-        format!("{shown} backends found")
+        crate::fl!("backends-count", shown = (shown).to_string())
     };
     text::caption(label)
         .class(cosmic::theme::Text::Color(muted))
@@ -813,7 +836,7 @@ pub(super) fn result_count<'a>(shown: usize) -> Element<'a, Message> {
 pub(super) fn requirement_warning(label: &str) -> Element<'_, Message> {
     row![
         icons::phosphor_destructive(icons::WARNING, 16.0),
-        text::body(format!("{label} must be set.")),
+        text::body(crate::fl!("required-setting", label = (label).to_string())),
     ]
     .spacing(cosmic::theme::spacing().space_xs)
     .align_y(Alignment::Center)
@@ -1131,10 +1154,24 @@ mod role_group_tests {
     //! order, so two backends with the same kinds read the same way round.
     use super::role_groups;
 
-    fn labels(models: &[(&str, &str)]) -> Vec<(&'static str, Vec<String>)> {
+    /// Each group's label and names. The labels are the English catalog's,
+    /// which is what the tests run with.
+    fn labels(models: &[(&str, &str)]) -> Vec<(String, Vec<String>)> {
         role_groups(models.iter().copied())
             .into_iter()
             .map(|g| (g.label, g.names))
+            .collect()
+    }
+
+    fn expected(groups: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
+        groups
+            .iter()
+            .map(|(label, names)| {
+                (
+                    (*label).to_string(),
+                    names.iter().map(ToString::to_string).collect(),
+                )
+            })
             .collect()
     }
 
@@ -1146,11 +1183,11 @@ mod role_group_tests {
                 ("tidy", "post_processor"),
                 ("whisper-small", "transcription"),
             ]),
-            [
-                ("Speech to text", vec!["whisper-small".to_string()]),
-                ("Post-processing", vec!["tidy".to_string()]),
-                ("Text to speech", vec!["kokoro-82m".to_string()]),
-            ]
+            expected(&[
+                ("Speech to text", &["whisper-small"]),
+                ("Post-processing", &["tidy"]),
+                ("Text to speech", &["kokoro-82m"]),
+            ])
         );
     }
 
@@ -1159,7 +1196,7 @@ mod role_group_tests {
     fn a_synthesis_model_is_text_to_speech() {
         assert_eq!(
             labels(&[("kokoro-82m", "synthesis")]),
-            [("Text to speech", vec!["kokoro-82m".to_string()])]
+            expected(&[("Text to speech", &["kokoro-82m"])])
         );
     }
 }

@@ -39,43 +39,38 @@ use super::surface::{
 /// What a section says that names its stage.
 struct Copy {
     /// The prompt when no backend is selected.
-    unselected: &'static str,
+    unselected: String,
     /// The button that opens the picker sheet, and the sheet's title.
-    select: &'static str,
+    select: String,
     /// The notice for a stage switched on whose model is not running.
-    not_loaded: &'static str,
+    not_loaded: String,
     /// The line above the sheet's rows.
-    sheet_caption: &'static str,
+    sheet_caption: String,
     /// The sheet when nothing installed serves the stage.
-    sheet_empty: &'static str,
+    sheet_empty: String,
 }
 
 fn copy(stage: BlockStage) -> Copy {
     match stage {
         BlockStage::PostProcessing => Copy {
-            unselected: "Optional. Clean up text before it is typed. Remove filler words. \
-                         Improve punctuation and formatting.",
-            select: "Select post-processor backend",
-            not_loaded: "The selected model isn't loaded — transcripts are used as they are.",
-            sheet_caption: "Pick which backend cleans up your transcripts. Add and manage \
-                            backends in your Library.",
-            sheet_empty: "No installed backend provides a post-processor. Open the Library \
-                          to install one.",
+            unselected: crate::fl!("optional-clean-up-text-before-it-is"),
+            select: crate::fl!("select-post-processor-backend"),
+            not_loaded: crate::fl!("the-selected-model-isn-t-loaded-transcripts"),
+            sheet_caption: crate::fl!("pick-which-backend-cleans-up-your-transcripts"),
+            sheet_empty: crate::fl!("no-installed-backend-provides-a-post-processor"),
         },
         BlockStage::Synthesis => Copy {
-            unselected: "Select a backend to start speaking.",
-            select: "Select synthesis backend",
-            not_loaded: "The selected model isn't loaded. Text can't be spoken until it is.",
-            sheet_caption: "Pick which backend powers speech. Add and manage backends in your \
-                            Library.",
-            sheet_empty: "No installed backend provides text to speech. Open the Library to \
-                          install one.",
+            unselected: crate::fl!("select-a-backend-to-start-speaking"),
+            select: crate::fl!("select-synthesis-backend"),
+            not_loaded: crate::fl!("the-selected-model-isn-t-loaded-text"),
+            sheet_caption: crate::fl!("pick-which-backend-powers-speech"),
+            sheet_empty: crate::fl!("no-installed-backend-provides-text-to-speech"),
         },
     }
 }
 
 /// The title of `stage`'s picker sheet.
-pub fn sheet_title(stage: BlockStage) -> &'static str {
+pub fn sheet_title(stage: BlockStage) -> String {
     copy(stage).select
 }
 
@@ -159,7 +154,7 @@ pub(crate) fn section(app: &AppModel, stage: BlockStage, width: f32) -> Element<
     // nothing else on the card would say so. `enabled` and `loaded` are
     // separate fields for exactly this case.
     if block.enabled && !block.loaded {
-        card = card.push(notice(copy.not_loaded));
+        card = card.push(notice(copy.not_loaded.clone()));
     }
 
     // A failed save surfaces on the card that owns it rather than only reaching
@@ -185,11 +180,11 @@ fn header<'a>(
     let source = backend.source.clone();
     let actions = row![
         repo_button(&source),
-        button::standard("Configure").on_press(Message::ModelsPage(
+        button::standard(crate::fl!("configure")).on_press(Message::ModelsPage(
             ModelsPageMessage::OpenBackendConfig(source.clone()),
         )),
         super::surface::deselect_button(
-            "Deselect this backend",
+            crate::fl!("deselect-this-backend"),
             Message::Stage(StageMessage::DeselectBackend {
                 stage: stage.stage()
             }),
@@ -246,7 +241,8 @@ fn control_row<'a>(
             .clone()
             .unwrap_or_else(|| stage.noun().to_string());
         let running = text::body(model.clone()).class(cosmic::theme::Text::Accent);
-        let mut rows: Vec<super::surface::ControlRow<'a>> = vec![("Model", None, running.into())];
+        let mut rows: Vec<super::surface::ControlRow<'a>> =
+            vec![(crate::fl!("model"), None, running.into())];
         let mut buttons = Vec::new();
         // The same picker the disabled card shows, in the same place: a running
         // post-processor's device can be changed in place too.
@@ -254,7 +250,7 @@ fn control_row<'a>(
             super::active::device_dropdown(stage.stage(), &backend.source, &model, app)
         {
             let note = super::active::device_note(app, stage.stage(), &backend.source);
-            rows.push(("Runs on", note, devices));
+            rows.push((crate::fl!("runs-on"), note, devices));
         }
         // Voice before language: it is the one a user changes between
         // utterances, and the one that decides whether a cloning model can
@@ -262,18 +258,18 @@ fn control_row<'a>(
         if stage == BlockStage::Synthesis
             && let Some(voice) = super::voice::voice_dropdown(backend, &model, app)
         {
-            rows.push(("Voice", None, voice));
+            rows.push((crate::fl!("voice"), None, voice));
         }
         // The same control the transcription card shows under its active
         // model, from the same function.
         if let Some(lang_button) = language_button(stage.stage(), backend, &model, app) {
-            rows.push(("Language", None, lang_button));
+            rows.push((crate::fl!("language"), None, lang_button));
         }
         if stage == BlockStage::Synthesis {
             buttons.push(reload_button(app, stage));
         }
         buttons.push(
-            button::standard("Unload")
+            button::standard(crate::fl!("unload"))
                 .leading_icon(icons::phosphor_handle(icons::STOP))
                 .on_press(Message::Stage(StageMessage::Unload {
                     stage: stage.stage(),
@@ -298,9 +294,10 @@ fn control_row<'a>(
             model: models_pick[index].clone(),
         })
     })
-    .placeholder("Select model");
+    .placeholder(crate::fl!("select-model"));
 
-    let mut rows: Vec<super::surface::ControlRow<'a>> = vec![("Model", None, dropdown.into())];
+    let mut rows: Vec<super::surface::ControlRow<'a>> =
+        vec![(crate::fl!("model"), None, dropdown.into())];
     let mut buttons = Vec::new();
 
     // Device dropdown — keyed on the same model the dropdown above shows, so
@@ -313,7 +310,7 @@ fn control_row<'a>(
         && let Some(devices) =
             super::active::device_dropdown(stage.stage(), &backend.source, model, app)
     {
-        rows.push(("Runs on", None, devices));
+        rows.push((crate::fl!("runs-on"), None, devices));
     }
 
     // The voice, for the same model, before its language as on the running
@@ -322,7 +319,7 @@ fn control_row<'a>(
         && let Some(model) = shown.as_deref()
         && let Some(voice) = super::voice::voice_dropdown(backend, model, app)
     {
-        rows.push(("Voice", None, voice));
+        rows.push((crate::fl!("voice"), None, voice));
     }
 
     // Per-model language, inline after the device dropdown — the same position
@@ -330,7 +327,7 @@ fn control_row<'a>(
     if let Some(model) = shown.as_deref()
         && let Some(lang_button) = language_button(stage.stage(), backend, model, app)
     {
-        rows.push(("Language", None, lang_button));
+        rows.push((crate::fl!("language"), None, lang_button));
     }
 
     // Load — enabled only when a model is staged AND (a device is staged OR the
@@ -343,7 +340,7 @@ fn control_row<'a>(
     let staged_ok =
         selected.is_some() && (app.staged_picks.device(stage.stage()).is_some() || staged_online);
     buttons.push(
-        button::suggested("Load model")
+        button::suggested(crate::fl!("load-model"))
             .leading_icon(icons::phosphor_handle(icons::PLAY))
             .on_press_maybe((staged_ok && app.is_model_ready(stage.stage())).then_some(
                 Message::Stage(StageMessage::Load {
@@ -369,7 +366,7 @@ fn reload_button(app: &AppModel, stage: BlockStage) -> Element<'_, Message> {
                     stage: stage.stage(),
                 },
             ))),
-        text::body("Reload this model"),
+        text::body(crate::fl!("reload-this-model")),
         widget::tooltip::Position::Bottom,
     )
 }
@@ -396,10 +393,10 @@ fn card_model(app: &AppModel, stage: BlockStage, backend: &BackendInfo) -> Optio
 fn unselected_state<'a>(stage: BlockStage, copy: &Copy, narrow: bool) -> Element<'a, Message> {
     empty_state(
         narrow,
-        "No backend selected",
-        copy.unselected,
+        crate::fl!("no-backend-selected"),
+        copy.unselected.clone(),
         Some(
-            button::suggested(copy.select)
+            button::suggested(copy.select.clone())
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
                 .on_press(Message::Shell(ShellMessage::ToggleContextPage(
                     ContextPage::SelectBlockBackend(stage),
@@ -411,10 +408,10 @@ fn unselected_state<'a>(stage: BlockStage, copy: &Copy, narrow: bool) -> Element
 
 /// A warning glyph plus text, for the not-loaded notice. Mirrors
 /// [`card_error`](super::active::card_error), which is private to its module.
-fn notice(message: &str) -> Element<'_, Message> {
+fn notice(message: String) -> Element<'static, Message> {
     row![
         icons::phosphor_destructive(icons::WARNING, 18.0),
-        text::body(message.to_string()),
+        text::body(message),
     ]
     .spacing(cosmic::theme::spacing().space_xs)
     .align_y(Alignment::Center)
@@ -443,7 +440,7 @@ pub fn sheet(app: &AppModel, stage: BlockStage) -> Element<'_, Message> {
     if eligible.is_empty() {
         return col
             .push(text::body(if answered.is_none() {
-                "Loading…"
+                crate::fl!("loading-progress")
             } else {
                 copy.sheet_empty
             }))

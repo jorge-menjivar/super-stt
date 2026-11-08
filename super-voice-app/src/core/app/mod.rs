@@ -307,10 +307,14 @@ impl cosmic::Application for AppModel {
         let brand = cosmic::widget::container(mark).padding([0, 12, 0, 8]);
 
         let menu_bar = menu::bar(vec![menu::Tree::with_children(
-            menu::root("View").apply(Element::from),
+            menu::root(crate::fl!("view")).apply(Element::from),
             menu::items(
                 &HashMap::new(),
-                vec![menu::Item::Button("About", None, MenuAction::About)],
+                vec![menu::Item::Button(
+                    crate::fl!("about"),
+                    None,
+                    MenuAction::About,
+                )],
             ),
         )]);
 

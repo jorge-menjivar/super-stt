@@ -58,7 +58,7 @@ pub(super) fn language_button<'a>(
 
     let label = block.map_or_else(
         // Block not fetched yet — a neutral label, not a guessed language.
-        || "Language".to_string(),
+        || crate::fl!("language"),
         |block| {
             let resolved_from = if block.source.is_empty() {
                 "default"
@@ -67,8 +67,10 @@ pub(super) fn language_button<'a>(
             };
             match (block.effective.as_deref(), resolved_from) {
                 (Some(tag), "override") => friendly_name(tag),
-                (Some(tag), "global") => format!("{} · global", friendly_name(tag)),
-                _ => format!("{} · default", friendly_name(&block.primary)),
+                (Some(tag), "global") => {
+                    crate::fl!("language-global", value0 = friendly_name(tag))
+                }
+                _ => crate::fl!("language-default", value0 = friendly_name(&block.primary)),
             }
         },
     );

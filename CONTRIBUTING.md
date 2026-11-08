@@ -326,3 +326,9 @@ By contributing to Super Voice, you agree that your contributions will be licens
 - Open an issue for feature requests or bugs
 - Join discussions in existing issues
 - Contact: jorge@menjivar.ai
+
+### Interface translations
+
+The settings app uses Fluent resources in `super-voice-app/i18n/<language>/super_voice_app.ftl`. Its explicit domain is `super_voice_app`; the older hyphenated English scaffold is not used. English is the fallback. Keep message IDs and variables aligned with English when adding a language, and route user-facing labels through `fl!` rather than changing enum wire values. Backend-provided names, descriptions and diagnostic details remain supplied by their backends.
+
+The app follows the desktop language; `LANGUAGE=fr super-voice-app` selects French when testing. Run `just test -p super-voice-app i18n::tests` to check regional French selection, English fallback, variable substitution and catalog parity.

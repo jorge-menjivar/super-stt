@@ -33,13 +33,17 @@ pub fn add_backend_sheet(app: &AppModel) -> Element<'_, Message> {
     // Source row: label left, dropdown right, the COSMIC settings idiom.
     let selected = AddSource::ALL.iter().position(|s| *s == source);
     let source_row = row![
-        text::body("Source").class(cosmic::theme::Text::Color(muted)),
+        text::body(crate::fl!("source")).class(cosmic::theme::Text::Color(muted)),
         horizontal_space(),
-        widget::dropdown(&SOURCE_LABELS, selected, |i| {
-            Message::ModelsPage(ModelsPageMessage::AddSourceChanged(
-                AddSource::ALL[i.min(AddSource::ALL.len() - 1)],
-            ))
-        }),
+        widget::dropdown(
+            vec![crate::fl!("git-repository"), crate::fl!("local-folder")],
+            selected,
+            |i| {
+                Message::ModelsPage(ModelsPageMessage::AddSourceChanged(
+                    AddSource::ALL[i.min(AddSource::ALL.len() - 1)],
+                ))
+            }
+        ),
     ]
     .spacing(spacing.space_xs)
     .align_y(Alignment::Center);
@@ -75,10 +79,6 @@ pub fn add_backend_footer(app: &AppModel) -> Element<'_, Message> {
     install_row(app, muted_text_color())
 }
 
-/// Dropdown labels, in [`AddSource::ALL`] order. `widget::dropdown` borrows
-/// this for the life of the view, so it is a const rather than a temporary.
-const SOURCE_LABELS: [&str; 2] = ["Git repository", "Local folder"];
-
 /// URL field plus Check. Resolving a URL spends one of GitHub's 60
 /// unauthenticated API calls an hour (`GITHUB_TOKEN` is optional, so most
 /// installs have that budget), so the trip is worth an explicit press rather
@@ -88,9 +88,9 @@ fn repository_entry(app: &AppModel, gap: u16) -> Element<'_, Message> {
     let checking = app.registry.add_preview.is_checking();
 
     let mut check = button::standard(if checking {
-        "Checking\u{2026}"
+        crate::fl!("checking-progress")
     } else {
-        "Check"
+        crate::fl!("check")
     });
     if !checking && !url.is_empty() {
         check = check.on_press(Message::ModelsPage(ModelsPageMessage::CheckAddSource));
@@ -126,9 +126,9 @@ fn folder_entry(app: &AppModel, gap: u16) -> Element<'_, Message> {
     let checking = app.registry.add_preview.is_checking();
 
     let mut check = button::standard(if checking {
-        "Checking\u{2026}"
+        crate::fl!("checking-progress")
     } else {
-        "Check"
+        crate::fl!("check")
     });
     if !checking && !path.is_empty() {
         check = check.on_press(Message::ModelsPage(ModelsPageMessage::CheckAddSource));
@@ -139,7 +139,7 @@ fn folder_entry(app: &AppModel, gap: u16) -> Element<'_, Message> {
             .on_input(|x| Message::ModelsPage(ModelsPageMessage::AddFolderInputChanged(x)))
             .on_submit(|_| Message::ModelsPage(ModelsPageMessage::CheckAddSource))
             .width(Length::Fill),
-        button::standard("Choose\u{2026}")
+        button::standard(crate::fl!("choose-progress"))
             .on_press(Message::ModelsPage(ModelsPageMessage::ImportBackendFromDir)),
         check,
     ]
@@ -156,16 +156,14 @@ fn preview_panel(app: &AppModel, muted: cosmic::iced::Color) -> Element<'_, Mess
         PreviewState::Empty => {
             let hint = match app.registry.add_source {
                 AddSource::Repository => {
-                    "Paste a repository URL and press Check. Super Voice reads its latest release \
-                     and shows what it found before anything is installed."
+                    crate::fl!("paste-a-repository-url-and-press-check")
                 }
                 AddSource::Folder => {
-                    "Choose a folder that holds a backend.toml manifest. Super Voice reads it and \
-                     shows what it found before anything is copied."
+                    crate::fl!("choose-a-folder-that-holds-a-backend")
                 }
             };
             column![
-                text::body("Nothing to preview yet"),
+                text::body(crate::fl!("nothing-to-preview-yet")),
                 text::caption(hint).class(cosmic::theme::Text::Color(muted)),
             ]
             .spacing(spacing.space_xxs)
@@ -178,7 +176,8 @@ fn preview_panel(app: &AppModel, muted: cosmic::iced::Color) -> Element<'_, Mess
         // comes from state and the app ticks it while the check is in flight.
         PreviewState::Checking(what) => row![
             icons::spinner(18.0, muted, app.registry.add_spin),
-            text::body(format!("Reading {what}\u{2026}")).class(cosmic::theme::Text::Color(muted)),
+            text::body(crate::fl!("reading-source", what = what.as_str()))
+                .class(cosmic::theme::Text::Color(muted)),
         ]
         .spacing(spacing.space_xs)
         .align_y(Alignment::Center)
@@ -216,12 +215,12 @@ fn resolved_preview(
         let reason = b
             .compatibility
             .reason
-            .as_deref()
-            .unwrap_or("This backend cannot run on this computer.");
+            .clone()
+            .unwrap_or_else(|| crate::fl!("this-backend-cannot-run-on-this-computer"));
         col = col.push(
             row![
                 icons::phosphor_destructive(icons::WARNING, 15.0),
-                text::body(reason.to_string()).width(Length::Fill),
+                text::body(reason.clone()).width(Length::Fill),
             ]
             .spacing(spacing.space_xs),
         );
@@ -280,16 +279,16 @@ fn resolved_preview(
         col = col.push(card_divider());
         col = col.push(
             text::caption(if b.models.len() == 1 {
-                "Model"
+                crate::fl!("model")
             } else {
-                "Models"
+                crate::fl!("models")
             })
             .class(cosmic::theme::Text::Color(muted)),
         );
         for m in &b.models {
             let mut r = row![
                 text::caption(m.name.clone()).width(Length::Fill),
-                count_chip(role_label(&m.product.role).to_string()),
+                count_chip(role_label(&m.product.role)),
             ]
             .spacing(spacing.space_xxs)
             .align_y(Alignment::Center);
@@ -318,10 +317,10 @@ fn facts(b: &super_voice_shared::registry::RegistryBackend) -> Vec<(String, Stri
     let mut out = Vec::with_capacity(5);
 
     out.push((
-        "Runs as".to_string(),
+        crate::fl!("runs-as"),
         match b.kind.as_str() {
-            "wasm" => "WASM component, sandboxed".to_string(),
-            "subprocess" => "Native subprocess".to_string(),
+            "wasm" => crate::fl!("wasm-component-sandboxed"),
+            "subprocess" => crate::fl!("native-subprocess"),
             other => other.to_string(),
         },
         FactStyle::Plain,
@@ -338,7 +337,7 @@ fn facts(b: &super_voice_shared::registry::RegistryBackend) -> Vec<(String, Stri
         .map(|s| s.label.as_str())
         .collect();
     if !needed.is_empty() {
-        out.push(("Needs".to_string(), needed.join(", "), FactStyle::Plain));
+        out.push((crate::fl!("needs"), needed.join(", "), FactStyle::Plain));
     }
 
     // Always, including when it is empty: "nothing, runs offline" is the
@@ -346,13 +345,13 @@ fn facts(b: &super_voice_shared::registry::RegistryBackend) -> Vec<(String, Stri
     // the absence is worth as much as the list.
     if b.allowed_hosts.is_empty() {
         out.push((
-            "Reaches".to_string(),
-            "Nothing. Runs offline.".to_string(),
+            crate::fl!("reaches"),
+            crate::fl!("nothing-runs-offline"),
             FactStyle::Good,
         ));
     } else {
         out.push((
-            "Reaches".to_string(),
+            crate::fl!("reaches"),
             b.allowed_hosts.join(", "),
             FactStyle::Mono,
         ));
@@ -363,7 +362,7 @@ fn facts(b: &super_voice_shared::registry::RegistryBackend) -> Vec<(String, Stri
     {
         let accel = asset.accel.join(", ");
         out.push((
-            "Built for".to_string(),
+            crate::fl!("built-for"),
             if accel.is_empty() {
                 asset.target.clone()
             } else {
@@ -373,7 +372,7 @@ fn facts(b: &super_voice_shared::registry::RegistryBackend) -> Vec<(String, Stri
         ));
     }
 
-    out.push(("License".to_string(), b.license.clone(), FactStyle::Plain));
+    out.push((crate::fl!("license"), b.license.clone(), FactStyle::Plain));
     out
 }
 
@@ -393,16 +392,19 @@ fn install_row(app: &AppModel, muted: cosmic::iced::Color) -> Element<'_, Messag
     let (label, live) = match (in_flight, ready) {
         (Some(s), _) => (
             match &s.error {
-                Some(_) => "Failed".to_string(),
-                None => format!(
-                    "Installing\u{2026} ({})",
-                    super::download::phase_label(s.phase)
+                Some(_) => crate::fl!("failed"),
+                None => crate::fl!(
+                    "install-backend-progress",
+                    value0 = super::download::phase_label(s.phase)
                 ),
             },
             false,
         ),
-        (None, Some(b)) if b.compatibility.compatible => (format!("Install {}", b.name), true),
-        _ => ("Install".to_string(), false),
+        (None, Some(b)) if b.compatibility.compatible => (
+            crate::fl!("install-backend", value0 = b.name.as_str()),
+            true,
+        ),
+        _ => (crate::fl!("install"), false),
     };
 
     let mut btn = button::suggested(label);
@@ -413,16 +415,18 @@ fn install_row(app: &AppModel, muted: cosmic::iced::Color) -> Element<'_, Messag
     let note: Element<'_, Message> = if let Some(err) = start_error {
         row![
             icons::phosphor_destructive(icons::WARNING, 14.0),
-            text::caption(format!("Failed to start: {err}")),
+            text::caption(crate::fl!("failed-start", err = err.as_str())),
         ]
         .spacing(spacing.space_xxs)
         .align_y(Alignment::Center)
         .into()
     } else if let Some(s) = in_flight {
         match (s.failure(), s.bytes_total) {
-            (Some(failure), _) => text::caption(format!("Failed: {failure}"))
-                .class(cosmic::theme::Text::Color(muted))
-                .into(),
+            (Some(failure), _) => {
+                text::caption(crate::fl!("failed-detail", err = failure.as_str()))
+                    .class(cosmic::theme::Text::Color(muted))
+                    .into()
+            }
             (None, Some(total)) if total > 0 => {
                 text::caption(format!("{}%", (s.bytes_done * 100) / total))
                     .class(cosmic::theme::Text::Color(muted))
@@ -435,12 +439,16 @@ fn install_row(app: &AppModel, muted: cosmic::iced::Color) -> Element<'_, Messag
         // is a bare button and the version it commits to is only readable by
         // scrolling the preview back up.
         let where_from = match app.registry.add_source {
-            AddSource::Repository => "from its latest release",
-            AddSource::Folder => "copied from disk",
+            AddSource::Repository => crate::fl!("from-its-latest-release"),
+            AddSource::Folder => crate::fl!("copied-from-disk"),
         };
-        text::caption(format!("Version {}, {where_from}", b.version))
-            .class(cosmic::theme::Text::Color(muted))
-            .into()
+        text::caption(crate::fl!(
+            "backend-version-source",
+            value0 = b.version.as_str(),
+            where_from = where_from.as_str()
+        ))
+        .class(cosmic::theme::Text::Color(muted))
+        .into()
     } else {
         horizontal_space().into()
     };

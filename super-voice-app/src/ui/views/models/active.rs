@@ -91,11 +91,11 @@ pub(super) fn active_backend_card<'a>(
     let description = super::surface::backend_description(app, &source);
     let actions = row![
         super::surface::repo_button(&source),
-        button::standard("Configure").on_press(Message::ModelsPage(
+        button::standard(crate::fl!("configure")).on_press(Message::ModelsPage(
             ModelsPageMessage::OpenBackendConfig(source.clone()),
         )),
         super::surface::deselect_button(
-            "Deselect this backend",
+            crate::fl!("deselect-this-backend"),
             Message::Stage(StageMessage::DeselectBackend {
                 stage: Stage::Transcription
             }),
@@ -201,7 +201,7 @@ pub(super) fn device_dropdown<'a>(
                 device: pick[index].clone(),
             })
         })
-        .placeholder("Select")
+        .placeholder(crate::fl!("select"))
         .into(),
     )
 }
@@ -244,7 +244,8 @@ pub(super) fn loaded_model_summary<'a>(
     app: &'a AppModel,
 ) -> Element<'a, Message> {
     let running = text::body(app.current_model.clone()).class(cosmic::theme::Text::Accent);
-    let mut rows: Vec<super::surface::ControlRow<'a>> = vec![("Model", None, running.into())];
+    let mut rows: Vec<super::surface::ControlRow<'a>> =
+        vec![(crate::fl!("model"), None, running.into())];
     let mut buttons = Vec::new();
     // The same picker the unloaded card shows, in the same place. Changing it
     // now reloads the model onto the new device rather than staging a choice
@@ -256,18 +257,18 @@ pub(super) fn loaded_model_summary<'a>(
         app,
     ) {
         let note = device_note(app, Stage::Transcription, &backend.source);
-        rows.push(("Runs on", note, devices));
+        rows.push((crate::fl!("runs-on"), note, devices));
     }
     // Per-model language, for a multilingual model.
     if let Some(lang_button) =
         language_button(Stage::Transcription, backend, &app.current_model, app)
     {
-        rows.push(("Language", None, lang_button));
+        rows.push((crate::fl!("language"), None, lang_button));
     }
     // A leading stop glyph fronts the Unload label, mirroring the Load button's
     // play icon so load/unload read as a play/stop pair.
     buttons.push(
-        button::standard("Unload")
+        button::standard(crate::fl!("unload"))
             .leading_icon(icons::phosphor_handle(icons::STOP))
             .on_press(Message::Stage(StageMessage::Unload {
                 stage: Stage::Transcription,
@@ -360,10 +361,10 @@ pub(super) fn staged_model_picker<'a>(
             model: model_names_pick[index].clone(),
         })
     })
-    .placeholder("Select model");
+    .placeholder(crate::fl!("select-model"));
 
     let mut rows: Vec<super::surface::ControlRow<'a>> =
-        vec![("Model", None, model_dropdown.into())];
+        vec![(crate::fl!("model"), None, model_dropdown.into())];
     let mut buttons = Vec::new();
 
     // Device dropdown — only once the daemon has answered what the staged
@@ -380,7 +381,7 @@ pub(super) fn staged_model_picker<'a>(
     if let Some(model) = staged_model
         && let Some(devices) = device_dropdown(Stage::Transcription, &backend.source, model, app)
     {
-        rows.push(("Runs on", None, devices));
+        rows.push((crate::fl!("runs-on"), None, devices));
     }
 
     // Per-model language, after the device — shown only for a staged
@@ -388,7 +389,7 @@ pub(super) fn staged_model_picker<'a>(
     if let Some(model) = staged_model
         && let Some(lang_button) = language_button(Stage::Transcription, backend, model, app)
     {
-        rows.push(("Language", None, lang_button));
+        rows.push((crate::fl!("language"), None, lang_button));
     }
 
     // Load button — enabled only when a model is staged AND (the staged
@@ -404,7 +405,7 @@ pub(super) fn staged_model_picker<'a>(
     let no_viable_device = !staged_online && staged_devices.is_some_and(<[String]>::is_empty);
     let staged_ok = staged_model.is_some()
         && (app.staged_picks.device(Stage::Transcription).is_some() || staged_online);
-    let load_button = button::suggested("Load model")
+    let load_button = button::suggested(crate::fl!("load-model"))
         .leading_icon(icons::phosphor_handle(icons::PLAY))
         .on_press_maybe(
             (staged_ok && app.is_model_ready(Stage::Transcription)).then_some(Message::Stage(
@@ -459,7 +460,12 @@ pub(super) fn operation_status(app: &AppModel, stage: Stage) -> Option<Element<'
             load,
         } => Some(match load {
             Some(load) => card_load_progress(target_model, load),
-            None => text::body(format!("Loading {target_model}: {status_message}")).into(),
+            None => text::body(crate::fl!(
+                "loading-model-status",
+                target_model = target_model.as_str(),
+                status_message = status_message.as_str()
+            ))
+            .into(),
         }),
         ModelOperationState::Error { message } => Some(card_error(message)),
     }
@@ -470,11 +476,11 @@ pub(super) fn operation_status(app: &AppModel, stage: Stage) -> Option<Element<'
 /// routes to this card is bytes coming off the network, and an unrecognised
 /// status reads as a download because that is what every status other than
 /// `verifying` has ever meant here.
-pub(super) fn provisioning_verb(status: &str) -> &'static str {
+pub(super) fn provisioning_verb(status: &str) -> String {
     if status == "verifying" {
-        "Verifying"
+        crate::fl!("verifying")
     } else {
-        "Downloading"
+        crate::fl!("downloading")
     }
 }
 
@@ -500,18 +506,22 @@ pub(super) fn card_provisioning_progress<'a>(
     } else {
         (progress.percentage / 100.0).clamp(0.0, 1.0)
     };
-    let line = format!(
-        "{} {} ({}/{}): {:.1}%",
-        provisioning_verb(&progress.status),
-        target_model,
-        progress.file_index + 1,
-        progress.total_files,
-        progress.percentage
+    let line = crate::fl!(
+        "provision-model-progress",
+        value0 = provisioning_verb(&progress.status),
+        value1 = (target_model).to_string(),
+        value2 = (progress.file_index + 1).to_string(),
+        value3 = (progress.total_files).to_string(),
+        value4 = format!("{:.1}", progress.percentage)
     );
     let bytes = if progress.total_bytes > 0 {
         let mb = progress.bytes_downloaded as f64 / (1024.0 * 1024.0);
         let total = progress.total_bytes as f64 / (1024.0 * 1024.0);
-        format!("{mb:.1} / {total:.1} MB")
+        crate::fl!(
+            "download-size",
+            mb = format!("{:.1}", mb),
+            total = format!("{:.1}", total)
+        )
     } else {
         String::new()
     };
@@ -520,7 +530,7 @@ pub(super) fn card_provisioning_progress<'a>(
         widget::determinate_linear(fraction.max(0.05)).width(Length::Fill),
         row![
             text::caption(bytes).width(Length::Fill),
-            widget::button::destructive("Cancel")
+            widget::button::destructive(crate::fl!("cancel"))
                 // The card's own stage, so the cancel reaches the download
                 // this card is showing.
                 .on_press(Message::Download(DownloadMessage::CancelDownload(stage))),
@@ -553,17 +563,31 @@ fn card_build_progress(app: &AppModel, stage: Stage) -> Option<Element<'_, Messa
         (true, Some(total)) => {
             let fraction = (done as f32 / total as f32).clamp(0.0, 1.0);
             (
-                format!("Downloading the {name} build: {:.0}%", fraction * 100.0),
+                crate::fl!(
+                    "downloading-the-build-percent",
+                    framework = name.as_str(),
+                    percent = format!("{:.0}", fraction * 100.0)
+                ),
                 fraction,
             )
         }
-        (true, None) => (format!("Downloading the {name} build"), 0.0),
-        (false, _) => (format!("Installing the {name} build"), 1.0),
+        (true, None) => (
+            crate::fl!("downloading-the-build", framework = name.as_str()),
+            0.0,
+        ),
+        (false, _) => (
+            crate::fl!("installing-the-build", framework = name.as_str()),
+            1.0,
+        ),
     };
     let bytes = match total {
         Some(total) if downloading => {
             let mb = |b: u64| b as f64 / (1024.0 * 1024.0);
-            format!("{:.1} / {:.1} MB", mb(done), mb(total))
+            crate::fl!(
+                "download-size",
+                mb = format!("{:.1}", mb(done)),
+                total = format!("{:.1}", mb(total))
+            )
         }
         _ => String::new(),
     };
@@ -583,20 +607,20 @@ fn card_build_progress(app: &AppModel, stage: Stage) -> Option<Element<'_, Messa
 /// repeat, and the model being loaded otherwise.
 fn load_title(load: &LoadProgress, target_model: &str) -> String {
     if load.phase.as_deref() == Some(load_progress::phase::INITIAL_SETUP) {
-        "Initial setup".to_string()
+        crate::fl!("initial-setup")
     } else {
-        format!("Loading {target_model}")
+        crate::fl!("loading-model", target_model = (target_model).to_string())
     }
 }
 
 /// What the backend says it is doing, in words. An id this app does not know
 /// is still a load in progress, so it reads as one rather than as an error.
-pub(super) fn load_step(step: Option<&str>) -> &'static str {
+pub(super) fn load_step(step: Option<&str>) -> String {
     match step {
-        Some(load_progress::step::LOADING_WEIGHTS) => "Loading weights",
-        Some(load_progress::step::BUILDING_KERNELS) => "Building kernels",
-        Some(load_progress::step::WARMING_UP) => "Warming up",
-        _ => "Loading",
+        Some(load_progress::step::LOADING_WEIGHTS) => crate::fl!("loading-weights"),
+        Some(load_progress::step::BUILDING_KERNELS) => crate::fl!("building-kernels"),
+        Some(load_progress::step::WARMING_UP) => crate::fl!("warming-up"),
+        _ => crate::fl!("loading"),
     }
 }
 
@@ -735,11 +759,11 @@ mod load_progress_tests {
         };
         assert_eq!(
             load_title(&ordinary, "voxtral-mini"),
-            "Loading voxtral-mini"
+            "Loading \u{2068}voxtral-mini\u{2069}"
         );
         assert_eq!(
             load_title(&LoadProgress::default(), "voxtral-mini"),
-            "Loading voxtral-mini"
+            "Loading \u{2068}voxtral-mini\u{2069}"
         );
     }
 

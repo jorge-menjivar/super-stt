@@ -27,11 +27,11 @@ use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage};
 
 /// The name a stage goes by on its step and above its card.
-pub(super) const fn stage_name(stage: Stage) -> &'static str {
+pub(super) fn stage_name(stage: Stage) -> String {
     match stage {
-        Stage::Transcription => "Transcription",
-        Stage::PostProcessing => "Post-processing",
-        Stage::Synthesis => "Synthesis",
+        Stage::Transcription => crate::fl!("transcription"),
+        Stage::PostProcessing => crate::fl!("post-processing"),
+        Stage::Synthesis => crate::fl!("synthesis"),
     }
 }
 
@@ -49,12 +49,12 @@ fn empty(stage: Stage) -> StepSummary {
     match stage {
         // Optional: transcripts are typed as they are without one.
         Stage::PostProcessing => StepSummary {
-            title: "Off".to_string(),
-            detail: "Optional".to_string(),
+            title: crate::fl!("off"),
+            detail: crate::fl!("optional"),
         },
         Stage::Transcription | Stage::Synthesis => StepSummary {
-            title: "None".to_string(),
-            detail: "Select a backend".to_string(),
+            title: crate::fl!("none"),
+            detail: crate::fl!("select-a-backend"),
         },
     }
 }
@@ -87,7 +87,7 @@ pub(super) fn transcription_summary(
     let detail = if loaded_for_backend && !loaded_model.is_empty() {
         running(loaded_model, Some(device))
     } else {
-        "Not loaded".to_string()
+        crate::fl!("not-loaded")
     };
     StepSummary {
         title: name.to_string(),
@@ -108,7 +108,7 @@ pub(super) fn block_summary(
     let title = block.name.clone().unwrap_or_else(|| source.to_string());
     let detail = match block.model.as_deref() {
         Some(model) if block.enabled && block.loaded => running(model, block.running_device()),
-        _ => "Not loaded".to_string(),
+        _ => crate::fl!("not-loaded"),
     };
     StepSummary { title, detail }
 }
@@ -130,10 +130,10 @@ fn operation(op: &ModelOperationState) -> Option<(String, Option<f32>)> {
                     let fraction = fraction.clamp(0.0, 1.0);
                     Some((format!("{step} · {:.0}%", fraction * 100.0), Some(fraction)))
                 }
-                None => Some((step.to_string(), None)),
+                None => Some((step, None)),
             }
         }
-        ModelOperationState::Error { .. } => Some(("Load failed".to_string(), None)),
+        ModelOperationState::Error { .. } => Some((crate::fl!("load-failed"), None)),
     }
 }
 
@@ -160,7 +160,7 @@ const ROW_WIDTH: f32 = 600.0;
 /// One item of a feature's pipeline.
 enum Item {
     /// Where the feature starts or stops: a name and a line about it.
-    End(&'static str, &'static str),
+    End(String, String),
     /// A stage the user sets.
     Step(Stage),
 }
@@ -179,23 +179,23 @@ pub(super) fn pipelines(app: &AppModel) -> Element<'_, Message> {
                 app,
                 stacked,
                 icons::MICROPHONE,
-                "Speech to text",
+                crate::fl!("speech-to-text"),
                 &[
-                    Item::End("Microphone", "Your voice"),
+                    Item::End(crate::fl!("microphone"), crate::fl!("your-voice")),
                     Item::Step(Stage::Transcription),
                     Item::Step(Stage::PostProcessing),
-                    Item::End("Typed", "Into your app"),
+                    Item::End(crate::fl!("typed"), crate::fl!("into-your-app")),
                 ],
             ),
             feature(
                 app,
                 stacked,
                 icons::SPEAKER_HIGH,
-                "Text to speech",
+                crate::fl!("text-to-speech"),
                 &[
-                    Item::End("Text", "From your app"),
+                    Item::End(crate::fl!("text"), crate::fl!("from-your-app")),
                     Item::Step(Stage::Synthesis),
-                    Item::End("Speakers", "Read aloud"),
+                    Item::End(crate::fl!("speakers"), crate::fl!("read-aloud")),
                 ],
             ),
         ]
@@ -212,7 +212,7 @@ fn feature<'a>(
     app: &'a AppModel,
     stacked: bool,
     glyph: &'static [u8],
-    name: &'a str,
+    name: String,
     items: &[Item],
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
@@ -224,9 +224,9 @@ fn feature<'a>(
     .spacing(spacing.space_xs)
     .align_y(Alignment::Center);
 
-    let built = items.iter().map(|item| match *item {
-        Item::End(name, caption) => end(name, caption, stacked),
-        Item::Step(stage) => step(app, stage, selected),
+    let built = items.iter().map(|item| match item {
+        Item::End(name, caption) => end(name.clone(), caption.clone(), stacked),
+        Item::Step(stage) => step(app, *stage, selected),
     });
     let count = items.len();
     let body: Element<'a, Message> = if stacked {
@@ -268,7 +268,7 @@ fn caret<'a>(down: bool) -> Element<'a, Message> {
 /// nothing to set there: in a row, a name over a line about it, at a fixed
 /// width so both rows' steps start at the same place; in a column, the two
 /// side by side on one line.
-fn end<'a>(name: &'a str, caption: &'a str, stacked: bool) -> Element<'a, Message> {
+fn end<'a>(name: String, caption: String, stacked: bool) -> Element<'a, Message> {
     let muted = muted_text_color();
     let name = text::body(name).font(cosmic::font::semibold());
     let caption = text::caption(caption).class(cosmic::theme::Text::Color(muted));

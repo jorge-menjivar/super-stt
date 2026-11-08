@@ -28,10 +28,10 @@ fn tag_is_prerelease(tag: &str) -> bool {
 /// The candidate tag to show/build messages around, falling back to a
 /// generic label when `status` is absent (a `Failed`/idle run can render
 /// while a fresh status hasn't loaded, e.g. right after `DismissRun`).
-fn tag_of(status: Option<&SelfUpdateStatus>) -> &str {
+fn tag_of(status: Option<&SelfUpdateStatus>) -> String {
     status
-        .and_then(|s| s.latest_version.as_deref())
-        .unwrap_or("the latest version")
+        .and_then(|s| s.latest_version.clone())
+        .unwrap_or_else(|| crate::fl!("the-latest-version"))
 }
 
 /// The curl-bootstrap command, with the `--beta` flag a prerelease tag needs.
@@ -50,10 +50,7 @@ fn curl_bootstrap(tag: &str) -> String {
 /// release simply lacks one). There is no button to press in that case, and
 /// this stands in for it.
 fn curl_fallback_caption(tag: &str) -> String {
-    format!(
-        "Update available, but no installer asset was published for this system. Run: {}",
-        curl_bootstrap(tag)
-    )
+    crate::fl!("update-no-installer", value0 = curl_bootstrap(tag))
 }
 
 /// The way forward offered after a run that *failed*.
@@ -63,27 +60,24 @@ fn curl_fallback_caption(tag: &str) -> String {
 /// downloaded and verified, so saying none was published is simply false —
 /// and it was, on the panel a dismissed authorization prompt produced.
 fn manual_install_caption(tag: &str) -> String {
-    format!(
-        "To install it outside the app, run: {}",
-        curl_bootstrap(tag)
-    )
+    crate::fl!("install-command", value0 = curl_bootstrap(tag))
 }
 
-fn phase_label(phase: RunPhase) -> &'static str {
+fn phase_label(phase: RunPhase) -> String {
     match phase {
-        RunPhase::FetchingInstaller => "Downloading installer…",
-        RunPhase::Resolve => "Resolving…",
-        RunPhase::Download => "Downloading update…",
-        RunPhase::Verify => "Verifying…",
-        RunPhase::Stage => "Staging…",
+        RunPhase::FetchingInstaller => crate::fl!("downloading-installer-progress"),
+        RunPhase::Resolve => crate::fl!("resolving-progress"),
+        RunPhase::Download => crate::fl!("downloading-update-progress"),
+        RunPhase::Verify => crate::fl!("verifying-progress"),
+        RunPhase::Stage => crate::fl!("staging-progress"),
         RunPhase::WaitingAuth => {
-            "Waiting for authorization — enter your password in the system dialog"
+            crate::fl!("waiting-for-authorization-enter-your-password-in")
         }
-        RunPhase::Install => "Installing…",
-        RunPhase::PostInstall => "Finishing…",
+        RunPhase::Install => crate::fl!("installing-progress"),
+        RunPhase::PostInstall => crate::fl!("finishing-progress"),
         // Rendered through their own branches in `update_body`, never through
         // this label.
-        RunPhase::Done | RunPhase::Failed => "",
+        RunPhase::Done | RunPhase::Failed => String::new(),
     }
 }
 
@@ -98,25 +92,28 @@ fn version_section(state: &UpdateState) -> Element<'_, Message> {
         .and_then(|s| s.checked_at.as_deref())
         .unwrap_or("never");
 
-    let mut checked_item = settings::item::builder("Last checked");
+    let mut checked_item = settings::item::builder(crate::fl!("last-checked"));
     if let Some(err) = status.and_then(|s| s.last_check_error.as_deref()) {
         checked_item = checked_item.description(err.to_string());
     }
 
-    let mut check_button = widget::button::standard("Check now");
+    let mut check_button = widget::button::standard(crate::fl!("check-now"));
     if state.can_check_now() {
         check_button = check_button.on_press(Message::Update(UpdateMessage::CheckNow));
     }
 
     settings::section()
-        .title("Version")
+        .title(crate::fl!("version"))
         .add(
-            settings::item::builder("Current version")
+            settings::item::builder(crate::fl!("current-version"))
                 .control(text::body(env!("CARGO_PKG_VERSION"))),
         )
-        .add(settings::item::builder("Latest version").control(text::body(latest.to_string())))
+        .add(
+            settings::item::builder(crate::fl!("latest-version"))
+                .control(text::body(latest.to_string())),
+        )
         .add(checked_item.control(text::body(checked_at.to_string())))
-        .add(settings::item::builder("Check for updates").control(check_button))
+        .add(settings::item::builder(crate::fl!("check-for-updates")).control(check_button))
         .into()
 }
 
@@ -125,10 +122,10 @@ fn settings_section(state: &UpdateState) -> Element<'_, Message> {
     let run_active = state.run.is_some();
 
     settings::section()
-        .title("Settings")
+        .title(crate::fl!("settings"))
         .add(
-            settings::item::builder("Automatic update checks")
-                .description("Periodically check for new releases and notify when one is found")
+            settings::item::builder(crate::fl!("automatic-update-checks"))
+                .description(crate::fl!("periodically-check-for-new-releases-and-notify"))
                 .control(
                     widget::toggler(state.auto_check_enabled.unwrap_or(true)).on_toggle_maybe(
                         (!run_active)
@@ -137,8 +134,10 @@ fn settings_section(state: &UpdateState) -> Element<'_, Message> {
                 ),
         )
         .add(
-            settings::item::builder("Receive beta updates")
-                .description("Consider prerelease versions when checking for updates")
+            settings::item::builder(crate::fl!("receive-beta-updates"))
+                .description(crate::fl!(
+                    "consider-prerelease-versions-when-checking-for-updates"
+                ))
                 .control(
                     // Inert while the write and its re-check are in flight:
                     // the switch has already moved, and a second press would
@@ -181,13 +180,13 @@ fn update_body<'a>(
             return text::body("").into();
         }
         return if state.can_start_update() {
-            widget::button::suggested(format!("Update to {tag}"))
+            widget::button::suggested(crate::fl!("update-to-tag", tag = tag.as_str()))
                 .on_press(Message::Update(UpdateMessage::StartUpdate))
                 .into()
         } else {
             column![
-                widget::button::suggested(format!("Update to {tag}")),
-                text::caption(curl_fallback_caption(tag)),
+                widget::button::suggested(crate::fl!("update-to-tag", tag = tag.as_str())),
+                text::caption(curl_fallback_caption(&tag)),
             ]
             .spacing(spacing)
             .into()
@@ -196,12 +195,12 @@ fn update_body<'a>(
 
     match run.phase {
         RunPhase::Done => {
-            let mut col = column![text::caption("Update installed.")].spacing(spacing);
+            let mut col = column![text::caption(crate::fl!("update-installed"))].spacing(spacing);
             if run.completed_components.iter().any(|c| c == "app") {
                 col = col.push(
                     row![
-                        text::body("Restart Super Voice to finish the update"),
-                        widget::button::suggested("Restart")
+                        text::body(crate::fl!("restart-super-voice-to-finish-the-update")),
+                        widget::button::suggested(crate::fl!("restart"))
                             .on_press(Message::Update(UpdateMessage::RestartApp)),
                     ]
                     .align_y(Alignment::Center)
@@ -218,14 +217,16 @@ fn update_body<'a>(
         }
         RunPhase::Failed => {
             let mut col = column![error_banner(
-                run.error.as_deref().unwrap_or("Update failed")
+                &run.error
+                    .clone()
+                    .unwrap_or_else(|| crate::fl!("update-failed"))
             )]
             .spacing(spacing);
             // Declining the prompt is not a dead end — pressing Update again
             // and authorizing is the answer, so a shell command here would
             // read as a non-sequitur to someone who just pressed Cancel.
             if !run.was_authorization_declined() {
-                col = col.push(text::caption(manual_install_caption(tag)));
+                col = col.push(text::caption(manual_install_caption(&tag)));
             }
             col.push(dismiss_button()).into()
         }
@@ -237,7 +238,7 @@ fn update_body<'a>(
             }
             if run.cancellable() {
                 col = col.push(
-                    widget::button::destructive("Cancel")
+                    widget::button::destructive(crate::fl!("cancel"))
                         .on_press(Message::Update(UpdateMessage::CancelUpdate)),
                 );
             }
@@ -250,7 +251,7 @@ fn update_body<'a>(
 /// clears it without restarting, so the page returns to the idle CTA and a
 /// future `StartUpdate` isn't permanently blocked.
 fn dismiss_button<'a>() -> Element<'a, Message> {
-    widget::button::standard("Dismiss")
+    widget::button::standard(crate::fl!("dismiss"))
         .on_press(Message::Update(UpdateMessage::DismissRun))
         .into()
 }
@@ -268,7 +269,7 @@ fn update_section<'a>(
     }
     Some(
         settings::section()
-            .title("Update")
+            .title(crate::fl!("update"))
             .add(update_body(state, status))
             .into(),
     )
@@ -286,7 +287,8 @@ pub fn page(state: &UpdateState) -> Element<'_, Message> {
     blocks.push(version_section(state));
 
     if state.unsupported {
-        blocks.push(text::caption("The connected daemon predates update support.").into());
+        blocks
+            .push(text::caption(crate::fl!("the-connected-daemon-predates-update-support")).into());
     } else {
         blocks.push(settings_section(state));
         if let Some(update) = update_section(state, state.status.as_ref()) {
@@ -294,7 +296,7 @@ pub fn page(state: &UpdateState) -> Element<'_, Message> {
         }
     }
 
-    page_layout("Updates", settings::view_column(blocks))
+    page_layout(crate::fl!("updates"), settings::view_column(blocks))
 }
 
 /// Header-bar badge shown while an update is available and no apply run is
@@ -309,7 +311,7 @@ pub(crate) fn header_badge(app: &AppModel) -> Option<Element<'_, Message>> {
     let fg: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
     let inner = row![
         crate::ui::icons::phosphor_tinted(crate::ui::icons::ARROWS_CLOCKWISE, 14.0, fg),
-        pill_label_tinted("Update available", fg),
+        pill_label_tinted(crate::fl!("update-available"), fg),
     ]
     .spacing(6.0)
     .align_y(Alignment::Center);
@@ -330,7 +332,7 @@ pub(crate) fn header_badge(app: &AppModel) -> Option<Element<'_, Message>> {
 
     Some(rounded_tooltip(
         badge,
-        text::body("A new Super Voice version is ready to install — open the Updates page"),
+        text::body(crate::fl!("a-new-super-voice-version-is-ready")),
         widget::tooltip::Position::Bottom,
     ))
 }
@@ -344,10 +346,26 @@ mod tests {
         assert!(tag_is_prerelease("v0.2.3-beta.1"));
         assert!(!tag_is_prerelease("v0.2.3"));
 
-        assert!(manual_install_caption("v0.2.3-beta.1").ends_with("| bash -s -- --beta"));
-        assert!(manual_install_caption("v0.2.3").ends_with("| bash"));
-        assert!(curl_fallback_caption("v0.2.3-beta.1").ends_with("| bash -s -- --beta"));
-        assert!(curl_fallback_caption("v0.2.3").ends_with("| bash"));
+        assert!(
+            manual_install_caption("v0.2.3-beta.1")
+                .trim_end_matches('\u{2069}')
+                .ends_with("| bash -s -- --beta")
+        );
+        assert!(
+            manual_install_caption("v0.2.3")
+                .trim_end_matches('\u{2069}')
+                .ends_with("| bash")
+        );
+        assert!(
+            curl_fallback_caption("v0.2.3-beta.1")
+                .trim_end_matches('\u{2069}')
+                .ends_with("| bash -s -- --beta")
+        );
+        assert!(
+            curl_fallback_caption("v0.2.3")
+                .trim_end_matches('\u{2069}')
+                .ends_with("| bash")
+        );
     }
 
     /// The regression: a run that FAILED had reported "no installer asset was

@@ -18,26 +18,25 @@ fn test_section<'a>(
     let status_text = match speaking_status {
         SpeakingStatus::Speaking => {
             if is_playing {
-                "🔊 Speaking"
+                crate::fl!("speaking-status")
             } else {
                 // Queued but nothing has reached the device yet: the daemon
                 // answers as soon as an utterance is accepted, which is before
                 // the first sample is rendered.
-                "⏳ Starting"
+                crate::fl!("starting-status")
             }
         }
-        SpeakingStatus::Idle => "⏹️ Not speaking",
+        SpeakingStatus::Idle => crate::fl!("not-speaking-status"),
     };
 
     // Speak is disabled on empty text rather than sending it: the daemon
     // rejects an empty utterance with a coded 400, and a button that only ever
     // produces an error banner is worse than one that is visibly unavailable.
     let action_button = match speaking_status {
-        SpeakingStatus::Speaking => {
-            button::destructive("Stop").on_press(Message::Speech(SpeechMessage::StopSpeaking))
-        }
+        SpeakingStatus::Speaking => button::destructive(crate::fl!("stop"))
+            .on_press(Message::Speech(SpeechMessage::StopSpeaking)),
         SpeakingStatus::Idle => {
-            let b = button::suggested("Speak");
+            let b = button::suggested(crate::fl!("speak"));
             if test_text.trim().is_empty() {
                 b
             } else {
@@ -46,7 +45,7 @@ fn test_section<'a>(
         }
     };
 
-    let input = widget::text_input("Type something to hear it…", test_text)
+    let input = widget::text_input(crate::fl!("type-something-to-hear-it"), test_text)
         .on_input(|s| Message::Speech(SpeechMessage::TestTextChanged(s)))
         .width(Length::Fill);
 
@@ -59,10 +58,16 @@ fn test_section<'a>(
     .spacing(10);
 
     settings::section()
-        .title("Test")
-        .add(settings::item("Status", text::body(status_text)))
-        .add(settings::flex_item("Text", input))
-        .add(settings::flex_item("Output Level", level_widget))
+        .title(crate::fl!("test"))
+        .add(settings::item(
+            crate::fl!("status"),
+            text::body(status_text),
+        ))
+        .add(settings::flex_item(crate::fl!("text"), input))
+        .add(settings::flex_item(
+            crate::fl!("output-level"),
+            level_widget,
+        ))
         .into()
 }
 

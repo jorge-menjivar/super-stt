@@ -238,13 +238,13 @@ pub(super) enum ModelStatus {
 
 impl ModelStatus {
     /// The hover text that names this state, after the feature's name.
-    pub(super) const fn detail(self) -> &'static str {
+    pub(super) fn detail(self) -> String {
         match self {
-            Self::None => "No backend selected",
-            Self::Blocked => "Backend setup incomplete",
-            Self::Idle => "No model loaded",
-            Self::Ready => "Model loaded and ready",
-            Self::Failed => "The selected model isn't loaded",
+            Self::None => crate::fl!("no-backend-selected"),
+            Self::Blocked => crate::fl!("backend-setup-incomplete"),
+            Self::Idle => crate::fl!("no-model-loaded"),
+            Self::Ready => crate::fl!("model-loaded-and-ready"),
+            Self::Failed => crate::fl!("the-selected-model-isn-t-loaded"),
         }
     }
 }

@@ -57,18 +57,23 @@ fn launchd_target() -> String {
 pub fn page(app: &AppModel) -> Element<'_, Message> {
     let daemon_status = &app.daemon_status;
     let status_text = match daemon_status {
-        DaemonStatus::Connected => "✅ Connected".to_string(),
-        DaemonStatus::Connecting => "⏳ Connecting...".to_string(),
-        DaemonStatus::Disconnected => "❌ Disconnected".to_string(),
-        DaemonStatus::Error(err) => format!("❌ Error: {err}"),
-        DaemonStatus::Blocked(reason) => format!("⛔ Authorization denied ({reason})"),
+        DaemonStatus::Connected => crate::fl!("connected"),
+        DaemonStatus::Connecting => crate::fl!("connecting"),
+        DaemonStatus::Disconnected => crate::fl!("disconnected"),
+        DaemonStatus::Error(err) => crate::fl!("connection-error", err = err.as_str()),
+        DaemonStatus::Blocked(reason) => {
+            crate::fl!("connection-denied", reason = reason.as_str())
+        }
     };
 
     let mut connection_section = settings::section()
-        .title("Connection Information")
-        .add(settings::item("Connection", text::body(status_text)))
+        .title(crate::fl!("connection-information"))
         .add(settings::item(
-            "Socket Path",
+            crate::fl!("connection"),
+            text::body(status_text),
+        ))
+        .add(settings::item(
+            crate::fl!("socket-path"),
             text::body(app.socket_path.to_string_lossy().to_string()),
         ));
 
@@ -85,7 +90,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
     if matches!(daemon_status, DaemonStatus::Blocked(_)) {
         connection_section = connection_section
             .add(settings::item(
-                "Action required",
+                crate::fl!("action-required"),
                 text::body(format!(
                     "Authorization was denied. Restart the daemon to clear the deny \
                      cache ({}), then click Retry to request access again.",
@@ -94,7 +99,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
             ))
             .add(settings::item(
                 "",
-                button::standard("Retry authorization")
+                button::standard(crate::fl!("retry-authorization"))
                     .on_press(Message::Daemon(DaemonMessage::RetryAuthorization)),
             ));
     }
@@ -102,7 +107,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
     let sections = vec![connection_section.into()];
 
     let sections_view = settings::view_column(sections);
-    page_layout("Connection", sections_view)
+    page_layout(crate::fl!("connection"), sections_view)
 }
 
 /// What to do about a daemon that cannot be reached: usually the command
@@ -122,27 +127,24 @@ fn not_running<'a>(
         Some(super_voice_shared::launch_agents::Status::RequiresApproval) => {
             return section
                 .add(settings::item(
-                    "No daemon",
-                    text::body(
-                        "Super Voice's background service is switched off in System \
-                         Settings › General › Login Items.",
-                    ),
+                    crate::fl!("no-daemon"),
+                    text::body(crate::fl!("super-voice-s-background-service-is-switched")),
                 ))
                 .add(settings::item(
-                    "Turn it on",
-                    button::standard("Open Login Items")
+                    crate::fl!("turn-it-on"),
+                    button::standard(crate::fl!("open-login-items"))
                         .on_press(Message::Shell(ShellMessage::OpenLoginItems)),
                 ));
         }
         Some(super_voice_shared::launch_agents::Status::NotRegistered) => {
             return section
                 .add(settings::item(
-                    "No daemon",
-                    text::body("Super Voice's background service is not registered with macOS."),
+                    crate::fl!("no-daemon"),
+                    text::body(crate::fl!("super-voice-s-background-service-is-not")),
                 ))
                 .add(settings::item(
-                    "Register it",
-                    button::standard("Register")
+                    crate::fl!("register-it"),
+                    button::standard(crate::fl!("register"))
                         .on_press(Message::Shell(ShellMessage::RegisterAgents)),
                 ));
         }
@@ -152,14 +154,14 @@ fn not_running<'a>(
     let start_command = start_daemon_command();
     section
         .add(settings::item(
-            "No daemon",
-            text::body("The daemon is not running."),
+            crate::fl!("no-daemon"),
+            text::body(crate::fl!("the-daemon-is-not-running")),
         ))
         .add(settings::item(
-            "Start it",
+            crate::fl!("start-it"),
             row![
                 text::body(start_command.clone()),
-                button::standard("Copy")
+                button::standard(crate::fl!("copy"))
                     .on_press(Message::Shell(ShellMessage::CopyText(start_command))),
             ]
             .spacing(cosmic::theme::spacing().space_xs)

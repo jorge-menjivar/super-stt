@@ -10,7 +10,7 @@ use crate::ui::messages::Message;
 #[allow(clippy::cast_precision_loss)]
 pub(super) fn fmt_gib(bytes: u64) -> String {
     let gib = bytes as f64 / (1024.0 * 1024.0 * 1024.0);
-    format!("{gib:.1} GiB")
+    crate::fl!("memory-size", gib = format!("{:.1}", gib))
 }
 
 /// Two byte counts as a shared-unit GiB pair, e.g. `"3.2 / 24.0 GiB"` — the
@@ -19,7 +19,11 @@ pub(super) fn fmt_gib(bytes: u64) -> String {
 #[allow(clippy::cast_precision_loss)]
 pub(super) fn fmt_gib_pair(used: u64, total: u64) -> String {
     const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-    format!("{:.1} / {:.1} GiB", used as f64 / GIB, total as f64 / GIB)
+    crate::fl!(
+        "memory-pair",
+        value0 = format!("{:.1}", used as f64 / GIB),
+        value1 = format!("{:.1}", total as f64 / GIB)
+    )
 }
 
 /// Strip the marketing vendor prefix from a GPU name for compact display
@@ -109,10 +113,10 @@ pub(super) fn vram_warning<'a>(needed: u64, available: u64) -> Element<'a, Messa
 
     row![
         icons::phosphor_warning(icons::WARNING, 16.0),
-        text::body(format!(
-            "This model may not fit on your GPU — needs ~{}, {} available.",
-            fmt_gib(needed),
-            fmt_gib(available),
+        text::body(crate::fl!(
+            "model-memory-warning",
+            value0 = fmt_gib(needed),
+            value1 = fmt_gib(available)
         )),
     ]
     .spacing(cosmic::theme::spacing().space_xs)
@@ -134,8 +138,9 @@ pub(super) fn no_viable_device_warning<'a>(model: &str) -> Element<'a, Message> 
 
     row![
         icons::phosphor_warning(icons::WARNING, 16.0),
-        text::body(format!(
-            "{model} needs a device this install doesn't have, so it can't be loaded here."
+        text::body(crate::fl!(
+            "model-device-unavailable",
+            model = (model).to_string()
         )),
     ]
     .spacing(cosmic::theme::spacing().space_xs)
@@ -164,9 +169,9 @@ pub(super) fn fmt_size(bytes: u64) -> String {
     const MB: f64 = 1024.0 * 1024.0;
     let mb = bytes as f64 / MB;
     if mb < 1024.0 {
-        format!("{} MB", mb.ceil())
+        crate::fl!("size-mb", size = mb.ceil().to_string())
     } else {
-        format!("{:.1} GB", mb / 1024.0)
+        crate::fl!("size-gb", size = format!("{:.1}", mb / 1024.0))
     }
 }
 
@@ -177,7 +182,10 @@ pub(super) fn running_note(chosen: Option<&str>, running: &str) -> Option<String
     match (chosen, running) {
         (None, _) | (_, "" | "none" | "remote") => None,
         (Some(chosen), running) if chosen == running => None,
-        (Some(_), running) => Some(format!("Running on {}", accel_name(running))),
+        (Some(_), running) => Some(crate::fl!(
+            "running-on-framework",
+            framework = accel_name(running)
+        )),
     }
 }
 
@@ -196,9 +204,10 @@ mod device_name_tests {
 
     #[test]
     fn a_download_reads_in_mb_then_gb() {
-        assert_eq!(fmt_size(640 * 1024 * 1024), "640 MB");
-        assert_eq!(fmt_size(1536 * 1024 * 1024), "1.5 GB");
-        assert_eq!(fmt_size(1), "1 MB");
+        let size = |bytes| crate::i18n::without_isolation(&fmt_size(bytes));
+        assert_eq!(size(640 * 1024 * 1024), "640 MB");
+        assert_eq!(size(1536 * 1024 * 1024), "1.5 GB");
+        assert_eq!(size(1), "1 MB");
     }
 
     /// Only a model running on another framework than picked says so.
@@ -207,8 +216,8 @@ mod device_name_tests {
         assert_eq!(running_note(Some("vulkan"), "vulkan"), None);
         assert_eq!(running_note(Some("cpu"), "cpu"), None);
         assert_eq!(
-            running_note(Some("cuda"), "cpu").as_deref(),
-            Some("Running on CPU")
+            running_note(Some("cuda"), "cpu").map(|note| crate::i18n::without_isolation(&note)),
+            Some("Running on CPU".to_string())
         );
         assert_eq!(running_note(Some("cpu"), "remote"), None);
         assert_eq!(running_note(None, "cpu"), None);

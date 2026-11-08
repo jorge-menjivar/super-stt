@@ -21,40 +21,40 @@ fn build_nav() -> nav_bar::Model {
     // rail and active on launch. Library (manage/install backends) sits
     // directly below.
     nav.insert()
-        .text("Models")
+        .text(crate::fl!("models"))
         .data::<Section>(Section::Models)
         .icon(icons::phosphor(icons::BRAIN))
         .activate();
 
     nav.insert()
-        .text("Library")
+        .text(crate::fl!("library"))
         .data::<Section>(Section::Library)
         .icon(icons::phosphor(icons::BOOKS));
 
     nav.insert()
-        .text("Speech to text")
+        .text(crate::fl!("speech-to-text"))
         .data::<Section>(Section::SpeechToText)
         .icon(icons::phosphor(icons::MICROPHONE))
         .divider_above(true);
 
     nav.insert()
-        .text("Text to speech")
+        .text(crate::fl!("text-to-speech"))
         .data::<Section>(Section::TextToSpeech)
         .icon(icons::phosphor(icons::SPEAKER_HIGH));
 
     nav.insert()
-        .text("Customization")
+        .text(crate::fl!("customization"))
         .data::<Section>(Section::Customization)
         .icon(icons::phosphor(icons::GEAR))
         .divider_above(true);
 
     nav.insert()
-        .text("Connection")
+        .text(crate::fl!("connection"))
         .data::<Section>(Section::Connection)
         .icon(icons::phosphor(icons::PLUG));
 
     nav.insert()
-        .text("Updates")
+        .text(crate::fl!("updates"))
         .data::<Section>(Section::Updates)
         .icon(icons::phosphor(icons::ARROWS_CLOCKWISE));
 
@@ -122,9 +122,9 @@ impl AppModel {
             current_model: String::new(),
             current_source: String::new(),
             current_model_epoch: 0,
-            model_operations: crate::state::model_operations::ModelOperations::opening(
-                "Loading initial model state...".to_string(),
-            ),
+            model_operations: crate::state::model_operations::ModelOperations::opening(crate::fl!(
+                "loading-initial-model-state"
+            )),
 
             // Initialize device state
             current_device: String::new(), // Empty until loaded from daemon

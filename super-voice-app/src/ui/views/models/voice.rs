@@ -39,7 +39,7 @@ pub(super) fn voice_dropdown<'a>(
     }
 
     let default_row = block.default.as_ref().map_or_else(
-        || "No cloned voice chosen".to_string(),
+        || crate::fl!("no-cloned-voice-chosen"),
         |id| {
             // Named, not just "Default": a user comparing two rows should not
             // have to remember which voice the manifest picked.
@@ -49,7 +49,7 @@ pub(super) fn voice_dropdown<'a>(
                 .iter()
                 .find(|v| &v.id == id)
                 .map_or(id.as_str(), |v| v.label.as_str());
-            format!("{label} · default")
+            crate::fl!("voice-default", label = label)
         },
     );
     let mut labels: Vec<String> = vec![default_row];
@@ -59,7 +59,7 @@ pub(super) fn voice_dropdown<'a>(
     // that did not say could put two identical labels side by side.
     labels.extend(app.voice.choices.iter().map(|v| {
         if v.kind == "cloned" {
-            format!("{} · cloned", v.label)
+            crate::fl!("voice-cloned", label = v.label.as_str())
         } else {
             v.label.clone()
         }
@@ -136,18 +136,17 @@ pub(super) fn voice_warning<'a>(
 /// whether the model takes cloned ids at all. Kept free of [`AppModel`] so the
 /// one thing this line must never do — send someone who has already recorded a
 /// voice off to record one — is a test rather than a screenshot.
-fn voice_warning_text(has_choices: bool, clones: bool) -> &'static str {
+fn voice_warning_text(has_choices: bool, clones: bool) -> String {
     match (has_choices, clones) {
         // Something to pick, and the dropdown offering it is directly above.
-        (true, _) => "This model doesn't have built-in voices. Pick a cloned voice above.",
+        (true, _) => crate::fl!("no-built-in-voices-pick-a-cloned-voice"),
         (false, true) => {
-            "This model doesn't have built-in voices. Record one in Text to speech, on the \
-             Voices tab."
+            crate::fl!("no-built-in-voices-record-one")
         }
         // Neither a list nor a way to fill one: a manifest that declares preset
         // voices and then ships none. Nothing to send the user to, so the line
         // states the fact and stops.
-        (false, false) => "No cloned voice chosen",
+        (false, false) => crate::fl!("no-cloned-voice-chosen"),
     }
 }
 
