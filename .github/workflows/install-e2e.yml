@@ -8,8 +8,8 @@ name: Install E2E
 # path-filtered workflow that doesn't run leaves a required check pending
 # forever and blocks the merge.
 #
-# What actually runs is super-engine's install-e2e action, shared with Super
-# TTS; see its test-install-e2e.sh for the two passes and why the fixture is a
+# What actually runs is super-engine's install-e2e action; see its
+# test-install-e2e.sh for the two passes and why the fixture is a
 # published release rather than a tarball built here. It is pinned at the same
 # rev as the super-engine crates in Cargo.toml.
 
@@ -61,6 +61,6 @@ jobs:
 
       - uses: super-libre/super-engine/.github/actions/install-e2e@79e3ceace42d9492c60277abfaa4c08b63cf3fdb
         with:
-          slug: super-stt
-          short-name: stt
+          slug: super-voice
+          short-name: voice
           channel: ${{ matrix.channel }}

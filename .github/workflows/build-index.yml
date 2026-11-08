@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 name: Build registry index
 
-# The job is super-engine's, shared with Super TTS. It is pinned at the same
+# The job is super-engine's. It is pinned at the same
 # rev as the super-engine crates in Cargo.toml.
 
 on:
