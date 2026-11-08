@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    uses: super-libre/super-engine/.github/workflows/build-index.yml@1c1e133f81456d37fb37a9fa0d8568b496736d8e
+    uses: super-libre/super-engine/.github/workflows/build-index.yml@79e3ceace42d9492c60277abfaa4c08b63cf3fdb
     with:
       indexer: super-voice-indexer
       registry-types: super-voice-registry-types
