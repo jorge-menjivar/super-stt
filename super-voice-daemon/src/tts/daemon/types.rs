@@ -158,7 +158,7 @@ pub(crate) async fn test_daemon() -> SuperTTSDaemon {
         resource_manager: Arc::new(ResourceManager::development()),
         backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         active_backend: Arc::new(tokio::sync::RwLock::new(None)),
-        // A fake notifier, not `Notifier::dbus()`: no daemon test may reach
+        // A fake notifier, not `Notifier::desktop()`: no daemon test may reach
         // the real session bus, or it can pop a genuine desktop notification
         // on whoever's machine runs the suite. `fail = true` mirrors a
         // headless/no-notification-server environment. A test that genuinely

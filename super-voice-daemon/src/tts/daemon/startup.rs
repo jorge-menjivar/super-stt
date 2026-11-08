@@ -38,7 +38,7 @@ impl SuperTTSDaemon {
             backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             active_backend: Arc::new(tokio::sync::RwLock::new(active_backend)),
             notifier: Arc::new(tokio::sync::Mutex::new(
-                crate::tts::output::notification::Notifier::dbus(),
+                crate::output::notification::Notifier::desktop(),
             )),
             // The speech engine publishes onto the daemon's one bus.
             speech: Arc::new(
