@@ -18,6 +18,12 @@
 # older tag with --version= is reported as an error rather than installed by
 # some other means.
 #
+# A release from before Super Voice ships Super STT's installer instead, and
+# until Super Voice has a release on a channel, the newest one there is such a
+# release. This script then hands over to that release's own copy of itself,
+# which installs Super STT; see [`is_former_bootstrap`]. Remove that hand-over
+# once Super Voice has a stable release.
+#
 # Flags consumed here:
 #   --beta / --stable / --channel=<name>   Pick the release channel
 #   --version=<tag>                        Pin a release tag
@@ -156,6 +162,31 @@ gh_api_curl() {
     fi
 }
 
+# Where release `$1` keeps its own copy of this script.
+former_bootstrap_url() {
+    echo "https://raw.githubusercontent.com/$GITHUB_REPO/$1/install.sh"
+}
+
+# Whether the script text `$1` is a Super STT release's bootstrap that installs
+# through Super STT's installer binary: one this script can hand a release
+# from before Super Voice to. Releases older than v0.2.2-beta.3 have no
+# installer binary, so their scripts don't name it, and pinning one stays an
+# error.
+#
+# A Super Voice bootstrap never qualifies, this one included, so a Super Voice
+# release that ships no installer for a platform is reported, not handed back
+# to itself. The marker is built in two halves for the same reason: this
+# file's own text must not contain it.
+is_former_bootstrap() {
+    local marker='INSTALLER_ASSET="super-stt'
+    marker+='-install-$TRIPLE"'
+    case "$1" in
+        *super-voice-install*) return 1 ;;
+        *"$marker"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # ---- Main install flow -----------------------------------------------------
 
 main() {
@@ -233,6 +264,20 @@ main() {
     # transport-or-server problem, and the two are reported distinctly so the
     # message names the cause the user can act on.
     if [ "$HTTP_CODE" = "404" ]; then
+        # A release from before Super Voice: its own copy of this script knows
+        # its asset names. Remove with the note at the top of this file.
+        FORMER_SCRIPT=$(curl -fsSL "$(former_bootstrap_url "$VERSION")" 2>/dev/null) || FORMER_SCRIPT=""
+        if is_former_bootstrap "$FORMER_SCRIPT"; then
+            print_info "$VERSION is from before Super Voice: installing Super STT $VERSION with that release's own installer"
+            printf '%s\n' "$FORMER_SCRIPT" >"$TEMP_DIR/install.sh"
+            EXTRA_ARGS=(--version="$VERSION")
+            [ "$CHANNEL" = "beta" ] && EXTRA_ARGS+=(--beta)
+            # A child rather than exec, so the trap above still removes the
+            # temporary directory the script runs from once it is done.
+            STATUS=0
+            bash "$TEMP_DIR/install.sh" "${EXTRA_ARGS[@]}" "${PASSTHROUGH[@]}" || STATUS=$?
+            exit "$STATUS"
+        fi
         print_error "Release $VERSION ships no installer binary for $TRIPLE."
         # The cause differs by platform, and so does the remedy. On Linux a
         # 404 means the pinned release predates the installer. On macOS it

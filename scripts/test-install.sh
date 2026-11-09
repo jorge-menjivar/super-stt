@@ -239,6 +239,27 @@ else
     skip "a release body quoting tag_name/prerelease doesn't desync the result (needs jq)"
 fi
 
+echo "== hand-over to a release from before Super Voice (is_former_bootstrap) =="
+# What Super STT's bootstraps from v0.2.2-beta.3 on name the installer as.
+FORMER_BOOTSTRAP='GITHUB_REPO="jorge-menjivar/super-stt"
+    INSTALLER_ASSET="super-stt-install-$TRIPLE"
+    INSTALLER_URL="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$INSTALLER_ASSET"'
+# Before v0.2.2-beta.3 the bootstrap installed by itself, with no installer
+# binary to hand over to.
+OLDER_BOOTSTRAP='GITHUB_REPO="jorge-menjivar/super-stt"
+    TARBALL="super-stt-$TRIPLE.tar.gz"'
+assert_eq "a Super STT bootstrap with an installer binary is handed over to" \
+    "yes" "$(is_former_bootstrap "$FORMER_BOOTSTRAP" && echo yes || echo no)"
+assert_eq "an older Super STT bootstrap is not, so pinning one stays an error" \
+    "no" "$(is_former_bootstrap "$OLDER_BOOTSTRAP" && echo yes || echo no)"
+assert_eq "this bootstrap is never handed back to itself" \
+    "no" "$(is_former_bootstrap "$(cat "$REPO_ROOT/install.sh")" && echo yes || echo no)"
+assert_eq "a script that failed to download is not handed over to" \
+    "no" "$(is_former_bootstrap "" && echo yes || echo no)"
+assert_eq "a release's own copy of the bootstrap is read from its tag" \
+    "https://raw.githubusercontent.com/jorge-menjivar/super-stt/v0.2.4/install.sh" \
+    "$(former_bootstrap_url v0.2.4)"
+
 echo
 echo "passed=$PASS failed=$FAIL skipped=$SKIPPED"
 if [ "$FAIL" -ne 0 ]; then
