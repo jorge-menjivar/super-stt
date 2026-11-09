@@ -1,6 +1,6 @@
 {
   "$comment": "SPDX-License-Identifier: GPL-3.0-only",
-  "$id": "https://jorge-menjivar.github.io/super-stt/backend.schema.json",
+  "$id": "https://jorge-menjivar.github.io/super-voice/backend.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "allOf": [
@@ -106,9 +106,16 @@
           "models": {
             "items": {
               "properties": {
+                "clone_needs_transcript": false,
+                "clone_ref_seconds": false,
+                "default_voice": false,
                 "force_preview_support": false,
+                "max_input_chars": false,
+                "output_sample_rate": false,
                 "prepare_files": false,
-                "role": false
+                "role": false,
+                "voice_kinds": false,
+                "voices": false
               }
             }
           }
@@ -143,7 +150,14 @@
           "models": {
             "items": {
               "properties": {
-                "prepare_files": false
+                "clone_needs_transcript": false,
+                "clone_ref_seconds": false,
+                "default_voice": false,
+                "max_input_chars": false,
+                "output_sample_rate": false,
+                "prepare_files": false,
+                "voice_kinds": false,
+                "voices": false
               }
             }
           }
@@ -178,7 +192,14 @@
           "models": {
             "items": {
               "properties": {
-                "prepare_files": false
+                "clone_needs_transcript": false,
+                "clone_ref_seconds": false,
+                "default_voice": false,
+                "max_input_chars": false,
+                "output_sample_rate": false,
+                "prepare_files": false,
+                "voice_kinds": false,
+                "voices": false
               }
             }
           }
@@ -483,9 +504,12 @@
           "type": "string"
         },
         "product": {
-          "const": "super-stt",
           "default": null,
           "description": "The product this backend is built for, by its slug, e.g. `super-stt`.\nA manifest naming any product other than the one parsing it is\nrefused. Optional on the type so manifests written before the field\nkeep loading; a product's contract makes it required.",
+          "enum": [
+            "super-voice",
+            "super-stt"
+          ],
           "type": [
             "string",
             "null"
@@ -517,7 +541,12 @@
       "properties": {
         "context": {
           "default": false,
-          "description": "Opt into being handed the user's dictation context: an `x-stt-prompt`\nheader and an `x-stt-vocabulary` header, on every `/v1` request.\nDefault `false`, which means neither header is sent.\n\nUnlike `websocket` this is not transport-restricted, and the deviation\nis deliberate: both headers ride the ordinary request every backend\nalready receives, so a `subprocess` backend can use them exactly as a\n`wasm` one does. The flag exists to keep the headers off backends that\nwould not know what to do with them, not to gate a transport.\n\nDeclared per backend rather than per model, because it describes what\nthe code reading the request does, and that code is the backend's.",
+          "description": "Opt into being handed the user's dictation context: an `x-stt-prompt`\nheader and an `x-stt-vocabulary` header, on every `/v1` request to a\nspeech-to-text model. Default `false`, which means neither header is\nsent.\n\nUnlike `websocket` this is not transport-restricted, and the deviation\nis deliberate: both headers ride the ordinary request every backend\nalready receives, so a `subprocess` backend can use them exactly as a\n`wasm` one does. The flag exists to keep the headers off backends that\nwould not know what to do with them, not to gate a transport.\n\nDeclared per backend rather than per model, because it describes what\nthe code reading the request does, and that code is the backend's.",
+          "type": "boolean"
+        },
+        "streaming_input": {
+          "default": false,
+          "description": "Reserved. Opts a backend into an incremental-text path, so it can hold\nan upstream provider's prosodic context across deltas instead of\nreceiving one chunk per request.\n\nNot specified yet: the daemon implements no such path, and a manifest\ndeclaring it is rejected at parse rather than silently ignored — a\nbackend author who sets this is expecting behavior that does not exist,\nand the loud failure is the honest answer.",
           "type": "boolean"
         },
         "websocket": {
@@ -529,7 +558,7 @@
       "type": "object"
     },
     "Contract": {
-      "description": "Backend-protocol contract version: the one thing a manifest declares about\nwhat it implements.\n\nA contract generation names a set of manifest fields and backend routes.\nEach generation is additive over the one before — v2 is v1 plus the\n`[[models]].role` field and the `POST /v1/process` route — so a backend\ndeclares the *lowest* generation whose fields it uses, and a daemon\nsupports every generation up to the one it was built with. Closed on\npurpose; see [`Generation`].\n\nVariant order is generation order; the derived `Ord` relies on it.",
+      "description": "Backend-protocol contract version: the one thing a manifest declares about\nwhat it implements.\n\nA contract generation names a set of manifest fields and backend routes.\nEach generation is additive over the one before (v2 is v1 plus the\n`[[models]].role` field and the `POST /v1/process` route), so a backend\ndeclares the *lowest* generation whose fields it uses, and a daemon\nsupports every generation up to the one it was built with.\n\nSuper Voice continues Super STT's line: every backend published for Super\nSTT declares one of these generations and keeps working. Text to speech\njoins at v4, the first generation Super Voice ships.\n\nClosed on purpose; see [`Generation`].\n\nVariant order is generation order; the derived `Ord` relies on it.",
       "oneOf": [
         {
           "const": "v1",
@@ -538,17 +567,17 @@
         },
         {
           "const": "v2",
-          "description": "v1 plus `[[models]].role` and `POST /v1/process` — a backend may serve\ntranscript post-processors.",
+          "description": "v1 plus `[[models]].role` and `POST /v1/process`: a backend may serve\ntranscript post-processors.",
           "type": "string"
         },
         {
           "const": "v3",
-          "description": "v2 plus nothing in the manifest: what v3 adds is what the daemon\nprovides. A subprocess backend is granted a cache directory that\nsurvives the process (`SUPER_STT_BACKEND_CACHE_DIR`, with\n`XDG_CACHE_HOME` and `CUDA_CACHE_PATH` pointed into it), and the\nload-progress fields of `GET /v1/status` (`phase`, `step`, `progress`)\nare read. A backend that builds GPU kernels at load needs both: without\nthe cache it rebuilds them on every load, and without the progress it\nruns into the flat load limit of a daemon that predates the stall rule.",
+          "description": "v2 plus nothing in the manifest: what v3 adds is what the daemon\nprovides. A subprocess backend is granted a cache directory that\nsurvives the process (`SUPER_VOICE_BACKEND_CACHE_DIR`, with\n`XDG_CACHE_HOME` and `CUDA_CACHE_PATH` pointed into it), and the\nload-progress fields of `GET /v1/status` (`phase`, `step`, `progress`)\nare read. A backend that builds GPU kernels at load needs both: without\nthe cache it rebuilds them on every load, and without the progress it\nruns into the flat load limit of a daemon that predates the stall rule.",
           "type": "string"
         },
         {
           "const": "v4",
-          "description": "v3 plus a required `[backend].product`, so the manifest says it is\nbuilt for Super STT, and `[[models]].prepare_files`: the daemon\ndownloads those files first and sends `POST /v1/prepare`, so a first\nload's GPU kernels are built while the weights still download.",
+          "description": "v3 plus a required `[backend].product`, so the manifest says it is\nbuilt for Super Voice, and `[[models]].prepare_files`: the daemon\ndownloads those files first and sends `POST /v1/prepare`, so a first\nload's GPU kernels are built while the weights still download. Text to\nspeech starts here: `role = \"synthesis\"`, its model keys, and\n`POST /v1/synthesize`.",
           "type": "string"
         }
       ]
@@ -766,6 +795,28 @@
       "additionalProperties": false,
       "description": "One `[[models]]` entry. Each model is identified on the wire by\n`(name, source)`, where `source` is `[backend].source`.",
       "properties": {
+        "clone_needs_transcript": {
+          "default": false,
+          "description": "Text to speech: whether registering a cloned voice requires the\nreference clip's transcript as well as its audio. Default `false`.\n\nIn-context cloning conditions on the reference audio *and* the tokens\nof what it says, so a backend taking that path cannot build a voice\nfrom audio alone; speaker-embedding cloning needs no transcript and\nleaves this unset. The daemon refuses to register a transcript-less\nclip against a model that declares it, which turns a synthesis failure\non every later request into one refusal at the point the voice is\nadded. Only meaningful alongside `cloned` in `voice_kinds`.",
+          "type": "boolean"
+        },
+        "clone_ref_seconds": {
+          "default": null,
+          "description": "Text to speech: longest reference audio accepted for a cloned voice,\nin seconds. Required when `voice_kinds` contains `cloned`, forbidden\notherwise.",
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "default_voice": {
+          "default": null,
+          "description": "Text to speech: voice used when a synthesis request omits `voice`.\nRequired when `voices` is non-empty; must name one of them.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "estimated_vram_bytes": {
           "default": 0,
           "description": "Conservative GPU memory estimate in bytes. Default `0`; use `0` for\ncloud models.",
@@ -782,8 +833,18 @@
         },
         "force_preview_support": {
           "default": false,
-          "description": "Force live previews onto a model that has none of its own: while the\nmicrophone is open, the daemon re-transcribes a sliding window of the\ncapture every `processing_interval_ms` and shows the result. Each pass\nis a full transcription the final pass repeats — for an online model,\na billed request per pass whose output is discarded — so it is off\nunless the manifest turns it on. Default `false`. Not consulted for a\n`realtime` model, which streams its own previews.\n\nA v2 field: declaring it under `contract = \"v1\"` is a parse error.",
+          "description": "Speech to text: force live previews onto a model that has none of its\nown. While the microphone is open, the daemon re-transcribes a sliding\nwindow of the capture every `processing_interval_ms` and shows the\nresult. Each pass is a full transcription the final pass repeats — for\nan online model, a billed request per pass whose output is discarded —\nso it is off unless the manifest turns it on. Default `false`. Not\nconsulted for a `realtime` model, which streams its own previews.",
           "type": "boolean"
+        },
+        "max_input_chars": {
+          "default": null,
+          "description": "Text to speech: longest `text` the model accepts in one\n`POST /v1/synthesize`. Absent means unbounded: the daemon sends whole\nutterances and never splits for length. When set, the daemon chunks on\nsentence boundaries to stay under it.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "multilingual": {
           "default": true,
@@ -793,6 +854,16 @@
         "name": {
           "description": "Wire model name.",
           "type": "string"
+        },
+        "output_sample_rate": {
+          "default": null,
+          "description": "Text to speech: native output sample rate in Hz, e.g. `24000`.\n\nAdvisory. The authoritative rate is the `x-tts-sample-rate` response\nheader on each synthesis, which is what the daemon resamples from — a\nmanifest cannot know what a cloud provider will actually return. This\nvalue exists so the settings UI can show an output rate and the daemon\ncan pre-size buffers before the first response arrives.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "prepare_files": {
           "default": [],
@@ -836,7 +907,7 @@
             }
           ],
           "default": "transcription",
-          "description": "What the model is for: transcribing audio, or post-processing a\ntranscript. Default [`ModelRole::Transcription`], so every manifest\nwritten before the field existed keeps its models transcribing.\n\nA v2 field: declaring it under `contract = \"v1\"` is a parse error."
+          "description": "What the model is for: transcribing audio, post-processing a\ntranscript, or speaking text. Default [`ModelRole::Transcription`], so\nevery manifest written before the field existed keeps its models\ntranscribing.\n\nA v2 field, and `synthesis` a v4 value."
         },
         "supported_devices": {
           "description": "Devices the model can be loaded onto. The sentinel `none` (remote /\nonline model with no local compute) must be the only entry when\npresent. Non-empty.",
@@ -852,6 +923,23 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "voice_kinds": {
+          "default": [
+            "preset"
+          ],
+          "description": "Text to speech: which kinds of `voice` id this model accepts. Default\n`[\"preset\"]`. The daemon refuses an id shape the model did not opt\ninto, so a backend never sees one it cannot resolve.",
+          "items": {
+            "$ref": "#/definitions/VoiceKind"
+          },
+          "type": "array"
+        },
+        "voices": {
+          "description": "Text to speech: preset voices the model provides. Empty for models\nwhose voices are entirely cloned or described.",
+          "items": {
+            "$ref": "#/definitions/VoiceEntry"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -863,16 +951,21 @@
       "type": "object"
     },
     "ModelRole": {
-      "description": "What a model is for.\n\nA backend serves both roles from the same manifest and the same install: a\nrole only decides which `/v1` route the daemon drives the model over —\n`POST /v1/transcribe` for [`Transcription`](Self::Transcription),\n`POST /v1/process` for [`PostProcessor`](Self::PostProcessor) — and which\nof the daemon's two model slots it may be selected into. Everything else\n(files, devices, secrets, options, discovery, install) is identical.",
+      "description": "What a model is for.",
       "oneOf": [
         {
           "const": "transcription",
-          "description": "Transcribes audio. The default, and what every model was before the\nfield existed.",
+          "description": "Speech to text, stage 1: audio in, text out. The default, and what\nevery model was before the field existed.",
           "type": "string"
         },
         {
           "const": "post_processor",
-          "description": "Rewrites a finished transcript — filler removal, punctuation,\nformatting. Driven over `POST /v1/process`.",
+          "description": "Speech to text, a later stage: rewrites the text the stage before it\nproduced. Driven over `POST /v1/process`.",
+          "type": "string"
+        },
+        {
+          "const": "synthesis",
+          "description": "Text to speech: text in, audio out, over `POST /v1/synthesize`.",
           "type": "string"
         }
       ]
@@ -1272,6 +1365,64 @@
       ],
       "type": "object"
     },
+    "VoiceEntry": {
+      "additionalProperties": false,
+      "description": "One `[[models.voices]]` entry: a preset voice the backend provides.",
+      "properties": {
+        "id": {
+          "description": "The `voice` id sent on `POST /v1/synthesize`. Unique within the model.",
+          "type": "string"
+        },
+        "label": {
+          "default": null,
+          "description": "Display name for the voice picker. Falls back to `id` when absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "language": {
+          "default": null,
+          "description": "Primary language of the voice. Must be one of the model's\n`supported_languages` when set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "default": [],
+          "description": "Free-form tags for filtering in the picker, e.g. `[\"warm\", \"female\"]`.\nNot interpreted by the daemon.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "VoiceKind": {
+      "description": "A kind of `voice` id a model accepts on `POST /v1/synthesize`.\n\nThe kind is carried by the id's shape, so the daemon can route without\nasking the backend: a bare id is a preset, `voice:<uuid>` is a cloned voice\nthe daemon holds reference audio for, and `desc:<text>` is a free-text\ndescription for models that can synthesize a voice from one.",
+      "oneOf": [
+        {
+          "const": "preset",
+          "description": "A voice declared in `[[models.voices]]`, named by a bare id.",
+          "type": "string"
+        },
+        {
+          "const": "cloned",
+          "description": "A user-cloned voice, `voice:<uuid>`. The daemon pushes reference audio\non the request; requires `clone_ref_seconds`.",
+          "type": "string"
+        },
+        {
+          "const": "described",
+          "description": "A free-text voice description, `desc:<text>`.",
+          "type": "string"
+        }
+      ]
+    },
     "VulkanApi": {
       "description": "A minimum Vulkan API version an asset requires, e.g. `1.3`.\n\nOrdered `major` first. Patch is deliberately absent: drivers advertise\nfeature levels at `major.minor`, and a patch floor would express a\nrequirement no build actually has.",
       "type": "string"
@@ -1336,6 +1487,6 @@
   "required": [
     "backend"
   ],
-  "title": "Super STT backend manifest (backend.toml)",
+  "title": "Super Voice backend manifest (backend.toml)",
   "type": "object"
 }
