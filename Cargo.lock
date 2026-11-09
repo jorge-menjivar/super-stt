@@ -1476,36 +1476,6 @@ dependencies = [
 
 [[package]]
 name = "cpal"
-version = "0.17.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8942da362c0f0d895d7cac616263f2f9424edc5687364dfd1d25ef7eba506d7"
-dependencies = [
- "alsa",
- "coreaudio-rs",
- "dasp_sample",
- "jni 0.21.1",
- "js-sys",
- "libc",
- "mach2 0.5.0",
- "ndk",
- "ndk-context",
- "num-derive",
- "num-traits",
- "objc2 0.6.5",
- "objc2-audio-toolbox",
- "objc2-avf-audio",
- "objc2-core-audio",
- "objc2-core-audio-types",
- "objc2-core-foundation",
- "objc2-foundation 0.3.2",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "windows 0.62.2",
-]
-
-[[package]]
-name = "cpal"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f02e8d0327b42d3e2e4ab2119af397344eb9fc54a34bf0ddeaa1277af8681f1"
@@ -1517,7 +1487,7 @@ dependencies = [
  "jni 0.22.4",
  "js-sys",
  "libc",
- "mach2 0.6.0",
+ "mach2",
  "ndk",
  "ndk-context",
  "num-derive",
@@ -4334,15 +4304,6 @@ dependencies = [
 
 [[package]]
 name = "mach2"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a1b95cd5421ec55b445b5ae102f5ea0e768de1f82bd3001e11f426c269c3aea"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "mach2"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
@@ -6975,7 +6936,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
- "cpal 0.18.2",
+ "cpal",
  "flate2",
  "futures-util",
  "gpu-probe",
@@ -7125,7 +7086,7 @@ version = "0.3.0-beta.2"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
- "cpal 0.18.2",
+ "cpal",
  "dirs 7.0.0",
  "futures-util",
  "hound",
@@ -7202,7 +7163,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
- "cpal 0.18.2",
+ "cpal",
  "dashmap",
  "dirs 7.0.0",
  "enigo",
@@ -8427,7 +8388,7 @@ dependencies = [
  "ittapi",
  "libc",
  "log",
- "mach2 0.6.0",
+ "mach2",
  "memfd",
  "object",
  "once_cell",
