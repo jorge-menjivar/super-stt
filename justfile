@@ -274,12 +274,23 @@ schema-check:
 # --remap-path-prefix keeps report paths relative, and tests/ is excluded so
 # only product code is counted. Build the mock WASM backends first
 # (just build-mock-wasm-backend{,-realtime}) so the daemon transport tests run
-# instead of self-skipping. Usage: just coverage [--html]
+# instead of self-skipping. Like `test`, every recipe that runs the suite gives
+# the run a state directory of its own. Usage: just coverage [--html]
 coverage *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    XDG_STATE_HOME=$(mktemp -d)
+    export XDG_STATE_HOME
+    trap 'rm -rf "$XDG_STATE_HOME"' EXIT
     cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' {{ args }}
 
 # Coverage for CI: write lcov.info and print a summary.
 coverage-lcov:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    XDG_STATE_HOME=$(mktemp -d)
+    export XDG_STATE_HOME
+    trap 'rm -rf "$XDG_STATE_HOME"' EXIT
     cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --lcov --output-path lcov.info
     cargo llvm-cov report --summary-only --ignore-filename-regex 'tests/'
 
@@ -287,6 +298,11 @@ coverage-lcov:
 # flat file list (cargo-llvm-cov's default); per-file pages show line-level
 # coverage. Usage: just coverage-html
 coverage-html *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    XDG_STATE_HOME=$(mktemp -d)
+    export XDG_STATE_HOME
+    trap 'rm -rf "$XDG_STATE_HOME"' EXIT
     cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --html {{ args }}
 
 # --- CI coverage: collect once, render many ---
@@ -297,6 +313,11 @@ coverage-html *args:
 
 # Run the instrumented suite and keep the profile data without rendering.
 coverage-collect:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    XDG_STATE_HOME=$(mktemp -d)
+    export XDG_STATE_HOME
+    trap 'rm -rf "$XDG_STATE_HOME"' EXIT
     cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --no-report
 
 # Write lcov.info from collected data and print the summary.
