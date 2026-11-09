@@ -11,9 +11,10 @@ use super_engine_installer::{AfterInstall, Components};
 /// One shortcut step, in the order [`plan`] returns them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
-    /// Rewrite a shortcut that runs Super STT's `stt` to run `voice`.
+    /// Point an installed shortcut at this install's `voice`.
     MigrateShortcut,
-    /// Interactively offer to add the `Super+Space` shortcut.
+    /// Interactively offer to add the `Super+Space` shortcut, when none is
+    /// installed.
     PromptShortcut,
 }
 
@@ -42,15 +43,19 @@ pub fn after_install(done: &AfterInstall<'_>) {
     }
 }
 
-/// Rewrite every shortcut that runs Super STT's `stt` — from wherever its
-/// wrapper was installed, `~/.local/bin` or the prefix — to run
-/// `<prefix>/bin/voice`, and rename its "Super STT" description. `stt` is
-/// gone, so a shortcut left on it would do nothing. The arguments carry over:
-/// `record` is `voice record` too, and `stt stop` is `voice record stop`.
-/// Returns `None` when no shortcut runs `stt` (nothing to migrate).
+/// Point every installed shortcut at this install's `<prefix>/bin/voice`,
+/// keeping its arguments. Returns `None` when there is nothing to change.
+///
+/// 1. One that runs Super STT's `stt`, from wherever its wrapper was
+///    installed, `~/.local/bin` or the prefix. `stt` is gone, so a shortcut
+///    left on it would do nothing. `record` is `voice record` too, `stt stop`
+///    is `voice record stop`, and its "Super STT" description is renamed.
+/// 2. One that runs `voice` from another place, such as an earlier install's
+///    prefix. A bare `voice`, found on `PATH`, is left as it is.
 #[must_use]
 pub fn migrate_shortcut_content(content: &str, prefix: &str) -> Option<String> {
     const SPAWN: &str = "Spawn(\"";
+    let voice = format!("{prefix}/bin/voice");
     let mut out = String::with_capacity(content.len());
     let mut rest = content;
     let mut changed = false;
@@ -67,9 +72,12 @@ pub fn migrate_shortcut_content(content: &str, prefix: &str) -> Option<String> {
             let args = args
                 .strip_prefix(" stop")
                 .map_or_else(|| args.to_string(), |tail| format!(" record stop{tail}"));
-            out.push_str(prefix);
-            out.push_str("/bin/voice");
+            out.push_str(&voice);
             out.push_str(&args);
+            changed = true;
+        } else if program.ends_with("/voice") && program != voice {
+            out.push_str(&voice);
+            out.push_str(&command[program_end..]);
             changed = true;
         } else {
             out.push_str(command);
@@ -93,16 +101,27 @@ fn shortcut_entry(command: &str) -> String {
     )
 }
 
+/// Whether a shortcut in `content` already runs `voice`, from any place.
+#[must_use]
+pub fn has_voice_shortcut(content: &str) -> bool {
+    content.split("Spawn(\"").skip(1).any(|rest| {
+        let command = rest.split('"').next().unwrap_or_default();
+        let program = command.split(' ').next().unwrap_or_default();
+        program == "voice" || program.ends_with("/voice")
+    })
+}
+
 /// Add a `Super+Space` → `command` shortcut entry to `content` (the
-/// COSMIC custom-shortcuts file's current text), subject to two coarse
-/// checks: skip (return `None`) if a "Super Voice" entry already exists, or if
+/// COSMIC custom-shortcuts file's current text), subject to coarse checks:
+/// skip (return `None`) if Super Voice's shortcut is already installed (a
+/// "Super Voice" entry, or any shortcut that runs `voice`), or if
 /// `key: "space"` is already bound to a `Super`-modified shortcut
 /// (approximated as both substrings appearing anywhere in `content`). Empty or
 /// `{}`-only content gets the full-file template; otherwise the entry is
 /// inserted before the final closing brace.
 #[must_use]
 pub fn shortcut_with_super_voice(content: &str, command: &str) -> Option<String> {
-    if content.contains("Super Voice") {
+    if content.contains("Super Voice") || has_voice_shortcut(content) {
         return None;
     }
     if content.contains("key: \"space\"") && content.contains("Super") {
@@ -142,8 +161,9 @@ fn prompt_yes_no(prompt: &str) -> bool {
     !line.trim().eq_ignore_ascii_case("n")
 }
 
-/// Rewrite a shortcut in the COSMIC custom-shortcuts file that runs `stt`,
-/// if there is one. See [`migrate_shortcut_content`].
+/// Point the shortcuts in the COSMIC custom-shortcuts file that run `stt`,
+/// or `voice` from another place, at this install. See
+/// [`migrate_shortcut_content`].
 fn migrate_shortcut(prefix: &Path) {
     let Some(home) = dirs::home_dir() else {
         return;
@@ -158,7 +178,10 @@ fn migrate_shortcut(prefix: &Path) {
     }
 }
 
-/// Interactively offer to add the `Super+Space` shortcut.
+/// Interactively offer to add the `Super+Space` shortcut, when it can be
+/// added: never when Super Voice's is already installed, which
+/// [`migrate_shortcut`] has just pointed at this install, nor when
+/// Super+Space is taken.
 fn prompt_shortcut(prefix: &Path) {
     let Some(home) = dirs::home_dir() else {
         return;
@@ -166,6 +189,11 @@ fn prompt_shortcut(prefix: &Path) {
     let shortcuts_dir = home.join(".config/cosmic/com.system76.CosmicSettings.Shortcuts/v1");
     let shortcuts_file = shortcuts_dir.join("custom");
 
+    let command = format!("{}/bin/voice record --write", prefix.display());
+    let existing = std::fs::read_to_string(&shortcuts_file).unwrap_or_default();
+    let Some(updated) = shortcut_with_super_voice(&existing, &command) else {
+        return;
+    };
     if !prompt_yes_no("Add COSMIC keyboard shortcut (Super+Space)? [Y/n]: ") {
         return;
     }
@@ -174,11 +202,7 @@ fn prompt_shortcut(prefix: &Path) {
         log::warn!("failed to create COSMIC shortcuts dir: {e}");
         return;
     }
-    let command = format!("{}/bin/voice record --write", prefix.display());
-    let existing = std::fs::read_to_string(&shortcuts_file).unwrap_or_default();
-    if let Some(updated) = shortcut_with_super_voice(&existing, &command)
-        && let Err(e) = std::fs::write(&shortcuts_file, updated)
-    {
+    if let Err(e) = std::fs::write(&shortcuts_file, updated) {
         log::warn!("failed to write COSMIC shortcut: {e}");
     }
 }
@@ -227,6 +251,41 @@ mod tests {
         assert!(migrate_shortcut_content("{}", "/usr/local").is_none());
         let c = r#"{ (key: "t"): Spawn("/usr/bin/gstt record"), (key: "u"): Spawn("term"), }"#;
         assert!(migrate_shortcut_content(c, "/usr/local").is_none());
+    }
+
+    /// A shortcut on another install's `voice` moves to this one, arguments
+    /// and all. One on this install's, or on a bare `voice`, is left alone.
+    #[test]
+    fn migrate_moves_voice_from_another_place() {
+        let c = r#"{ (key: "space", description: Some("Super Voice")): Spawn("/home/u/.local/bin/voice record --write --wait"), }"#;
+        let out = migrate_shortcut_content(c, "/usr/local").unwrap();
+        assert!(
+            out.contains(r#"Spawn("/usr/local/bin/voice record --write --wait")"#),
+            "{out}"
+        );
+        for kept in [
+            r#"{ (key: "space"): Spawn("/usr/local/bin/voice record --write"), }"#,
+            r#"{ (key: "space"): Spawn("voice record --write"), }"#,
+            r#"{ (key: "v"): Spawn("/usr/bin/nvoice --x"), }"#,
+        ] {
+            assert!(
+                migrate_shortcut_content(kept, "/usr/local").is_none(),
+                "{kept}"
+            );
+        }
+    }
+
+    /// A shortcut that runs `voice` counts as installed, whatever it is
+    /// called, so no second one is offered beside it.
+    #[test]
+    fn a_shortcut_running_voice_is_installed() {
+        let c = "{\n    (\n        modifiers: [\n            Ctrl,\n        ],\n        key: \"r\",\n        description: Some(\"Dictate\"),\n    ): Spawn(\"voice record --write\"),\n}";
+        assert!(has_voice_shortcut(c));
+        assert!(shortcut_with_super_voice(c, VOICE_CMD).is_none());
+        assert!(!has_voice_shortcut(
+            r#"{ (key: "v"): Spawn("/usr/bin/nvoice --x"), }"#
+        ));
+        assert!(!has_voice_shortcut("{}"));
     }
 
     #[test]
