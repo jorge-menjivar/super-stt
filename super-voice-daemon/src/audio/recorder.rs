@@ -10,7 +10,7 @@ use crate::audio::processing::{captured_at, downmix_f32, downmix_i16, process_an
 use crate::audio::state::RecordingState;
 use crate::daemon::events::EventBus;
 use anyhow::{Context, Result};
-use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use log::info;
 use parking_lot::Mutex;
@@ -281,6 +281,10 @@ impl DaemonAudioRecorder {
             level_tx,
             samples_tx: samples_tx.clone(),
         })?;
+        // A stream does not run until it is played. cpal 0.17's ALSA input
+        // started on its own, so nothing here did; since 0.18 its worker
+        // waits for play(), and a stream left unplayed captures nothing.
+        stream.play().context("could not start the microphone")?;
 
         Ok((stream, analysis_task, stream_config, samples_tx))
     }
