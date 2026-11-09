@@ -38,10 +38,6 @@
     chrono.workspace = true
     clap.workspace = true
     cpal.workspace = true
-    # Text to speech plays through cpal 0.18 while speech to text still
-    # captures with the workspace's 0.17. Renamed so both build in one crate
-    # until the capture side moves up.
-    cpal-playback = { package = "cpal", version = "0.18.2" }
     dashmap.workspace = true
     dirs.workspace = true
     futures = "0.3"

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use anyhow::Result;
+// The verification stream below writes the formats playback does, so it opens
+// the device in the config playback would.
+use crate::tts::audio::playback::output_config;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SupportedStreamConfig};
 use parking_lot::Mutex;
@@ -128,9 +131,8 @@ pub fn get_or_initialize_audio_device(
         .default_output_device()
         .ok_or_else(|| anyhow::anyhow!("No output device available"))?;
 
-    let config = device
-        .default_output_config()
-        .map_err(|e| anyhow::anyhow!("Failed to get output config: {e}"))?;
+    let config =
+        output_config(&device).map_err(|e| anyhow::anyhow!("Failed to get output config: {e}"))?;
 
     log::info!(
         "Audio device initialized: {}Hz, {} channels, {:?}",
@@ -199,7 +201,7 @@ fn attempt_device_verification(device_cache: &AudioDeviceCache, _attempt: usize)
 
     let stream = match device_cache.output_config.sample_format() {
         cpal::SampleFormat::F32 => device_cache.output_device.build_output_stream(
-            &device_cache.output_config.config(),
+            device_cache.output_config.config(),
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 for frame in data.chunks_mut(channels) {
                     if sample_count >= samples_needed {
@@ -216,7 +218,7 @@ fn attempt_device_verification(device_cache: &AudioDeviceCache, _attempt: usize)
             None,
         )?,
         cpal::SampleFormat::I16 => device_cache.output_device.build_output_stream(
-            &device_cache.output_config.config(),
+            device_cache.output_config.config(),
             move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                 for frame in data.chunks_mut(channels) {
                     if sample_count >= samples_needed {
@@ -263,7 +265,7 @@ pub fn check_output_device_health(
         let cache_guard = audio_device_cache.lock();
         if let Some(ref cached) = *cache_guard {
             if cached.last_verified.elapsed() < DEVICE_CACHE_VALIDITY {
-                Ok((cached.output_device.clone(), cached.output_config.clone()))
+                Ok((cached.output_device.clone(), cached.output_config))
             } else {
                 drop(cache_guard);
                 Err(anyhow::anyhow!("Cached device expired"))
@@ -281,7 +283,7 @@ pub fn check_output_device_health(
         let device = host
             .default_output_device()
             .ok_or_else(|| anyhow::anyhow!("No output device available"))?;
-        let config = device.default_output_config()?;
+        let config = output_config(&device)?;
         (device, config)
     };
 
@@ -289,7 +291,7 @@ pub fn check_output_device_health(
         audio_device_cache,
         &AudioDeviceCache {
             output_device: device.clone(),
-            output_config: config.clone(),
+            output_config: config,
             last_verified: Instant::now(),
             initialization_verified: false,
         },
@@ -328,7 +330,7 @@ pub fn check_input_device_health() -> Result<AudioDeviceInfo> {
     let config = device.default_input_config()?;
 
     let _test_stream = device.build_input_stream(
-        &config.config(),
+        config.config(),
         move |_data: &[f32], _: &cpal::InputCallbackInfo| {},
         |err| log::debug!("Input verification stream error: {err}"),
         None,

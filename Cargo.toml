@@ -42,7 +42,9 @@
     anyhow                   = "1.0.100"
     chrono                   = { version = "0.4", features = ["serde"] }
     clap                     = { version = "4.5.54", features = ["cargo", "derive"] }
-    cpal                     = "0.17.3"
+    # 0.18 is the floor: 0.17's ALSA worker reported a POLLERR and polled
+    # again without recovering, which spun the audio thread forever.
+    cpal                     = "0.18.2"
     dashmap                  = "6.1.0"
     dirs                     = "7.0.0"
     # Input simulation (for client)

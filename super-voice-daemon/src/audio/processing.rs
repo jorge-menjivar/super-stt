@@ -137,7 +137,7 @@ pub fn captured_at(info: &cpal::InputCallbackInfo) -> Instant {
     let timestamp = info.timestamp();
     timestamp
         .callback
-        .duration_since(&timestamp.capture)
+        .checked_duration_since(timestamp.capture)
         .and_then(|delay| now.checked_sub(delay))
         .unwrap_or(now)
 }
