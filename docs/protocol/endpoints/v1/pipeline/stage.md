@@ -1,11 +1,11 @@
-# `/pipeline/{stage}`
+# `/stt/pipeline/{stage}`
 
 One **stage** of the [pipeline](../pipeline.md), addressed by position: which
 backend fills it, and whether it is filled at all. Every stage answers these
 three verbs, so a client learns one shape and applies it anywhere.
 
 **Only the backend.** What that backend is running is
-[`/pipeline/{stage}/model`](./model.md), one level down, and filling a stage is
+[`/stt/pipeline/{stage}/model`](./model.md), one level down, and filling a stage is
 not loading a model. The split is deliberate: choosing a backend is cheap and
 cannot fail for runtime reasons, while loading a model downloads, allocates and
 can fail — and a backend selection outlives every model that comes and goes
@@ -15,7 +15,7 @@ The [stage object](../pipeline.md#the-stage-object) these endpoints report, the
 stage roles and the [auth](../pipeline.md#auth) they all share are described
 once in the family overview.
 
-## `GET /pipeline/{stage}`
+## `GET /stt/pipeline/{stage}`
 
 One stage, as `stage` — the same object the array carries.
 
@@ -36,23 +36,23 @@ Content-Type: application/json
 ```
 
 The model is not here — read it at
-[`GET /pipeline/{stage}/model`](./model.md#get-pipelinestagemodel).
+[`GET /stt/pipeline/{stage}/model`](./model.md#get-sttpipelinestagemodel).
 
-## `POST /pipeline/{stage}`
+## `POST /stt/pipeline/{stage}`
 
 Select the backend that fills this stage. Validates that it is installed and
 serves this stage's role; does **not** load anything.
 
 The backends it will accept are
-[`GET /pipeline/{stage}/backend/list`](./backend-list.md) — fill a picker from
+[`GET /stt/pipeline/{stage}/backend/list`](./backend-list.md) — fill a picker from
 that rather than from `GET /backend/list`, or it offers backends this refuses.
 
 **Request:**
 
 ```http
-POST /pipeline/2 HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+POST /stt/pipeline/2 HTTP/1.1
+Host: voice.local
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 { "source": "github.com/jorge-menjivar/super-stt-textclean" }
@@ -77,7 +77,7 @@ Re-selecting the backend already there changes nothing.
 | 401  | `invalid_session`       | Token unknown / expired / `exe_changed`                          |
 | 403  | `scope_denied`          | Token lacks the `settings` scope                                 |
 
-## `DELETE /pipeline/{stage}`
+## `DELETE /stt/pipeline/{stage}`
 
 Empty the stage: unload, and forget the model with the backend.
 

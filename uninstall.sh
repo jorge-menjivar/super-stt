@@ -1,24 +1,25 @@
 #!/bin/bash
 
-# Super STT Uninstall Script
+# Super Voice Uninstall Script
 #
-# Removes Super STT regardless of which channel installed it.
-# Handles both layouts:
-#   - Stable / legacy: single `super-stt` binary + `stt` wrapper.
-#   - Beta / post-rewrite: super-stt-daemon + super-stt-cli +
-#     super-stt-consent + `stt` wrapper.
+# Removes Super Voice, and whatever Super STT or Super TTS installs it
+# replaced left behind, regardless of which channel installed them.
 #
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/uninstall.sh | bash
 #   bash uninstall.sh
 #
 # What gets removed:
-#   - All Super STT binaries in /usr/local/bin and ~/.local/bin
-#     (current system layout plus both legacy per-user layouts)
+#   - Super Voice's binaries in /usr/local/bin: the daemon, the `voice` CLI
+#     and wrapper, the consent helper, the installer, both settings apps and
+#     the COSMIC applet
+#   - What Super STT and Super TTS installed: their daemons, CLIs, wrappers
+#     (`stt`, `tts`), consent helpers, installers and applets, in
+#     /usr/local/bin and the legacy ~/.local/bin
 #   - Desktop entries, icons, metainfo (system + per-user)
-#   - Runtime socket dir under $XDG_RUNTIME_DIR/stt
-#   - systemd user unit (/usr/lib/systemd/user + ~/.config/systemd/user)
-#   - COSMIC keyboard shortcut (only if it's the lone entry)
+#   - Runtime socket dirs under $XDG_RUNTIME_DIR
+#   - systemd user units (/usr/lib/systemd/user + ~/.config/systemd/user)
+#   - The COSMIC keyboard shortcut (only if it's the lone entry)
 #
 # The COSMIC panel is restarted when an installed applet was removed, so the
 # tray drops it without a relogin.
@@ -27,14 +28,15 @@
 # files are actually present.
 #
 # What is PRESERVED:
-#   - ~/.local/share/stt/logs/ (in case you need to inspect history)
-#   - ~/.config/super-stt/ (user-set defaults)
-#   - System keyring entries (cached session tokens, API keys)
-#   - The `stt` system group (other users may depend on it)
+#   - Logs
+#   - Config: ~/.config/super-voice/
+#   - Secrets: ~/.local/state/super-voice/ (session tokens, API keys)
+#   - Models, installed backends and cloned voices: ~/.local/share/super-voice/
+#   - Whatever Super STT and Super TTS kept in their own config, state and
+#     data folders
 #
-# The daemon is stopped as the final step so any in-flight
-# transcription completes (or at least gets a chance to flush) before
-# the process exits.
+# The daemons are stopped as the final step so any in-flight transcription
+# or speech gets a chance to finish before the process exits.
 
 set -u
 
@@ -64,11 +66,29 @@ ICON_DIR_FLAT="$HOME/.local/share/icons"
 METAINFO_DIR="$HOME/.local/share/metainfo"
 USER_SYSTEMD_DIR="$HOME/.config/systemd/user"
 
-RUN_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/stt"
-LOG_DIR="$HOME/.local/share/stt/logs"
-CONFIG_DIR="$HOME/.config/super-stt"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+CONFIG_DIR="$HOME/.config/super-voice"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/super-voice"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/super-voice"
 COSMIC_SHORTCUTS="$HOME/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom"
-SERVICE_NAME="super-stt"
+
+# Super Voice's unit, and the ones it replaced.
+SERVICES=(super-voice super-stt super-tts)
+
+# Every binary any of them installed, current names first.
+BINARIES=(
+    super-voice-daemon super-voice-cli super-voice-consent super-voice-install voice
+    super-voice-app super-tts-app super-stt-app
+    super-cosmic-applet
+    super-stt super-stt-daemon super-stt-cli super-stt-consent super-stt-install stt
+    super-stt-cosmic-applet super-stt-applet-full super-stt-applet-left super-stt-applet-right
+    super-tts-daemon super-tts-cli super-tts-consent super-tts-install tts
+    super-tts-cosmic-applet
+)
+APPS=(super-voice-app super-tts-app super-stt-app)
+APPLETS=(super-cosmic-applet super-stt-cosmic-applet super-tts-cosmic-applet)
+# Processes to stop at the end, for a daemon started outside systemd.
+DAEMONS=(super-voice-daemon super-stt-daemon super-tts-daemon super-stt)
 
 # This script undoes what install.sh did, and install.sh only installs on
 # Linux (see its `detect_triple`). Running it on a Mac would walk a tree of
@@ -77,7 +97,7 @@ SERVICE_NAME="super-stt"
 # uninstall. Say what to run instead.
 if [ "$(uname -s)" = "Darwin" ]; then
     print_error "This uninstaller is for Linux installs made by install.sh."
-    print_error "On macOS Super STT is installed from source, so uninstall it the same way:"
+    print_error "On macOS Super Voice is installed from source, so uninstall it the same way:"
     print_error "  cd /path/to/super-stt && just uninstall"
     exit 1
 fi
@@ -98,38 +118,27 @@ remove_path() {
     rm -f "$target" 2>/dev/null || $SUDO rm -f "$target"
 }
 
-# The COSMIC applet Super STT shares with Super TTS. It goes with Super STT
-# unless Super TTS, which uses it too, is still installed.
-SHARED_APPLET=super-cosmic-applet
-SHARED_APPLET_STAYS=false
-if [ -e "$SYSTEM_BIN_DIR/super-tts-daemon" ]; then
-    SHARED_APPLET_STAYS=true
-fi
-SHARED_APPLET_BINS=()
-SHARED_APPLET_DESKTOPS=()
-SHARED_APPLET_ICONS=()
-if [ "$SHARED_APPLET_STAYS" = false ]; then
-    SHARED_APPLET_BINS=("$SHARED_APPLET")
-    SHARED_APPLET_DESKTOPS=(
-        "$SHARED_APPLET-full.desktop"
-        "$SHARED_APPLET-left.desktop"
-        "$SHARED_APPLET-right.desktop"
-    )
-    SHARED_APPLET_ICONS=("$SHARED_APPLET.svg")
-fi
+DESKTOPS=()
+ICONS=()
+for app in "${APPS[@]}"; do
+    DESKTOPS+=("$app.desktop")
+    ICONS+=("$app.svg")
+done
+for applet in "${APPLETS[@]}"; do
+    for side in full left right; do
+        DESKTOPS+=("$applet-$side.desktop")
+    done
+    ICONS+=("$applet.svg")
+done
 
 # Detect whether a system install is present at all, so legacy-only
 # setups never see a sudo prompt.
 SYSTEM_INSTALL_PRESENT=false
-for probe in \
-    "$SYSTEM_BIN_DIR/super-stt-daemon" \
-    "$SYSTEM_BIN_DIR/super-stt-app" \
-    "$SYSTEM_BIN_DIR/super-stt-cosmic-applet" \
-    "$SYSTEM_BIN_DIR/stt" \
-    "$SYSTEM_SYSTEMD_DIR/$SERVICE_NAME.service" \
-    "${SHARED_APPLET_BINS[@]/#/$SYSTEM_BIN_DIR/}"
-do
-    [ -e "$probe" ] && SYSTEM_INSTALL_PRESENT=true
+for bin in "${BINARIES[@]}"; do
+    [ -e "$SYSTEM_BIN_DIR/$bin" ] && SYSTEM_INSTALL_PRESENT=true
+done
+for service in "${SERVICES[@]}"; do
+    [ -e "$SYSTEM_SYSTEMD_DIR/$service.service" ] && SYSTEM_INSTALL_PRESENT=true
 done
 
 # Whether a COSMIC applet was installed, captured here for the same reason:
@@ -138,46 +147,35 @@ done
 # the legacy per-user layouts count, and the desktop entries are probed as
 # well as the binary so an install missing one of the two still registers.
 APPLET_INSTALLED=false
-for probe in \
-    "$SYSTEM_BIN_DIR/super-stt-cosmic-applet" \
-    "$LEGACY_BIN_DIR/super-stt-cosmic-applet" \
-    "$SYSTEM_DESKTOP_DIR/super-stt-cosmic-applet-full.desktop" \
-    "$DESKTOP_DIR/super-stt-cosmic-applet-full.desktop" \
-    "${SHARED_APPLET_BINS[@]/#/$SYSTEM_BIN_DIR/}" \
-    "${SHARED_APPLET_DESKTOPS[@]/#/$SYSTEM_DESKTOP_DIR/}"
-do
-    [ -e "$probe" ] && APPLET_INSTALLED=true
+for applet in "${APPLETS[@]}"; do
+    for probe in \
+        "$SYSTEM_BIN_DIR/$applet" \
+        "$LEGACY_BIN_DIR/$applet" \
+        "$SYSTEM_DESKTOP_DIR/$applet-full.desktop" \
+        "$DESKTOP_DIR/$applet-full.desktop"
+    do
+        [ -e "$probe" ] && APPLET_INSTALLED=true
+    done
 done
 
-print_info "Uninstalling Super STT..."
+print_info "Uninstalling Super Voice..."
 
-# 1. Disable the unit so it doesn't auto-start after the next reboot,
-#    BUT don't stop it yet — we want the daemon to remain running
-#    while we clear out its on-disk artifacts, and stop it at the end.
+# 1. Disable the units so they don't auto-start after the next reboot,
+#    BUT don't stop them yet — the daemon keeps running while its on-disk
+#    artifacts are cleared, and stops at the end.
 if command -v systemctl &> /dev/null; then
-    if systemctl --user is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
-        print_info "Disabling user systemd unit '$SERVICE_NAME'..."
-        systemctl --user disable "$SERVICE_NAME" 2>/dev/null || true
-    fi
+    for service in "${SERVICES[@]}"; do
+        if systemctl --user is-enabled --quiet "$service" 2>/dev/null; then
+            print_info "Disabling user systemd unit '$service'..."
+            systemctl --user disable "$service" 2>/dev/null || true
+        fi
+    done
 fi
 
-# 2. Remove binaries — system layout plus both legacy layouts. Missing
+# 2. Remove binaries — system layout plus the legacy layout. Missing
 #    files are not an error (the user may have only installed a subset).
 print_info "Removing binaries from $SYSTEM_BIN_DIR and $LEGACY_BIN_DIR..."
-for bin in \
-    super-stt \
-    super-stt-daemon \
-    super-stt-cli \
-    super-stt-consent \
-    super-stt-install \
-    super-stt-app \
-    super-stt-cosmic-applet \
-    super-stt-applet-full \
-    super-stt-applet-left \
-    super-stt-applet-right \
-    stt \
-    "${SHARED_APPLET_BINS[@]}"
-do
+for bin in "${BINARIES[@]}"; do
     for dir in "$SYSTEM_BIN_DIR" "$LEGACY_BIN_DIR"; do
         remove_path "$dir/$bin" && print_info "  removed $dir/$bin"
     done
@@ -185,13 +183,7 @@ done
 
 # 3. Desktop entries (system + legacy per-user).
 print_info "Removing desktop entries..."
-for name in \
-    super-stt-app.desktop \
-    super-stt-cosmic-applet-full.desktop \
-    super-stt-cosmic-applet-left.desktop \
-    super-stt-cosmic-applet-right.desktop \
-    "${SHARED_APPLET_DESKTOPS[@]}"
-do
+for name in "${DESKTOPS[@]}"; do
     for dir in "$SYSTEM_DESKTOP_DIR" "$DESKTOP_DIR"; do
         remove_path "$dir/$name" && print_info "  removed $dir/$name"
     done
@@ -200,15 +192,17 @@ done
 # 4. Icons (system hicolor, legacy hicolor-scalable, and the flat
 #    layout some old versions of the script used).
 print_info "Removing icons..."
-for name in super-stt-app.svg super-stt-cosmic-applet.svg "${SHARED_APPLET_ICONS[@]}"; do
+for name in "${ICONS[@]}"; do
     for dir in "$SYSTEM_ICON_DIR" "$ICON_DIR_HICOLOR" "$ICON_DIR_FLAT"; do
         remove_path "$dir/$name" && print_info "  removed $dir/$name"
     done
 done
 
 # 5. metainfo (system + legacy per-user)
-for dir in "$SYSTEM_METAINFO_DIR" "$METAINFO_DIR"; do
-    remove_path "$dir/super-stt-app.metainfo.xml" && print_info "Removed $dir/super-stt-app.metainfo.xml"
+for app in "${APPS[@]}"; do
+    for dir in "$SYSTEM_METAINFO_DIR" "$METAINFO_DIR"; do
+        remove_path "$dir/$app.metainfo.xml" && print_info "Removed $dir/$app.metainfo.xml"
+    done
 done
 
 # 6. Refresh icon / desktop caches so the system reflects the removal.
@@ -225,7 +219,7 @@ if command -v update-desktop-database &> /dev/null; then
     fi
 fi
 # The panel keeps a loaded applet in the tray until it restarts, so a removed
-# applet lingers there until the next relogin. Restart it when the applet was
+# applet lingers there until the next relogin. Restart it when an applet was
 # actually installed (captured before removal, above) and a panel is actually
 # running; cosmic-session respawns it. Unanchored `-f`, matching the
 # installer's own post-install panel restart, because the panel runs from an
@@ -235,21 +229,16 @@ if [ "$APPLET_INSTALLED" = true ] && pgrep -f cosmic-panel > /dev/null 2>&1; the
     pkill -f cosmic-panel 2>/dev/null || true
 fi
 
-if [ "$SHARED_APPLET_STAYS" = true ]; then
-    print_info "Super TTS is installed and uses the shared COSMIC applet, so it stays."
-fi
-
 # Nudge COSMIC's launcher caches so the removed entries disappear without
 # a relogin; both processes respawn on demand and rescan.
 pkill -f '^cosmic-app-library$' 2>/dev/null || true
 pkill -f '^cosmic-launcher$' 2>/dev/null || true
 pkill -f '^pop-launcher( |$)' 2>/dev/null || true
 
-# 7. COSMIC custom keyboard shortcut. Remove only if Super STT is the
-#    only entry; otherwise the user has other custom bindings we
-#    shouldn't disturb. They can hand-edit if they want a finer
-#    surgical removal.
-if [ -f "$COSMIC_SHORTCUTS" ] && grep -q 'description: Some("Super STT")' "$COSMIC_SHORTCUTS"; then
+# 7. COSMIC custom keyboard shortcut. Remove only if ours is the only
+#    entry; otherwise the user has other custom bindings we shouldn't
+#    disturb. They can hand-edit if they want a finer surgical removal.
+if [ -f "$COSMIC_SHORTCUTS" ] && grep -Eq 'description: Some\("Super (Voice|STT)"\)' "$COSMIC_SHORTCUTS"; then
     # Each binding starts with `    (` in column 0. Count them.
     entry_count=$(grep -c '^    (' "$COSMIC_SHORTCUTS" || echo 0)
     if [ "$entry_count" = "1" ]; then
@@ -257,42 +246,48 @@ if [ -f "$COSMIC_SHORTCUTS" ] && grep -q 'description: Some("Super STT")' "$COSM
         print_info "Removed COSMIC keyboard shortcut"
     else
         print_warn "COSMIC custom shortcuts file has other entries — not touching."
-        print_warn "  Edit by hand to remove the Super STT entry:"
+        print_warn "  Edit by hand to remove the Super Voice entry:"
         print_warn "  $COSMIC_SHORTCUTS"
     fi
 fi
 
-# 8. Runtime socket / pid dir (sockets will be cleared when the daemon
-#    stops in step 10).
-if [ -d "$RUN_DIR" ]; then
-    rm -rf "$RUN_DIR"
-    print_info "Removed runtime dir $RUN_DIR"
-fi
+# 8. Runtime socket dirs (sockets will be cleared when the daemons stop in
+#    step 10).
+for name in voice stt tts; do
+    if [ -d "$RUNTIME_DIR/$name" ]; then
+        rm -rf "${RUNTIME_DIR:?}/$name"
+        print_info "Removed runtime dir $RUNTIME_DIR/$name"
+    fi
+done
 
-# 9. systemd unit file (system + legacy per-user) + reload so systemd
-#    forgets the unit.
-for unit in \
-    "$SYSTEM_SYSTEMD_DIR/$SERVICE_NAME.service" \
-    "$USER_SYSTEMD_DIR/$SERVICE_NAME.service"
-do
-    remove_path "$unit" && print_info "Removed systemd unit $unit"
+# 9. systemd unit files (system + legacy per-user) + reload so systemd
+#    forgets the units.
+for service in "${SERVICES[@]}"; do
+    for unit in \
+        "$SYSTEM_SYSTEMD_DIR/$service.service" \
+        "$USER_SYSTEMD_DIR/$service.service"
+    do
+        remove_path "$unit" && print_info "Removed systemd unit $unit"
+    done
 done
 if command -v systemctl &> /dev/null; then
     systemctl --user daemon-reload 2>/dev/null || true
 fi
 
-# 10. Stop the daemon LAST. Doing it here means an in-flight
-#     transcription has had until this point to either complete or
-#     be force-killed. We use `stop` (clean shutdown) and fall back
-#     to `kill` if the process is still alive after a grace window.
+# 10. Stop the daemons LAST. Doing it here means an in-flight transcription
+#     or utterance has had until this point to either complete or be
+#     force-killed. We use `stop` (clean shutdown) and fall back to `kill`
+#     if the process is still alive.
 if command -v systemctl &> /dev/null; then
-    if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-        print_info "Stopping daemon..."
-        systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
-    fi
+    for service in "${SERVICES[@]}"; do
+        if systemctl --user is-active --quiet "$service" 2>/dev/null; then
+            print_info "Stopping $service..."
+            systemctl --user stop "$service" 2>/dev/null || true
+        fi
+    done
 fi
 # Catch a daemon started outside of systemd (e.g. `just run-daemon`).
-for proc in super-stt-daemon super-stt; do
+for proc in "${DAEMONS[@]}"; do
     if pgrep -u "$(id -u)" -x "$proc" > /dev/null 2>&1; then
         print_info "Killing leftover $proc process..."
         pkill -u "$(id -u)" -x "$proc" 2>/dev/null || true
@@ -303,6 +298,6 @@ print_info ""
 print_info "Uninstall complete."
 print_info ""
 print_info "Preserved (delete manually if you want a deeper clean):"
-print_info "  - Logs:    $LOG_DIR"
 print_info "  - Config:  $CONFIG_DIR"
-print_info "  - Keyring entries (open your keyring manager — Seahorse, KWalletManager — and delete entries under 'super-stt-session' and 'super-stt')"
+print_info "  - Secrets: $STATE_DIR (session tokens and API keys)"
+print_info "  - Data:    $DATA_DIR (installed backends, models, cloned voices)"

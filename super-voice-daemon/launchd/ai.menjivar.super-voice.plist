@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The macOS counterpart to systemd/super-voice.service.
+
+  A LaunchAgent, not a LaunchDaemon, and that is not a packaging preference:
+  a LaunchDaemon runs in the system context with no window server and no
+  logged-in user, where the daemon cannot post CoreGraphics key events (its
+  only write method here), cannot reach Notification Center, and cannot put
+  the consent dialog on anyone's screen. Everything the daemon does that is
+  not transcription needs the user's GUI session.
+
+  It ships inside the app bundle, at
+  Super Voice.app/Contents/Library/LaunchAgents/, and is never copied out:
+  the app registers it with SMAppService (super-voice-shared/src/launch_agents.rs),
+  which has launchd load it from there. So this file is the same for every
+  user and every install location, and says nothing that depends on either —
+  `just bundle-macos` copies it into the bundle as it is.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.menjivar.super-voice</string>
+
+    <!--
+      Relative to the bundle, so the app can be moved after it is installed.
+      launchd has no search path, and SMAppService resolves this key against
+      wherever the bundle is now.
+    -->
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/super-voice-daemon</string>
+
+    <!--
+      Only argv[0], and there must never be anything after it: the daemon
+      takes no configuration on its command line (the model, its device, and
+      the audio theme are all config / `POST /v1` state), clap rejects an
+      unknown argument and exits 2 before the listener binds, and `KeepAlive`
+      below turns that into a permanent crash loop with no socket for the app
+      or the CLI to reach. `every_shipped_program_arguments_parses`
+      (super-voice-daemon/src/cli_tests.rs) reads this file and fails if one is
+      reintroduced.
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>super-voice-daemon</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+      The analogue of the unit's `Restart=always`. Plain `true` rather than a
+      `SuccessfulExit=false` dictionary: a clean exit should still come back,
+      the same way it does under systemd, and the explicit way to stop the
+      daemon is `launchctl bootout` (what `just stop-daemon` runs), which
+      overrides KeepAlive.
+    -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- `RestartSec=5`. -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!--
+      Keeps the daemon off the efficiency-core/throttled tier App Nap would
+      otherwise put a background agent on. It holds a model in memory and is
+      expected to answer a keypress immediately.
+    -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RUST_LOG</key>
+        <string>info</string>
+        <!--
+          There is no journal here, so the daemon's output goes to a file,
+          which `just logs-daemon` tails. Not `StandardErrorPath`: that needs
+          an absolute path, launchd expands neither `~` nor `$HOME`, and a
+          plist inside a signed bundle cannot be edited per user. The daemon
+          resolves this against `$HOME` itself; see
+          super-voice-shared/src/logging.rs.
+        -->
+        <key>SUPER_VOICE_LOG_FILE</key>
+        <string>Library/Logs/super-voice/daemon.log</string>
+    </dict>
+</dict>
+</plist>

@@ -1,0 +1,421 @@
+// SPDX-License-Identifier: GPL-3.0-only
+use crate::config::DaemonConfig;
+use crate::daemon::device_management::PipelineStage;
+use crate::daemon::events::EventBus;
+use crate::download_progress::DownloadStateManager;
+use crate::input::audio::AudioProcessor;
+use crate::resource_management::ResourceManager;
+use crate::services::dbus::DBusManager;
+use crate::stt_models::backends::{self, DiscoveredBackend};
+use anyhow::Result;
+use std::sync::{Arc, RwLock};
+use super_engine_daemon::load_gate::LoadGate;
+use super_engine_daemon::secrets::Secrets;
+use super_voice_shared::models::protocol::{DaemonStatusEvent, PreviewSource};
+use super_voice_shared::theme::AudioTheme;
+use tokio::sync::broadcast;
+
+/// Normalize a backend-reported device label to the short wire-name
+/// (`"cpu"` / `"cuda"` / `"rocm"` / `"metal"` / `"vulkan"` / `"remote"`) used
+/// in `daemon_status_changed` SSE payloads and as `resolved_accel` on the
+/// per-model device endpoint.
+#[must_use]
+pub(crate) fn normalize_device(label: &str) -> String {
+    let l = label.to_ascii_lowercase();
+    if l.contains("cuda") {
+        "cuda".to_string()
+    } else if l.contains("rocm") || contains_hip_token(&l) {
+        "rocm".to_string()
+    } else if l.contains("vulkan") {
+        "vulkan".to_string()
+    } else if l.contains("metal") {
+        "metal".to_string()
+    } else if l.contains("remote") {
+        "remote".to_string()
+    } else {
+        "cpu".to_string()
+    }
+}
+
+/// Whether `label` (already lowercased) names `hip` as a whole token rather
+/// than as a substring. A bare `contains("hip")` also fires inside `"chip"` /
+/// `"chipset"`, so e.g. a Vulkan label mentioning an llvmpipe "chip" would
+/// misroute to `rocm`.
+fn contains_hip_token(label: &str) -> bool {
+    label
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|token| token == "hip")
+}
+
+/// A live model: its full resolved [`ModelDefinition`] plus the running
+/// inference instance. A single slot rather than parallel
+/// `Arc<RwLock<Option<…>>>` slots for the name, the definition, and the
+/// instance — those always changed together and could drift during a switch.
+/// The definition owns the model's identity and capabilities, so nothing has
+/// to be re-derived at read sites.
+pub struct LoadedModel {
+    pub definition: crate::stt_models::ModelDefinition,
+    pub instance: Box<dyn crate::stt_models::transcribe::Transcribe>,
+}
+
+/// Shared handle to the currently-loaded model (or `None` while idle/loading).
+pub type SharedLoadedModel = Arc<tokio::sync::RwLock<Option<LoadedModel>>>;
+
+/// One preview on its way to the waiting `/stt/transcribe` client: the text and
+/// what it spans, which the client cannot tell from the text alone.
+#[derive(Debug, Clone)]
+pub struct PreviewFrame {
+    pub text: String,
+    pub source: PreviewSource,
+}
+
+/// The single `/stt/transcribe` preview slot: an `(id, sender)` guarded by a lock,
+/// where `id` lets a racing request claim the slot only when free and clear it
+/// only when it is still its own.
+pub type PreviewSlot =
+    Arc<tokio::sync::RwLock<Option<(u64, tokio::sync::mpsc::UnboundedSender<PreviewFrame>)>>>;
+
+#[derive(Clone)]
+pub struct SuperSTTDaemon {
+    pub model: SharedLoadedModel,
+    /// The loaded post-processor, or `None` when post-processing is off or
+    /// nothing is selected.
+    ///
+    /// A second slot rather than a second daemon: a post-processor is an
+    /// ordinary backend model — same discovery, same instantiation, same
+    /// `Transcribe` box — that happens to be driven over `POST /v1/process`
+    /// instead of `/v1/stt/transcribe`. Keeping it beside [`Self::model`] is what
+    /// lets it be selected independently of the transcription backend and
+    /// survive a backend switch.
+    pub post_processor: SharedLoadedModel,
+    pub audio_processor: Arc<AudioProcessor>,
+    pub shutdown_tx: broadcast::Sender<()>,
+    pub dbus_manager: Option<Arc<DBusManager>>,
+    /// Internal pub/sub bus that fans recording / audio / STT events
+    /// out to widget HTTP/SSE subscribers via `GET /events`.
+    pub events: Arc<EventBus>,
+    pub audio_theme: Arc<RwLock<AudioTheme>>,
+    pub volume: Arc<RwLock<u8>>,
+    pub busy: Arc<tokio::sync::RwLock<bool>>,
+    pub download_manager: Arc<DownloadStateManager>,
+    // Configuration management
+    pub config: Arc<tokio::sync::RwLock<DaemonConfig>>,
+    // Resource management for connection and rate limiting
+    pub resource_manager: Arc<ResourceManager>,
+    // Preview typing setting (beta feature)
+    pub preview_typing_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    // Sender used to signal a running recording to stop early (shortcut or external stop)
+    pub manual_stop_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::broadcast::Sender<()>>>>,
+    // Cached keyboard simulator (session persists across recordings, except
+    // for backends that go stale while idle — see `Simulator::is_cacheable`)
+    pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
+    // Streams preview text to the one waiting `/stt/transcribe` client. See
+    // [`PreviewSlot`]: the id closes the busy-check TOCTOU that let a losing
+    // request null the winner's preview stream.
+    pub preview_text: PreviewSlot,
+    // Speech to text's backends, discovered from the backends directory: each
+    // with its transcription and post-processing models only.
+    pub backends: Arc<tokio::sync::RwLock<Vec<DiscoveredBackend>>>,
+    // Every backend in the directory, with the models of every feature: the
+    // catalog `/v1/backend/list` serves.
+    pub all_backends: Arc<tokio::sync::RwLock<Vec<DiscoveredBackend>>>,
+    // Active backend: the relative install dir (a subdir of the backends dir)
+    // of the selected backend, or None when idle. Runtime mirror of
+    // `config.transcription.active_backend`.
+    pub active_backend: Arc<tokio::sync::RwLock<Option<String>>>,
+    // Desktop-notification channel for recording failures. Behind a mutex
+    // because sending mutates the cached connection and the replaces-id.
+    pub notifier: Arc<tokio::sync::Mutex<crate::output::notification::Notifier>>,
+    // Self-update check state: last completed check + notify-once
+    // persistence. See `crate::self_update`.
+    pub self_update: Arc<crate::self_update::SelfUpdateChecker>,
+    // One model loads into each stage at a time, and the newest request for
+    // a stage wins. Taken in `instantiate_backend`, which every load of either
+    // stage passes through.
+    pub loading: Arc<StageLoadGates>,
+    // The secrets file: the session tokens the daemon has issued and every
+    // backend's API keys. One per process, opened at startup; clones share it.
+    pub secrets: Secrets,
+    /// Text to speech: the daemon's second feature, built on the same config,
+    /// event bus, secrets and limits as everything above.
+    pub tts: crate::tts::daemon::types::SuperTTSDaemon,
+}
+
+/// A [`LoadGate`] for each pipeline stage.
+///
+/// One per stage, not one for the daemon: both stages are meant to hold a
+/// model at once, so a request for one must never supersede a load into the
+/// other.
+#[derive(Debug, Default)]
+pub struct StageLoadGates {
+    transcription: LoadGate,
+    post_processor: LoadGate,
+}
+
+impl StageLoadGates {
+    /// The gate every load into `stage` passes.
+    #[must_use]
+    pub fn get(&self, stage: PipelineStage) -> &LoadGate {
+        match stage {
+            PipelineStage::Transcription => &self.transcription,
+            PipelineStage::PostProcessor => &self.post_processor,
+        }
+    }
+}
+
+#[cfg(test)]
+mod stage_load_gate_tests {
+    use super::{PipelineStage, StageLoadGates};
+
+    /// A request for the post-processor arriving while a transcription model
+    /// waits to load must not make that load give up: the stages hold
+    /// different models.
+    #[tokio::test]
+    async fn a_request_for_one_stage_does_not_supersede_the_other() {
+        let gates = StageLoadGates::default();
+        let transcription = gates.get(PipelineStage::Transcription).ticket();
+        let _post_processor = gates.get(PipelineStage::PostProcessor).ticket();
+        assert!(
+            gates
+                .get(PipelineStage::Transcription)
+                .enter(transcription)
+                .await
+                .is_some(),
+            "a post-processor request superseded a transcription load"
+        );
+    }
+
+    /// Within a stage the newest request still wins.
+    #[tokio::test]
+    async fn a_newer_request_for_the_same_stage_supersedes() {
+        let gates = StageLoadGates::default();
+        let gate = gates.get(PipelineStage::PostProcessor);
+        let older = gate.ticket();
+        let _newer = gate.ticket();
+        assert!(gate.enter(older).await.is_none());
+    }
+}
+
+/// A daemon wired up with inert defaults: no model, no backends, nothing
+/// selected, and a `DaemonConfig::default()` that is never written to disk.
+///
+/// Lives beside the struct so there is exactly one copy — a second would drift
+/// as fields are added (the compiler catches the drift, but only after someone
+/// has fixed the same literal twice).
+#[cfg(test)]
+pub(crate) async fn test_daemon() -> SuperSTTDaemon {
+    let (shutdown_tx, _) = broadcast::channel(1);
+    SuperSTTDaemon {
+        model: Arc::new(tokio::sync::RwLock::new(None)),
+        post_processor: Arc::new(tokio::sync::RwLock::new(None)),
+        audio_processor: Arc::new(AudioProcessor::new()),
+        shutdown_tx,
+        dbus_manager: None,
+        events: Arc::new(EventBus::new()),
+        audio_theme: Arc::new(RwLock::new(AudioTheme::default())),
+        volume: Arc::new(RwLock::new(100)),
+        busy: Arc::new(tokio::sync::RwLock::new(false)),
+        download_manager: Arc::new(DownloadStateManager::new()),
+        config: Arc::new(tokio::sync::RwLock::new(DaemonConfig::default())),
+        resource_manager: Arc::new(ResourceManager::development()),
+        preview_typing_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
+        simulator: Arc::new(tokio::sync::RwLock::new(None)),
+        preview_text: Arc::new(tokio::sync::RwLock::new(None)),
+        backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        all_backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        active_backend: Arc::new(tokio::sync::RwLock::new(None)),
+        // A fake notifier, not `Notifier::dbus()`: no daemon test may reach
+        // the real session bus, or it can pop a genuine desktop notification
+        // on whoever's machine runs the suite. `fail = true` mirrors a
+        // headless/no-notification-server environment, which is also what
+        // makes `NotificationMethod::Auto` (the config default) degrade to
+        // typing — the behavior the write-mode failure-notice tests assert.
+        // A test that genuinely needs delivery to succeed can override
+        // `daemon.notifier` after construction.
+        notifier: Arc::new(tokio::sync::Mutex::new(
+            crate::output::notification::Notifier::fake(true).0,
+        )),
+        self_update: Arc::new(crate::self_update::checker()),
+        loading: Arc::new(StageLoadGates::default()),
+        // In memory: no daemon test reads or writes the user's secrets file.
+        secrets: Secrets::in_memory(),
+        tts: crate::tts::daemon::types::test_daemon().await,
+    }
+}
+
+impl SuperSTTDaemon {
+    /// Resolve a wire-level `(name, source)` pair into a [`ModelDefinition`]
+    /// from the discovered backends. Returns `None` on miss.
+    pub async fn resolve_definition(
+        &self,
+        name: &str,
+        source: &str,
+    ) -> Option<crate::stt_models::ModelDefinition> {
+        let backends = self.backends.read().await;
+        backends::find_model(&backends, name, source).map(|(_, def)| def.clone())
+    }
+
+    /// Set the audio theme
+    ///
+    /// If the lock is poisoned, logs a warning and attempts to recover by creating a new lock.
+    pub fn set_audio_theme(&self, theme: AudioTheme) {
+        match self.audio_theme.write() {
+            Ok(mut guard) => {
+                *guard = theme;
+                log::info!("Audio theme changed to: {theme}");
+            }
+            Err(poisoned) => {
+                log::warn!("Audio theme lock was poisoned, attempting recovery");
+                let mut guard = poisoned.into_inner();
+                *guard = theme;
+                log::info!("Audio theme changed to: {theme} (after lock recovery)");
+            }
+        }
+    }
+
+    /// Get the current audio theme
+    ///
+    /// If the lock is poisoned, logs a warning and returns the default theme.
+    #[must_use]
+    pub fn get_audio_theme(&self) -> AudioTheme {
+        match self.audio_theme.read() {
+            Ok(guard) => *guard,
+            Err(poisoned) => {
+                log::warn!("Audio theme lock was poisoned, returning current value");
+                *poisoned.into_inner()
+            }
+        }
+    }
+
+    /// Set the master volume (0-100)
+    pub fn set_volume(&self, volume: u8) {
+        match self.volume.write() {
+            Ok(mut guard) => {
+                *guard = volume;
+                log::info!("Volume changed to: {volume}");
+            }
+            Err(poisoned) => {
+                log::warn!("Volume lock was poisoned, attempting recovery");
+                let mut guard = poisoned.into_inner();
+                *guard = volume;
+                log::info!("Volume changed to: {volume} (after lock recovery)");
+            }
+        }
+    }
+
+    /// Get the current master volume (0-100)
+    #[must_use]
+    pub fn get_volume(&self) -> u8 {
+        match self.volume.read() {
+            Ok(guard) => *guard,
+            Err(poisoned) => {
+                log::warn!("Volume lock was poisoned, returning current value");
+                *poisoned.into_inner()
+            }
+        }
+    }
+
+    /// Get the current volume as a f32 multiplier (0.0-1.0)
+    #[must_use]
+    pub fn get_volume_f32(&self) -> f32 {
+        f32::from(self.get_volume()) / 100.0
+    }
+
+    /// Broadcast that a setting changed so subscribed clients re-resolve any
+    /// derived state — e.g. a per-model language that follows the global
+    /// value must re-fetch its resolution block. Reuses the
+    /// `daemon_status_changed` topic clients already subscribe to;
+    /// `setting` names what changed (currently `"language"`,
+    /// `"update_check_enabled"`, `"update_beta_optin"`, `"post_processor"`, or
+    /// `"contexts"` — see `docs/protocol/endpoints/v1/events.md`). Shared by
+    /// the language, settings and context handlers so the event shape can't
+    /// drift between call sites.
+    pub fn publish_settings_changed(&self, setting: &str) {
+        self.events
+            .publish_daemon_status(DaemonStatusEvent::SettingsChanged {
+                setting: setting.to_string(),
+            });
+    }
+
+    /// [`publish_settings_changed`](Self::publish_settings_changed) for a
+    /// setting both features read: the global language and the update
+    /// settings. It names no feature, so both features' clients re-fetch.
+    pub fn publish_shared_setting_changed(&self, setting: &str) {
+        self.events
+            .publish_shared_status(DaemonStatusEvent::SettingsChanged {
+                setting: setting.to_string(),
+            });
+    }
+
+    /// Publish a recording-state transition on the SSE event bus so any
+    /// connected `/events` subscribers (e.g. the COSMIC applet) update
+    /// their visualization. The legacy notification path is gone; this
+    /// is the only fan-out.
+    pub fn broadcast_recording_state_change(&self, is_recording: bool) {
+        self.events.publish_recording_state(is_recording);
+    }
+
+    /// Persist the current config to disk. Settings handlers call this
+    /// after mutating the in-memory config so the change survives a
+    /// restart. The legacy `config_changed` broadcast that used to
+    /// follow this save is no longer part of the documented protocol
+    /// (see `docs/protocol/endpoints/v1/events.md`); a future
+    /// cross-app sync mechanism should be added as a documented topic.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the on-disk write fails.
+    pub async fn persist_config(&self) -> Result<(), anyhow::Error> {
+        Self::persist_config_static(&self.config).await
+    }
+
+    /// Static variant of [`persist_config`] for use in spawned tasks
+    /// that hold a `Clone<Arc<RwLock<DaemonConfig>>>` directly.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the on-disk write fails.
+    pub async fn persist_config_static(
+        config: &Arc<tokio::sync::RwLock<DaemonConfig>>,
+    ) -> Result<(), anyhow::Error> {
+        // Snapshot under the lock (cheap clone), release it, then do the
+        // blocking serialize + atomic write on a blocking thread — never on
+        // an async worker while a config lock is held (Tier 3 #3).
+        let snapshot = config.read().await.clone();
+        tokio::task::spawn_blocking(move || snapshot.save())
+            .await
+            .map_err(|e| anyhow::anyhow!("config-persist task failed: {e}"))?
+            .map_err(|e| anyhow::anyhow!("Failed to save config to disk: {e}"))?;
+        log::debug!("Persisted config to disk");
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_device_maps_every_accel_label() {
+        assert_eq!(normalize_device("cuda:0"), "cuda");
+        assert_eq!(normalize_device("Cuda(0)"), "cuda");
+        assert_eq!(normalize_device("Metal(0)"), "metal");
+        assert_eq!(normalize_device("ROCm(0)"), "rocm");
+        assert_eq!(normalize_device("hip:0"), "rocm");
+        assert_eq!(normalize_device("Vulkan(0)"), "vulkan");
+        assert_eq!(normalize_device("remote"), "remote");
+        assert_eq!(normalize_device("cpu"), "cpu");
+        assert_eq!(normalize_device("anything else"), "cpu");
+    }
+
+    /// `hip` must match as a token, not as a substring — a bare
+    /// `contains("hip")` also fires inside `"chip"` and would misroute a
+    /// Vulkan label naming an llvmpipe "chip" to `rocm`.
+    #[test]
+    fn normalize_device_does_not_treat_chip_as_hip() {
+        assert_eq!(normalize_device("chip"), "cpu");
+        assert_eq!(normalize_device("generic chip"), "cpu");
+        assert_eq!(normalize_device("Vulkan (llvmpipe chip)"), "vulkan");
+    }
+}

@@ -17,9 +17,11 @@ pointing at its executable.
 
 The backend is an HTTP/1.1 server that exposes the [`/v1`
 routes](./contract.md#the-v1-contract), including the SSE form of
-`POST /v1/transcribe`. The daemon is the client. This is the same wire shape
-as the external client↔daemon protocol in [transport.md](../transport.md),
-so an existing HTTP/SSE server stack can be reused directly.
+`POST /v1/transcribe` and the framed audio body of `POST /v1/synthesize`. The
+daemon is the client. This is the same wire shape as the external
+client↔daemon protocol in [transport.md](../transport.md), so an existing
+HTTP/SSE server stack can be reused directly — the framed body is an ordinary
+chunked response with a custom content type.
 
 The daemon provides the socket; the backend binds and serves it. The socket
 **must be a pathname socket** (a path on disk), not an abstract-namespace
@@ -35,30 +37,38 @@ backend directory and the following environment:
 
 | Variable                   | Notes                                                                 |
 |----------------------------|-----------------------------------------------------------------------|
-| `SUPER_STT_BACKEND_SOCKET` | Pathname of the Unix socket to bind and serve the `/v1` routes on.    |
-| `SUPER_STT_BACKEND_DIR`    | Absolute path to the backend directory; model files live under it at the configured `dest` paths. |
-| `SUPER_STT_BACKEND_CACHE_DIR` | Absolute path to a writable directory the backend may keep regenerable data in, private to it and preserved across runs. The daemon creates it; it is the **only** durable writable path the sandbox grants. |
+| `SUPER_VOICE_BACKEND_SOCKET` | Pathname of the Unix socket to bind and serve the `/v1` routes on.    |
+| `SUPER_VOICE_BACKEND_DIR`    | Absolute path to the backend directory; model files live under it at the configured `dest` paths. |
+| `SUPER_VOICE_BACKEND_CACHE_DIR` | Absolute path to a writable directory the backend may keep regenerable data in, private to it and preserved across runs. The daemon creates it; it is the **only** durable writable path the sandbox grants. |
 | `XDG_CACHE_HOME`           | Set to the same directory, so a library that resolves its own cache the XDG way lands there instead of under the read-only `$HOME`. |
 | `CUDA_CACHE_PATH`          | Set to `<cache dir>/nv`. The NVIDIA driver keeps its PTX-to-SASS translations under `$HOME/.nv/ComputeCache` and ignores XDG, so it is the one consumer the line above misses — and `ProtectHome=read-only` would let it read a cache it can never write, redoing the translation on every load. |
 | `CUDA_CACHE_MAXSIZE`       | Bounds that cache. The driver's own default is around a gigabyte, and the cache is per backend, so the default would be inherited once per installed backend. |
 
-On startup the backend binds `SUPER_STT_BACKEND_SOCKET`, begins serving
+The daemon also sets the three under `SUPER_STT_` and `SUPER_TTS_`, with the
+same values, because backends published for Super STT and Super TTS read
+those names (`SUPER_STT_BACKEND_SOCKET` and so on). A new backend reads the
+`SUPER_VOICE_` ones.
+
+On startup the backend binds `SUPER_VOICE_BACKEND_SOCKET`, begins serving
 `/v1`, and reports `state: "starting"` from `GET /v1/status` until a
-`POST /v1/load` arrives. It resolves a model's files from
-`SUPER_STT_BACKEND_DIR` joined with the model's `dest`.
+[`POST /v1/prepare`](./contract.md#post-v1prepare) or `POST /v1/load`
+arrives. It resolves a model's files from
+`SUPER_VOICE_BACKEND_DIR` joined with the model's `dest`.
 
 The daemon polls for `ready` for **ten minutes** before giving up on a load,
 or for as long as the load keeps moving if the backend reports its progress
 (see [`GET /v1/status`](./contract.md#get-v1status)). Ten minutes is a
 generous budget on purpose: a backend that compiles its GPU kernels
-at runtime should do it during the load, not on the first request, because
+at runtime should do it during the load, or in a
+[prepare](./contract.md#post-v1prepare) that overlaps it with the download of
+the weights, and never on the first request, because
 `ready` is what the daemon shows the user and what it starts sending
-transcription requests against. A load that fails must say so with `error`
+transcription or synthesis requests against. A load that fails must say so with `error`
 rather than leave the daemon waiting out the budget (see
 [`GET /v1/status`](./contract.md#get-v1status)).
 
 Anything a backend wants to keep between runs goes in
-`SUPER_STT_BACKEND_CACHE_DIR` and must be treated as regenerable: it is a
+`SUPER_VOICE_BACKEND_CACHE_DIR` and must be treated as regenerable: it is a
 cache, the daemon does not back it up, and a user may delete it. A backend
 that compiles GPU kernels at runtime — anything on CubeCL/Burn — should point
 its kernel cache there, or it recompiles on every load. A backend with
@@ -86,7 +96,7 @@ unit. The backend cannot relax these restrictions; design against them:
 | `ProtectSystem=strict`            | The entire filesystem is read-only …                           |
 | `ReadOnlyPaths=<backend dir>`     | … including the backend's own directory: the daemon provisions model files into it, and the backend never writes there. A model with [`prepare_files`](./config.md#models) has its backend spawned once those files are on disk; the rest arrive while it runs, each under its final name only once it is complete and verified. |
 | `ReadWritePaths=<socket dir>`     | The socket directory is writable.                              |
-| `ReadWritePaths=<cache dir>`      | `SUPER_STT_BACKEND_CACHE_DIR` is writable, and is the only writable path whose contents survive the process. Every cache the daemon points a library at lives under it, including the driver's. |
+| `ReadWritePaths=<cache dir>`      | `SUPER_VOICE_BACKEND_CACHE_DIR` is writable, and is the only writable path whose contents survive the process. Every cache the daemon points a library at lives under it, including the driver's. |
 | `ProtectHome=read-only`, `PrivateTmp=yes` | `$HOME` is readable but not writable; `/tmp` is private and writable, but it is discarded with the unit — scratch only, never a cache. |
 | `NoNewPrivileges=yes`             | The process cannot acquire new privileges.                     |
 | `SystemCallFilter=@system-service` | A seccomp allowlist; privileged syscall groups are denied.    |
@@ -136,12 +146,14 @@ authentication; it serves whatever connects on its socket. It may verify via
 
 - Declare `kind = "subprocess"` and an `entrypoint` in
   [backend.toml](./config.md).
-- Bind `SUPER_STT_BACKEND_SOCKET` (a pathname socket) and serve the
+- Bind `SUPER_VOICE_BACKEND_SOCKET` (a pathname socket) and serve the
   [`/v1` routes](./contract.md#the-v1-contract).
-- Resolve model files under `SUPER_STT_BACKEND_DIR`; never attempt network
+- Resolve model files under `SUPER_VOICE_BACKEND_DIR`; never attempt network
   access.
 - Drive `GET /v1/status` through `starting → loading → ready`, reporting load
   `progress` and the actual `device`.
 - Stream `event: preview` / `event: done` from `POST /v1/transcribe` when
   `options.stream_realtime` is set.
+- Emit `audio` frames from `POST /v1/synthesize` as they are produced rather
+  than buffering the whole utterance — the daemon plays as soon as it can.
 - Exit cleanly on `SIGTERM`.

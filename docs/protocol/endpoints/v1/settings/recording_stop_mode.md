@@ -1,16 +1,16 @@
 # `/settings/recording_stop_mode`
 
 Read and set the default stop behavior for
-[`POST /transcribe`](../transcribe.md) when no per-request
+[`POST /stt/transcribe`](../transcribe.md) when no per-request
 `stop_mode` is sent.
 
 | Mode                 | Stops on silence (VAD) | Stops on manual signal                      |
 |----------------------|------------------------|---------------------------------------------|
 | `silence_only`            | yes                    | no                                          |
 | `silence_and_manual` | yes                    | yes                                         |
-| `manual_only`        | no                     | yes — explicit [`/transcribe/stop`](../transcribe/stop.md) or socket disconnect |
+| `manual_only`        | no                     | yes — explicit [`/stt/transcribe/stop`](../transcribe/stop.md) or socket disconnect |
 
-Per-request overrides on `/transcribe` take precedence over the
+Per-request overrides on `/stt/transcribe` take precedence over the
 default set here.
 
 ## Auth
@@ -25,8 +25,8 @@ default set here.
 
 ```http
 POST /settings/recording_stop_mode HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 {
@@ -67,8 +67,8 @@ the write is not silently coerced to the default.
 
 ```http
 GET /settings/recording_stop_mode HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

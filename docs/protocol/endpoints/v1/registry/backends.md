@@ -47,7 +47,7 @@ GET /registry/backend/list?include_incompatible=false&kind=wasm&online=true&q=op
       "description": "…",
       "license": "Apache-2.0",
       "kind": "subprocess",
-      "contract": "v1",
+      "contract": "v4",
       "min_client": "0.1.0",
       "allowed_hosts": [],
       "online": false,
@@ -69,6 +69,11 @@ GET /registry/backend/list?include_incompatible=false&kind=wasm&online=true&q=op
           "cudnn": false
         }
       },
+      "builds": [
+        { "accel": "cuda",   "size": 734003200 },
+        { "accel": "vulkan", "size": 152043520 },
+        { "accel": "cpu",    "size": 98566144 }
+      ],
       "installed_version": "0.1.0",
       "update_available": true
     }
@@ -93,7 +98,7 @@ identify a model by `(name, source)` instead. It will be removed.
 `models[].supported_devices` names the runtimes a model can use: `"cpu"`,
 `"gpu"`, or the `"none"` sentinel for a model that runs remotely. It is a
 property of the *model*, not of this host — see
-[`GET /backend/list`](../backend/list.md) for narrowing it to the devices the
+[`GET /backend/list`](../backends.md) for narrowing it to the devices the
 installed build actually provides.
 
 Per-entry fields beyond what `index.json` carries:
@@ -104,10 +109,17 @@ Per-entry fields beyond what `index.json` carries:
   internal. `accel` is a string for a build carrying one runtime, and an array
   for one carrying several — the same two spellings
   [`backend.toml`](../../../backend/config.md#assets) accepts.
+- `builds` — every framework this machine can run a build of the backend on,
+  best first, each with its build's download `size` in bytes (every part
+  counted). The first is `selected_asset`'s: what an install picks when none is
+  asked for. A client switching an installed backend to another framework (see
+  the [device](../pipeline/device.md) endpoints) reads the download that costs
+  from here, and installs it with `POST .../install` and that `accel`. Absent
+  for a WASM backend, which has one build.
 - `compatibility.reason` — present only when `compatible = false`. Human-readable.
   A backend whose [`contract`](../../../backend/config.md#contract-generations)
   generation this daemon does not know is reported here too — before any
-  asset question — as `needs Super STT <min_client> or newer (backend contract
+  asset question — as `needs Super Voice <min_client> or newer (backend contract
   <contract>); this is <daemon version>`. `POST .../install` and
   `POST .../update` return the same sentence as their `422 incompatible`
   `message`, so the fix is stated wherever the block is met.
@@ -119,7 +131,7 @@ Per-entry fields beyond what `index.json` carries:
   host, regardless of its registry status. Read from the installed
   `backend.toml` on every request, so it reflects what is on disk now rather
   than what the daemon saw at startup. It is the same read that fills
-  [`version` on `GET /backend/list`](../backend/list.md), so the two never disagree.
+  [`version` on `GET /backend/list`](../backends.md), so the two never disagree.
 - `update_available` — whether `version` is newer than `installed_version`,
   compared as semver. The daemon decides this rather than leaving each client
   to re-derive it: the daemon is the side that reads the installed manifest and

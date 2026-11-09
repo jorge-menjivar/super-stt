@@ -1,34 +1,36 @@
 [workspace]
   resolver        = "2"
   members         = [
-    "super-stt-app",
-    "super-stt-cli",
-    "super-stt-consent",
-    "super-stt-daemon",
-    "super-stt-indexer",
-    "super-stt-install",
-    "super-stt-registry-types",
-    "super-stt-shared",
+    "super-voice-app",
+    "super-voice-cli",
+    "super-voice-consent",
+    "super-voice-daemon",
+    "super-voice-indexer",
+    "super-voice-install",
+    "super-voice-shared",
+    "super-voice-registry-types",
   ]
   # The mock WASM backend fixtures build for wasm32-wasip2, not the host target
   # (the daemon's wasm_mock.rs / wasm_mock_realtime.rs load them) — keep them
   # out of the workspace entirely.
   exclude         = [
-    "super-stt-daemon/tests/fixtures/mock-wasm-backend",
-    "super-stt-daemon/tests/fixtures/mock-wasm-realtime-backend",
+    "super-voice-daemon/tests/fixtures/mock-wasm-backend",
+    "super-voice-daemon/tests/fixtures/mock-wasm-realtime-backend",
+    "super-voice-daemon/tests/fixtures/mock-wasm-tts-backend",
+    "super-voice-daemon/tests/fixtures/mock-wasm-realtime-tts-backend",
   ]
   # The indexer is a host binary, so it's a workspace member — `--workspace`
   # lints and tests it like everything else. But it's a CI-only tool with
   # heavy deps, so keep it out of `default-members`: the everyday
   # `cargo build`/`run`/`test` (no `--workspace`) stays lean.
   default-members = [
-    "super-stt-app",
-    "super-stt-cli",
-    "super-stt-consent",
-    "super-stt-daemon",
-    "super-stt-install",
-    "super-stt-registry-types",
-    "super-stt-shared",
+    "super-voice-app",
+    "super-voice-cli",
+    "super-voice-consent",
+    "super-voice-daemon",
+    "super-voice-install",
+    "super-voice-shared",
+    "super-voice-registry-types",
   ]
 
   [workspace.package]
@@ -80,20 +82,6 @@
       ]
     }
     i18n-embed-fl            = "0.10.0"
-    # Both native backends are named because the daemon builds for both
-    # platforms. Neither costs the other anything: keyring puts
-    # `dbus-secret-service` behind `cfg(target_os = "linux")` and
-    # `security-framework` behind `cfg(target_os = "macos")`, so each feature
-    # pulls a dependency only on the target that uses it. Without
-    # `apple-native` keyring falls back to its *mock* store on macOS, which
-    # would silently drop every session token and backend secret at exit.
-    keyring                  = {
-      version  = "3",
-      features = [
-        "apple-native",
-        "sync-secret-service",
-      ]
-    }
     # System calls (for client singleton)
     libc                     = "0.2"
     # Cosmic specific. The lib target is `cosmic`, so this is `use cosmic::`
@@ -149,35 +137,35 @@
     # `just pin-engine <rev>`.
     super-engine-client      = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "79e3ceace42d9492c60277abfaa4c08b63cf3fdb",
     }
     super-engine-daemon      = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "79e3ceace42d9492c60277abfaa4c08b63cf3fdb",
     }
     super-engine-forge       = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "79e3ceace42d9492c60277abfaa4c08b63cf3fdb",
     }
     super-engine-indexer     = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "79e3ceace42d9492c60277abfaa4c08b63cf3fdb",
     }
     super-engine-installer   = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "79e3ceace42d9492c60277abfaa4c08b63cf3fdb",
     }
     super-engine-protocol    = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "79e3ceace42d9492c60277abfaa4c08b63cf3fdb",
     }
     super-engine-spec        = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "79e3ceace42d9492c60277abfaa4c08b63cf3fdb",
     }
     super-engine-test-daemon = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "79e3ceace42d9492c60277abfaa4c08b63cf3fdb",
     }
     thiserror                = "2.0"
     tokio                    = {

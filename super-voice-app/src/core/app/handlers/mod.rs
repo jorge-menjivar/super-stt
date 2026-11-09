@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-3.0-only
+mod backend;
+mod build;
+mod contexts;
+mod daemon;
+mod device;
+mod download;
+mod language;
+mod model;
+mod models_page;
+mod recording;
+mod settings;
+mod shell;
+mod speech;
+mod stage;
+pub(in crate::core::app) mod tasks;
+mod update;
+pub(in crate::core::app) mod voice;
+mod voices;

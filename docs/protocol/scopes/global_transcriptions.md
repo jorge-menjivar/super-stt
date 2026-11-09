@@ -12,7 +12,7 @@ to call this out plainly.
 
 Reading back your *own* transcription results does **not** require this scope —
 that is part of [`transcribe`](./transcribe.md), returned inline on the
-`/transcribe` response.
+`/stt/transcribe` response.
 
 ## Topics
 

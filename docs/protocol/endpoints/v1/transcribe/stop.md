@@ -1,29 +1,29 @@
-# `POST /transcribe/stop`
+# `POST /stt/transcribe/stop`
 
 Stop an in-flight daemon-mic capture. Idempotent: calling it when
 nothing is running, or twice in quick succession, returns success
 with an informational message rather than an error.
 
-> **Most apps don't need this endpoint.** If your `/transcribe`
+> **Most apps don't need this endpoint.** If your `/stt/transcribe`
 > connection is still open (`wait: true`), just close the HTTP
 > connection — client disconnect is treated as an implicit stop.
-> `/transcribe/stop` only exists for the two cases where
+> `/stt/transcribe/stop` only exists for the two cases where
 > socket-close isn't available:
 >
-> 1. You sent [`POST /transcribe`](../transcribe.md) with
+> 1. You sent [`POST /stt/transcribe`](../transcribe.md) with
 >    `wait: false`; the connection is closed by design, so there's
 >    nothing to disconnect.
 > 2. You're stopping a recording started by a different process
 >    (a panel applet stopping a hotkey daemon's recording, etc.).
 
-`/transcribe/stop` only applies to the daemon-mic capture path. A
+`/stt/transcribe/stop` only applies to the daemon-mic capture path. A
 pre-captured (`audio_data`) request is one-shot and synchronous —
 there is nothing to stop.
 
 This endpoint **does not affect** the connection that issued the
-matching `/transcribe`. If that caller used `wait: true`, it
+matching `/stt/transcribe`. If that caller used `wait: true`, it
 continues to read `event: preview` blocks and the final `event:
-done` block on its own connection — `/transcribe/stop` simply
+done` block on its own connection — `/stt/transcribe/stop` simply
 causes the capture to end sooner. The final result is always
 delivered on the connection that opened it, not on the connection
 that issued the stop.
@@ -34,14 +34,14 @@ that issued the stop.
 - `Authorization: Bearer <session_token>` is required.
 - Tokens without the `transcribe` scope get `403 scope_denied`.
 
-## `POST /transcribe/stop`
+## `POST /stt/transcribe/stop`
 
 **Request:**
 
 ```http
-POST /transcribe/stop HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+POST /stt/transcribe/stop HTTP/1.1
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 No request body.

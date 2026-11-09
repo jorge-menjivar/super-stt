@@ -25,6 +25,20 @@ The daemon looks up the entry whose `source` matches and installs its
 selected asset. If the entry is not in the cached index, the daemon does a
 single inline refresh before failing.
 
+An optional `accel` installs the build for one framework instead of the best
+one: `cuda`, `rocm`, `metal`, `vulkan` or `cpu`, one of the entry's
+[`builds`](./backends.md). This is how a backend is switched to another
+framework: installed again with that `accel`, its downloaded model files
+carried over, and then the model's [device](../pipeline/device.md) set to it.
+
+```json
+{ "source": "github.com/super-libre/super-tts-qwen", "accel": "vulkan" }
+```
+
+An `accel` this machine has no build for answers `422 incompatible`; one that
+is not a framework, `400 bad_request`. An update keeps the framework installed
+when the new release still has a build for it.
+
 The installed `backend.toml` is the backend's own manifest, published as a
 pinned release asset (the `manifest` field on every index entry). The daemon
 downloads it, verifies its SHA-256 against the pin, confirms it parses, passes
@@ -117,7 +131,7 @@ same backend is unaffected, as is replacing an install whose `backend.toml`
 no longer parses.
 
 **Integrity & limits.** Operator base-URL overrides (`GITHUB_API_BASE`,
-`SUPER_STT_REGISTRY_URL`) must be `https://` (loopback `http://` is allowed for
+`SUPER_VOICE_REGISTRY_URL`) must be `https://` (loopback `http://` is allowed for
 testing); insecure values are ignored and the secure default is used. Downloads
 are capped at the index-declared asset size plus a small margin (or an absolute
 ceiling when no size is declared), and tarball extraction enforces per-file and
@@ -172,10 +186,15 @@ Streamed on `GET /events`:
   "type": "registry.install.failed",
   "install_id": "ins_01HE5…",
   "source": "github.com/…",
-  "phase": "verifying",
-  "error": "asset_hash_mismatch"
+  "phase": "installing",
+  "error": "manifest_invalid",
+  "reason": "this backend is built for super-tts, not super-voice"
 }
 ```
+
+`reason` says in words what went wrong, when the daemon knows more than
+`error` does: for `manifest_invalid`, the rule the manifest broke. It is
+absent otherwise. Show `reason` when it is there, and branch on `error`.
 
 Typed `error` values:
 

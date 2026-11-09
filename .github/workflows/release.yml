@@ -81,7 +81,7 @@ jobs:
           # an oversight. The app, the daemon and the CLI build and run on
           # macOS (CI gates them — see the `macos` job in ci.yml), and
           # everything needed to package them is in the tree: `just
-          # bundle-macos` builds Super STT.app, with the daemon's and the
+          # bundle-macos` builds Super Voice.app, with the daemon's and the
           # shortcut's LaunchAgents inside it.
           #
           # What is missing is the release half, and it is not just a matrix
@@ -90,7 +90,7 @@ jobs:
           #     and COSMIC resources. A darwin entry ships the app bundle
           #     instead, so the build and packaging steps need to branch on
           #     the target.
-          #   * `super-stt-install` — the binary this workflow publishes as
+          #   * `super-voice-install` — the binary this workflow publishes as
           #     the one-line installer — writes a systemd unit and runs
           #     `systemctl --user`. It needs a launchd path before a darwin
           #     asset would install anything.
@@ -145,11 +145,11 @@ jobs:
       - name: Build binaries
         run: |
           cargo build --release --target ${{ matrix.target }} \
-            --bin super-stt-daemon \
-            --bin super-stt-cli \
-            --bin super-stt-consent \
-            --bin super-stt-app \
-            --bin super-stt-install
+            --bin super-voice-daemon \
+            --bin super-voice-cli \
+            --bin super-voice-consent \
+            --bin super-voice-app \
+            --bin super-voice-install
 
       - name: Create tarball
         run: |
@@ -157,36 +157,36 @@ jobs:
           # Daemon, CLI, and consent helper. The consent helper MUST be in
           # the same directory as the daemon — locate_consent_helper has no
           # PATH fallback.
-          cp target/${{ matrix.target }}/release/super-stt-daemon dist/
-          cp target/${{ matrix.target }}/release/super-stt-cli dist/
-          cp target/${{ matrix.target }}/release/super-stt-consent dist/
-          cp target/${{ matrix.target }}/release/super-stt-app dist/
+          cp target/${{ matrix.target }}/release/super-voice-daemon dist/
+          cp target/${{ matrix.target }}/release/super-voice-cli dist/
+          cp target/${{ matrix.target }}/release/super-voice-consent dist/
+          cp target/${{ matrix.target }}/release/super-voice-app dist/
 
           # Include systemd service files
           mkdir -p dist/systemd
-          cp super-stt-daemon/systemd/super-stt.service dist/systemd/
+          cp super-voice-daemon/systemd/super-voice.service dist/systemd/
 
           mkdir -p dist/resources
 
-          # Include desktop app resources
-          cp -r super-stt-app/resources/* dist/resources
+          # The app's desktop resources: launcher entry, metainfo, icons.
+          cp -r super-voice-app/resources/* dist/resources
 
           # Remove any extra assets
           rm -rf dist/resources/assets
 
           # Create tarball with architecture suffix
-          tar -czf super-stt-${{ matrix.target }}.tar.gz -C dist .
+          tar -czf super-voice-${{ matrix.target }}.tar.gz -C dist .
 
       - name: Stage installer binary
-        run: cp "target/${{ matrix.target }}/release/super-stt-install" "super-stt-install-${{ matrix.target }}"
+        run: cp "target/${{ matrix.target }}/release/super-voice-install" "super-voice-install-${{ matrix.target }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: super-stt-${{ matrix.target }}
+          name: super-voice-${{ matrix.target }}
           path: |
-            super-stt-${{ matrix.target }}.tar.gz
-            super-stt-install-${{ matrix.target }}
+            super-voice-${{ matrix.target }}.tar.gz
+            super-voice-install-${{ matrix.target }}
 
   create-release:
     name: Create Release
@@ -217,7 +217,7 @@ jobs:
         with:
           files: |
             artifacts/**/*.tar.gz
-            artifacts/**/super-stt-install-*
+            artifacts/**/super-voice-install-*
             SHA256SUMS
           draft: false
           prerelease: false

@@ -1,0 +1,220 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+use crate::core::app::AppModel;
+use crate::ui::messages::{BackendMessage, Message, ModelsPageMessage};
+use cosmic::prelude::*;
+
+impl AppModel {
+    pub(in crate::core::app) fn handle_models_install_lifecycle(
+        &mut self,
+        message: ModelsPageMessage,
+    ) -> Task<cosmic::Action<Message>> {
+        match message {
+            // Registry / Download-tab messages
+            ModelsPageMessage::InstallBackend(source) => {
+                // Clear a prior "failed to start" so the card reads "Installing…".
+                self.registry.install_errors.remove(&source);
+                let s = source.clone();
+                Task::perform(
+                    async move { crate::daemon::registry::install_by_source(&s, None).await },
+                    move |res| {
+                        cosmic::Action::App(Message::ModelsPage(match res {
+                            Ok(a) => ModelsPageMessage::InstallAccepted {
+                                source: source.clone(),
+                                install_id: a.install_id,
+                            },
+                            Err(e) => ModelsPageMessage::InstallFailedToStart {
+                                source: source.clone(),
+                                error: e.to_string(),
+                            },
+                        }))
+                    },
+                )
+            }
+
+            ModelsPageMessage::InstallAccepted { source, install_id } => {
+                use crate::state::registry::InstallStatus;
+                use super_voice_shared::registry::events::InstallPhase;
+                // The request was accepted — retire any prior start error.
+                self.registry.install_errors.remove(&source);
+                self.registry.installs.insert(
+                    source,
+                    InstallStatus {
+                        install_id,
+                        phase: InstallPhase::Downloading,
+                        bytes_done: 0,
+                        bytes_total: None,
+                        error: None,
+                        reason: None,
+                    },
+                );
+                Task::none()
+            }
+
+            ModelsPageMessage::InstallFailedToStart { source, error } => {
+                log::error!("install({source}) failed to start: {error}");
+                let error = super_voice_shared::daemon::http_client::HttpError::Other(error)
+                    .user_message(&super_voice_shared::SUPER_VOICE);
+                // Drop the pending marker (there is no background install) and
+                // record the reason so the Browse card shows "Failed" + a note
+                // instead of silently snapping back to the Install button.
+                self.registry.installs.remove(&source);
+                self.fail_build(&source, &error);
+                self.registry.install_errors.insert(source, error);
+                Task::none()
+            }
+
+            ModelsPageMessage::UpdateBackend(source) => {
+                self.registry.install_errors.remove(&source);
+                let s = source.clone();
+                Task::perform(
+                    async move { crate::daemon::registry::update(&s).await },
+                    move |res| {
+                        cosmic::Action::App(match res {
+                            Ok(r) if r.noop => {
+                                log::info!("update({source}) noop — already at {}", r.to_version);
+                                // Nothing to install, but something to correct:
+                                // the only way to reach this is an Update entry
+                                // drawn from a stale `installed_version`. Reload
+                                // the catalog that decides it, or the entry
+                                // stays and every click no-ops again.
+                                Message::ModelsPage(ModelsPageMessage::InstallCompleted { source })
+                            }
+                            Ok(r) => Message::ModelsPage(ModelsPageMessage::InstallAccepted {
+                                source: source.clone(),
+                                install_id: r.install_id.unwrap_or_default(),
+                            }),
+                            Err(e) => {
+                                Message::ModelsPage(ModelsPageMessage::InstallFailedToStart {
+                                    source: source.clone(),
+                                    error: e.to_string(),
+                                })
+                            }
+                        })
+                    },
+                )
+            }
+
+            _ => Task::none(),
+        }
+    }
+
+    /// Uninstall lifecycle: kick off the request and surface its failure.
+    pub(in crate::core::app) fn handle_models_uninstall(
+        &mut self,
+        message: ModelsPageMessage,
+    ) -> Task<cosmic::Action<Message>> {
+        match message {
+            ModelsPageMessage::UninstallBackend(source) => {
+                // Clear any stale failure so the row reads "in progress" on retry.
+                self.registry.uninstall_errors.remove(&source);
+                let s = source.clone();
+                Task::perform(
+                    async move { crate::daemon::registry::uninstall(&s).await },
+                    move |res| {
+                        cosmic::Action::App(match res {
+                            Ok(_) => Message::Backend(BackendMessage::BackendsReload),
+                            Err(error) => Message::ModelsPage(ModelsPageMessage::UninstallFailed {
+                                source: source.clone(),
+                                error: error.to_string(),
+                            }),
+                        })
+                    },
+                )
+            }
+
+            ModelsPageMessage::UninstallFailed { source, error } => {
+                log::error!("uninstall({source}) failed: {error}");
+                self.registry.uninstall_errors.insert(source, error);
+                Task::none()
+            }
+
+            _ => Task::none(),
+        }
+    }
+
+    pub(in crate::core::app) fn handle_models_install_progress(
+        &mut self,
+        message: ModelsPageMessage,
+    ) -> Task<cosmic::Action<Message>> {
+        match message {
+            ModelsPageMessage::InstallProgress {
+                install_id,
+                source,
+                phase,
+                bytes_done,
+                bytes_total,
+            } => {
+                if let Some(s) = self.registry.installs.get_mut(&source)
+                    && s.install_id == install_id
+                {
+                    s.phase = phase;
+                    if let Some(d) = bytes_done {
+                        s.bytes_done = d;
+                    }
+                    if let Some(t) = bytes_total {
+                        s.bytes_total = Some(t);
+                    }
+                }
+                Task::none()
+            }
+
+            ModelsPageMessage::InstallCompleted { source } => {
+                // The drawer's whole job is done the moment the thing it
+                // previewed is installed: the preview now describes a backend
+                // that is already there, and the Install button under it would
+                // offer to fetch it again. Close it and empty it.
+                //
+                // Only for the install this drawer started — a Browse card's
+                // install reports on the same channel, and it has its own card
+                // to report on.
+                if self.core.window.show_context
+                    && self.context_page == crate::state::models::ContextPage::AddBackend
+                    && self.registry.add_key() == source
+                {
+                    self.core.window.show_context = false;
+                    self.registry.clear_add_sheet();
+                }
+                self.registry.installs.remove(&source);
+                self.registry.install_errors.remove(&source);
+                // A build the user asked for moves the model onto it. The
+                // daemon reads the install from disk, so this need not wait
+                // for the catalogs below.
+                let switch = self.finish_build(&source);
+                // Both catalogs, because they carry different halves of what
+                // just changed. The backends list is what the Installed tab
+                // draws; the registry catalog carries `installed_version`, and
+                // that is what decides whether an Update entry is offered. Left
+                // stale, the Update the user just ran stays on the menu and
+                // does nothing when clicked. No index refresh: the annotation
+                // is computed from local install state, so the cached index is
+                // enough and a network round-trip would only slow this down.
+                Task::batch([
+                    crate::core::app::handlers::tasks::reload_backend_catalogs(),
+                    switch,
+                ])
+            }
+
+            ModelsPageMessage::InstallFailed {
+                install_id,
+                source,
+                phase,
+                error,
+                reason,
+            } => {
+                if let Some(s) = self.registry.installs.get_mut(&source)
+                    && s.install_id == install_id
+                {
+                    s.error = Some(error);
+                    s.reason = reason;
+                    s.phase = phase;
+                    let shown = s.failure().unwrap_or_default();
+                    self.fail_build(&source, &shown);
+                }
+                Task::none()
+            }
+
+            _ => Task::none(),
+        }
+    }
+}

@@ -1,0 +1,586 @@
+// SPDX-License-Identifier: GPL-3.0-only
+use super::command::Command;
+use super::request::DaemonRequest;
+use crate::models::contexts::DictationContext;
+use crate::models::recording_stop_mode::RecordingStopMode;
+use crate::models::write_method::WriteMethod;
+use crate::validation::{self, Validate};
+
+impl TryFrom<DaemonRequest> for Command {
+    type Error = String;
+
+    fn try_from(request: DaemonRequest) -> Result<Self, Self::Error> {
+        // Validate the request first
+        if let Err(e) = request.validate() {
+            return Err(format!("Request validation failed: {e}"));
+        }
+        match request.command.as_str() {
+            "transcribe" => cmd_transcribe(&request),
+            "ping" => Ok(Command::Ping {
+                client_id: request.client_id.clone(),
+            }),
+            "status" => Ok(Command::Status),
+            "record" => cmd_record(&request),
+            "set_audio_theme" => cmd_set_audio_theme(&request),
+            "get_audio_theme" => Ok(Command::GetAudioTheme),
+            "test_audio_theme" => Ok(Command::TestAudioTheme),
+            "set_model" => cmd_set_model(&request),
+            "get_model" => Ok(Command::GetModel),
+            "list_models" => Ok(Command::ListModels),
+            "list_post_processor_models" => Ok(Command::ListPostProcessorModels),
+            "set_model_device" => cmd_set_model_device(&request),
+            "get_model_device" => cmd_get_model_device(&request),
+            "set_post_processor_device" => cmd_set_post_processor_device(&request),
+            "get_post_processor_device" => cmd_get_post_processor_device(&request),
+            "list_model_devices" => Ok(Command::ListModelDevices {
+                model: model_device_target(&request, "list_model_devices")?,
+            }),
+            "list_active_backend_devices" => Ok(Command::ListActiveBackendDevices),
+            "list_post_processor_devices" => Ok(Command::ListPostProcessorDevices {
+                model: model_device_target(&request, "list_post_processor_devices")?,
+            }),
+            "list_post_processor_backend_devices" => Ok(Command::ListPostProcessorBackendDevices),
+            "get_config" => Ok(Command::GetConfig),
+            "cancel_download" => Ok(Command::CancelDownload),
+            "cancel_post_processor_download" => Ok(Command::CancelPostProcessorDownload),
+            "get_download_status" => Ok(Command::GetDownloadStatus),
+            "list_audio_themes" => Ok(Command::ListAudioThemes),
+            "set_preview_typing" => cmd_set_preview_typing(&request),
+            "get_preview_typing" => Ok(Command::GetPreviewTyping),
+            "set_post_processor" => cmd_set_post_processor(&request),
+            "get_post_processor" => Ok(Command::GetPostProcessor),
+            "clear_post_processor" => Ok(Command::ClearPostProcessor),
+            "reload_post_processor" => Ok(Command::ReloadPostProcessor),
+            "set_post_processor_backend" => cmd_set_post_processor_backend(&request),
+            "clear_post_processor_backend" => Ok(Command::ClearPostProcessorBackend),
+            "get_pipeline" => Ok(Command::GetPipeline),
+            "set_recording_stop_mode" => cmd_set_recording_stop_mode(&request),
+            "get_recording_stop_mode" => Ok(Command::GetRecordingStopMode),
+            "set_write_method" => cmd_set_write_method(&request),
+            "get_write_method" => Ok(Command::GetWriteMethod),
+            "test_write_method" => Ok(Command::TestWriteMethod),
+            "set_notification_method" => cmd_set_notification_method(&request),
+            "get_notification_method" => Ok(Command::GetNotificationMethod),
+            "set_update_check_enabled" => cmd_set_update_check_enabled(&request),
+            "get_update_check_enabled" => Ok(Command::GetUpdateCheckEnabled),
+            "set_update_beta_optin" => cmd_set_update_beta_optin(&request),
+            "get_update_beta_optin" => Ok(Command::GetUpdateBetaOptin),
+            "set_volume" => cmd_set_volume(&request),
+            "get_volume" => Ok(Command::GetVolume),
+            "set_primary_language" => cmd_set_primary_language(&request),
+            "get_primary_language" => Ok(Command::GetPrimaryLanguage),
+            "clear_primary_language" => Ok(Command::ClearPrimaryLanguage),
+            "list_primary_languages" => Ok(Command::ListPrimaryLanguages),
+            "set_model_language" => cmd_set_model_language(&request),
+            "get_model_language" => cmd_get_model_language(&request),
+            "clear_model_language" => cmd_clear_model_language(&request),
+            "list_model_languages" => cmd_list_model_languages(&request),
+            "list_backends" => Ok(Command::ListBackends),
+            "list_transcription_backends" => Ok(Command::ListTranscriptionBackends),
+            "list_post_processor_backends" => Ok(Command::ListPostProcessorBackends),
+            "reload_active_model" => Ok(Command::ReloadActiveModel),
+            "unload_active_model" => Ok(Command::UnloadActiveModel),
+            "set_backend_option" => cmd_set_backend_option(&request),
+            "set_active_backend" => cmd_set_active_backend(&request),
+            "get_active_backend" => Ok(Command::GetActiveBackend),
+            "clear_active_backend" => Ok(Command::ClearActiveBackend),
+            "get_gpu_info" => Ok(Command::GetGpuInfo),
+            "set_context" => cmd_set_context(&request),
+            "delete_context" => cmd_delete_context(&request),
+            "set_active_context" => Ok(cmd_set_active_context(&request)),
+            "set_backend_context" => cmd_set_backend_context(&request),
+            _ => Err(format!("Unknown command: {}", request.command)),
+        }
+    }
+}
+
+fn cmd_transcribe(request: &DaemonRequest) -> Result<Command, String> {
+    let audio_data = request
+        .audio_data
+        .clone()
+        .ok_or("Missing audio_data for transcribe command")?;
+    let sample_rate = request.sample_rate.unwrap_or(16000);
+    let client_id = request
+        .client_id
+        .clone()
+        .unwrap_or_else(|| format!("client_{}", uuid::Uuid::new_v4()));
+    Ok(Command::Transcribe {
+        audio_data,
+        sample_rate,
+        client_id,
+        language: request.language.clone(),
+    })
+}
+
+fn cmd_record(request: &DaemonRequest) -> Result<Command, String> {
+    let write_mode = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("write_mode"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    // `stop_mode` is an optional per-request override: absent -> `None` (the
+    // daemon uses its configured default). A present-but-unknown value is a bad
+    // request — reject it rather than silently dropping it, matching the strict
+    // `set_recording_stop_mode` path (Tier 1 #26). The legacy
+    // `disable_silence_detection` compat branch was undocumented and caller-less.
+    let stop_mode = match request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("stop_mode"))
+        .and_then(|v| v.as_str())
+    {
+        Some(s) => Some(
+            s.parse::<RecordingStopMode>()
+                .map_err(|e| format!("Invalid recording stop mode: {e}"))?,
+        ),
+        None => None,
+    };
+    let wait = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("wait"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let preview = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("preview"))
+        .and_then(serde_json::Value::as_bool);
+    // Strict for the same reason as `stop_mode`: a mistyped `"false"` dropped
+    // to `None` would play the cues the caller asked to silence.
+    let audio_cues = match request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("audio_cues"))
+    {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::Bool(on)) => Some(*on),
+        Some(other) => {
+            return Err(format!(
+                "Invalid audio_cues: expected true or false, got {other}"
+            ));
+        }
+    };
+    Ok(Command::Record {
+        write_mode,
+        stop_mode,
+        wait,
+        preview,
+        language: request.language.clone(),
+        audio_cues,
+    })
+}
+
+fn cmd_set_audio_theme(request: &DaemonRequest) -> Result<Command, String> {
+    let theme = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("theme"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing theme for set_audio_theme command")?
+        .to_string();
+
+    if let Err(e) =
+        validation::validate_string(&theme, "theme", validation::limits::MAX_NAME_LENGTH)
+    {
+        return Err(e.to_string());
+    }
+
+    Ok(Command::SetAudioTheme { theme })
+}
+
+fn cmd_set_model(request: &DaemonRequest) -> Result<Command, String> {
+    let data = request.data.as_ref();
+    let model_str = data
+        .and_then(|d| d.get("model"))
+        .and_then(|v| v.as_str())
+        .ok_or("Model string is empty")?;
+
+    // `source` is the serving backend's repo id. It is optional: when absent
+    // the daemon resolves it against the active backend, and rejects the switch
+    // when none is selected (see endpoints/v1/active_model.md).
+    let source = data
+        .and_then(|d| d.get("source"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    Ok(Command::SetModel {
+        model: model_str.to_string(),
+        source,
+    })
+}
+
+/// The `model` a per-model device command addresses. Required and non-empty:
+/// a device belongs to a model, and there is no "the current one" fallback
+/// because the command must work for a model that is not loaded.
+fn model_device_target(request: &DaemonRequest, command: &str) -> Result<String, String> {
+    let model = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("model"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if model.is_empty() {
+        return Err(format!("Missing model for {command} command"));
+    }
+    if let Err(e) =
+        validation::validate_string(&model, "model", validation::limits::MAX_NAME_LENGTH)
+    {
+        return Err(e.to_string());
+    }
+    Ok(model)
+}
+
+/// The `device` a per-model device setter carries. Only presence and length
+/// are checked here; the daemon validates the value itself (`cpu`/`gpu` and
+/// the deprecated spellings) so it can answer `invalid_device`.
+fn model_device_value(request: &DaemonRequest, command: &str) -> Result<String, String> {
+    let device = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("device"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing device for {command} command"))?
+        .to_string();
+    if let Err(e) =
+        validation::validate_string(&device, "device", validation::limits::MAX_NAME_LENGTH)
+    {
+        return Err(e.to_string());
+    }
+    Ok(device)
+}
+
+fn cmd_set_model_device(request: &DaemonRequest) -> Result<Command, String> {
+    let model = model_device_target(request, "set_model_device")?;
+    let device = model_device_value(request, "set_model_device")?;
+    Ok(Command::SetModelDevice { model, device })
+}
+
+fn cmd_get_model_device(request: &DaemonRequest) -> Result<Command, String> {
+    let model = model_device_target(request, "get_model_device")?;
+    Ok(Command::GetModelDevice { model })
+}
+
+fn cmd_set_post_processor_device(request: &DaemonRequest) -> Result<Command, String> {
+    let model = model_device_target(request, "set_post_processor_device")?;
+    let device = model_device_value(request, "set_post_processor_device")?;
+    Ok(Command::SetPostProcessorDevice { model, device })
+}
+
+fn cmd_get_post_processor_device(request: &DaemonRequest) -> Result<Command, String> {
+    let model = model_device_target(request, "get_post_processor_device")?;
+    Ok(Command::GetPostProcessorDevice { model })
+}
+
+/// Parse `set_post_processor`: the model to run final transcripts through.
+///
+/// `source` is optional and resolves to the selected post-processor backend
+/// when omitted, exactly as `set_model` resolves against the active backend.
+/// There is no `enabled` field — this command *is* "enable with this model",
+/// and `clear_post_processor` is its off switch.
+fn cmd_set_post_processor(request: &DaemonRequest) -> Result<Command, String> {
+    let data = request
+        .data
+        .as_ref()
+        .ok_or("Missing data for set_post_processor command")?;
+
+    let model = data
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if model.is_empty() {
+        return Err("Missing model for set_post_processor command".to_string());
+    }
+    let source = data
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    if let Err(e) =
+        validation::validate_string(&model, "model", validation::limits::MAX_NAME_LENGTH)
+    {
+        return Err(e.to_string());
+    }
+    if !source.is_empty()
+        && let Err(e) =
+            validation::validate_string(&source, "source", validation::limits::MAX_NAME_LENGTH)
+    {
+        return Err(e.to_string());
+    }
+
+    Ok(Command::SetPostProcessor { model, source })
+}
+
+/// Parse `set_post_processor_backend`: which backend provides the
+/// post-processor. The twin of `cmd_set_active_backend`.
+fn cmd_set_post_processor_backend(request: &DaemonRequest) -> Result<Command, String> {
+    let source = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("source"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing source for set_post_processor_backend")?
+        .to_string();
+    if let Err(e) =
+        validation::validate_string(&source, "source", validation::limits::MAX_NAME_LENGTH)
+    {
+        return Err(e.to_string());
+    }
+    Ok(Command::SetPostProcessorBackend { source })
+}
+
+fn cmd_set_preview_typing(request: &DaemonRequest) -> Result<Command, String> {
+    let enabled = request
+        .enabled
+        .ok_or("Missing enabled field for set_preview_typing command")?;
+
+    Ok(Command::SetPreviewTyping { enabled })
+}
+
+fn cmd_set_recording_stop_mode(request: &DaemonRequest) -> Result<Command, String> {
+    let mode_str = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("mode"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing mode for set_recording_stop_mode command")?;
+    // A present-but-unknown value is a bad request: return an error and leave
+    // the stored setting unchanged, rather than silently persisting the default
+    // (Tier 1 #26). Matches the `record` command's `stop_mode` override.
+    let mode = mode_str
+        .parse::<RecordingStopMode>()
+        .map_err(|e| format!("Invalid recording stop mode: {e}"))?;
+    Ok(Command::SetRecordingStopMode { mode })
+}
+
+fn cmd_set_write_method(request: &DaemonRequest) -> Result<Command, String> {
+    let method_str = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("method"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing method for set_write_method command")?;
+    let method = method_str
+        .parse::<WriteMethod>()
+        .map_err(|e| format!("Invalid input method: {e}"))?;
+    Ok(Command::SetWriteMethod { method })
+}
+
+fn cmd_set_notification_method(request: &DaemonRequest) -> Result<Command, String> {
+    let method = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("method"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing method for set_notification_method command")?
+        .to_string();
+
+    Ok(Command::SetNotificationMethod { method })
+}
+
+fn cmd_set_update_check_enabled(request: &DaemonRequest) -> Result<Command, String> {
+    let enabled = request
+        .enabled
+        .ok_or("Missing enabled field for set_update_check_enabled command")?;
+    Ok(Command::SetUpdateCheckEnabled { enabled })
+}
+
+fn cmd_set_update_beta_optin(request: &DaemonRequest) -> Result<Command, String> {
+    let value = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("value"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing value for set_update_beta_optin command")?
+        .to_string();
+
+    Ok(Command::SetUpdateBetaOptin { value })
+}
+
+fn cmd_set_volume(request: &DaemonRequest) -> Result<Command, String> {
+    let volume = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("volume"))
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("Missing volume for set_volume command")?;
+    let volume =
+        u8::try_from(volume).map_err(|_| "Volume must be between 0 and 100".to_string())?;
+    if volume > 100 {
+        return Err("Volume must be between 0 and 100".to_string());
+    }
+    Ok(Command::SetVolume { volume })
+}
+
+fn cmd_set_backend_option(request: &DaemonRequest) -> Result<Command, String> {
+    let data = request.data.as_ref();
+    let source = data
+        .and_then(|d| d.get("source"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing source for set_backend_option")?
+        .to_string();
+    let name = data
+        .and_then(|d| d.get("name"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing name for set_backend_option")?
+        .to_string();
+    // Empty/absent value clears the override.
+    let value = data
+        .and_then(|d| d.get("value"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    Ok(Command::SetBackendOption {
+        source,
+        name,
+        value,
+    })
+}
+
+/// `set_context` — the whole context object arrives under `data.context`.
+///
+/// The first command here whose payload is a struct rather than a scalar, so
+/// it is the first to hand the field to `serde` instead of picking strings out
+/// of the `Value` by hand. That is the right trade at this shape: the manual
+/// style would have to spell out four fields including an array, and would
+/// silently accept a vocabulary of numbers by dropping it.
+///
+/// Storage limits are not checked here. This is the parse; whether the context
+/// is one the daemon will keep is `DictationContext::check`, run by the handler
+/// that stores it, so a client reaching the daemon by any route meets the same
+/// answer.
+fn cmd_set_context(request: &DaemonRequest) -> Result<Command, String> {
+    let value = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("context"))
+        .ok_or("Missing context for set_context")?
+        .clone();
+    let context: DictationContext = serde_json::from_value(value)
+        .map_err(|e| format!("Invalid context for set_context: {e}"))?;
+    Ok(Command::SetContext { context })
+}
+
+fn cmd_delete_context(request: &DaemonRequest) -> Result<Command, String> {
+    let id = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("id"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing id for delete_context")?
+        .to_string();
+    Ok(Command::DeleteContext { id })
+}
+
+/// `set_active_context` — an absent or null `id` clears the selection, which
+/// is why this one cannot fail: there is no missing-field case to report.
+fn cmd_set_active_context(request: &DaemonRequest) -> Command {
+    let id = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("id"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    Command::SetActiveContext { id }
+}
+
+/// `set_backend_context` — `id` carries three states, so absent and null are
+/// not the same thing here as they are in `set_active_context`.
+///
+/// Absent (or null) clears the override and the backend follows the active
+/// context; a string pins it, and the empty string pins it to no context at
+/// all. The distinction is the reason this reads `id` as a `Value` first: an
+/// `as_str()` chain would fold `""` and null together and lose the ability to
+/// say "this backend gets nothing".
+fn cmd_set_backend_context(request: &DaemonRequest) -> Result<Command, String> {
+    let data = request.data.as_ref();
+    let source = data
+        .and_then(|d| d.get("source"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing source for set_backend_context")?
+        .to_string();
+    let id = match data.and_then(|d| d.get("id")) {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(s)) => Some(s.clone()),
+        Some(other) => return Err(format!("Invalid id for set_backend_context: {other}")),
+    };
+    Ok(Command::SetBackendContext { source, id })
+}
+
+fn cmd_set_active_backend(request: &DaemonRequest) -> Result<Command, String> {
+    let source = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("source"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing source for set_active_backend")?
+        .to_string();
+    Ok(Command::SetActiveBackend { source })
+}
+
+fn cmd_set_primary_language(request: &DaemonRequest) -> Result<Command, String> {
+    let language = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("language"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing language for set_primary_language command")?
+        .to_string();
+    Ok(Command::SetPrimaryLanguage { language })
+}
+
+/// Extract the `(source, model)` pair every per-model language command carries
+/// in `data`. Both are required.
+fn model_language_target(
+    request: &DaemonRequest,
+    command: &str,
+) -> Result<(String, String), String> {
+    let data = request.data.as_ref();
+    let source = data
+        .and_then(|d| d.get("source"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing source for {command} command"))?
+        .to_string();
+    let model = data
+        .and_then(|d| d.get("model"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing model for {command} command"))?
+        .to_string();
+    Ok((source, model))
+}
+
+fn cmd_set_model_language(request: &DaemonRequest) -> Result<Command, String> {
+    let (source, model) = model_language_target(request, "set_model_language")?;
+    let language = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("language"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing language for set_model_language command")?
+        .to_string();
+    Ok(Command::SetModelLanguage {
+        source,
+        model,
+        language,
+    })
+}
+
+fn cmd_get_model_language(request: &DaemonRequest) -> Result<Command, String> {
+    let (source, model) = model_language_target(request, "get_model_language")?;
+    Ok(Command::GetModelLanguage { source, model })
+}
+
+fn cmd_clear_model_language(request: &DaemonRequest) -> Result<Command, String> {
+    let (source, model) = model_language_target(request, "clear_model_language")?;
+    Ok(Command::ClearModelLanguage { source, model })
+}
+
+fn cmd_list_model_languages(request: &DaemonRequest) -> Result<Command, String> {
+    let (source, model) = model_language_target(request, "list_model_languages")?;
+    Ok(Command::ListModelLanguages { source, model })
+}

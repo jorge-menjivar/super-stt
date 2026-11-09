@@ -6,14 +6,14 @@ name: Registry index (PR preview)
 # publishing to gh-pages, surface it for manual review: a job-summary table of
 # the indexed backends plus the full index.json as a downloadable artifact.
 #
-# The job is super-engine's, shared with Super TTS. It is pinned at the same
+# The job is super-engine's. It is pinned at the same
 # rev as the super-engine crates in Cargo.toml.
 
 on:
   pull_request:
     paths:
       - 'registry/registry.toml'
-      - 'super-stt-registry-types/**'
+      - 'super-voice-registry-types/**'
   workflow_dispatch: # manual run for testing on any branch
 
 permissions:
@@ -25,6 +25,6 @@ concurrency:
 
 jobs:
   preview:
-    uses: super-libre/super-engine/.github/workflows/registry-index-pr.yml@3cd940dfbf7c41153dc684e66c272d69cc78b88a
+    uses: super-libre/super-engine/.github/workflows/registry-index-pr.yml@79e3ceace42d9492c60277abfaa4c08b63cf3fdb
     with:
-      indexer: super-stt-indexer
+      indexer: super-voice-indexer

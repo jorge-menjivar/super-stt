@@ -4,13 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Super STT is a high-performance speech-to-text service built in Rust with a daemon/client architecture. The system loads AI models once in memory for instant transcription responses.
+Super Voice is a speech-to-text and text-to-speech service built in Rust with a daemon/client architecture. One daemon serves both features: it loads models once in memory so transcription and speech answer at once. Speech to text and text to speech are features of one product, not two products: one socket, one token per client, one config file. Each feature's own routes are under `/v1/stt` and `/v1/tts`; what the daemon has once is at `/v1`.
 
 ## Workspace Structure
 
-This is a Rust workspace with 4 main crates:
+- **super-voice-daemon**: the one daemon. Speech to text is its top-level modules; text to speech is its `tts` module.
+- **super-voice-consent**: the consent dialog the daemon shows when a client asks for a token.
+- **super-voice-registry-types**: the one backend manifest spec (`backend.toml`) and the registry index, for both features.
+- **super-voice-indexer**: builds the registry index (CI only).
+- **super-voice-cli**: the `voice` command. Each feature's commands are under its own subcommand: `voice record` (speech to text), `voice speak` (text to speech).
+- **super-voice-app**: the settings app, for both features. Each feature's pages are tabs of its section: Speech to text, Text to speech.
+- **super-voice-shared**: the client library, for both features. Text to speech's own types are its `tts` module.
+- **super-voice-install**: the installer and self-updater.
 
-- **super-stt-app**: Desktop application used to configure and manage Super STT.
-- **super-stt-applet**: COSMIC desktop environment extension/applet that has visualization capabilities.
-- **super-stt-daemon**: Background service that loads and runs ML models
-- **super-stt-shared**: Common types, protocol definitions, and utilities
+The COSMIC applet lives in super-libre/super-cosmic-applet. Super TTS's repository was imported under `tts/`; what is still there is being merged.

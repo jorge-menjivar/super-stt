@@ -2,11 +2,13 @@
 
 ## Project Structure & Module Organization
 - Workspace root (`Cargo.toml`) with members:
-  - `super-stt`: speech-to-text daemon (ML, audio, D-Bus, model mgmt).
-  - `super-stt-app`: desktop UI (COSMIC/iced).
-  - `super-stt-shared`: shared models, protocol, utils.
+  - `super-voice-daemon`: the one daemon, for speech to text and text to speech (ML, audio, D-Bus, model mgmt). Text to speech is its `tts` module.
+  - `super-voice-consent`, `super-voice-registry-types`, `super-voice-indexer`: the consent dialog, the backend manifest spec, the registry indexer.
+  - `super-voice-app`: the settings app (COSMIC/iced), for both features.
+  - `super-voice-cli`: the `voice` command, for both features.
+  - `super-voice-shared`: the client library, for both features. Text to speech's own types are its `tts` module.
 - Tests/tooling: Python scripts at repo root (e.g., `test_download_progress.py`).
-- Assets: app `i18n/`, `resources/`. The COSMIC panel applet is shared with Super TTS and lives in super-libre/super-cosmic-applet, which publishes its own releases; the installer installs the newest one.
+- Assets: app `i18n/`, `resources/`. The COSMIC panel applet lives in super-libre/super-cosmic-applet, which publishes its own releases; the installer installs the newest one.
 
 ## Build, Test, and Development Commands
 - Build release: `just build-release` (or `cargo build --release`).
@@ -22,14 +24,14 @@
 - Rust edition `2024`; 4-space indent.
 - Format before pushing: `cargo fmt --all`.
 - Lint before pushing: `just check`.
-- Modules use snake_case; crates/binaries use kebab-case (e.g., `super-stt-daemon`).
+- Modules use snake_case; crates/binaries use kebab-case (e.g., `super-voice-daemon`).
 - Format TOML with Taplo (`taplo.toml`) when editing manifests.
 
 ## Testing Guidelines
-- Runtime/UX tests: Python against daemon socket at `/run/user/$UID/stt/super-stt-http.sock`.
+- Runtime/UX tests: Python against daemon socket at `/run/user/$UID/voice/super-voice-http.sock`.
   - Example: `python3 test_download_progress.py` (ensure daemon is running).
 - Rust unit tests live next to code (`#[cfg(test)]`) or in `tests/` per crate.
-- For protocol changes, add tests in `super-stt-shared` first.
+- For protocol changes, add tests in `super-voice-shared` first.
 
 ## Commit & Pull Request Guidelines
 - Commits: prefer `type(scope): summary` (e.g., `feat(daemon): track model download progress`).
@@ -37,6 +39,6 @@
 - PRs include purpose, linked issues, testing steps/commands, and UI screenshots (app/applets). Mention affected crates and update docs/`justfile` if behavior changes.
 
 ## Security & Configuration Tips
-- Daemon runs as a user service (`systemd --user`) and exposes a Unix socket under `/run/user/$UID/stt/`.
+- Daemon runs as a user service (`systemd --user`) and exposes a Unix socket under `/run/user/$UID/voice/`.
 - Some ML deps may reference local paths (e.g., `../candle-2/*`); document deviations in PRs.
 - Do not commit large model files; use daemon-managed downloads.

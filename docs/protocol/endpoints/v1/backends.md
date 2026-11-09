@@ -7,8 +7,8 @@ discovered from a `backend.toml` on disk (see
 models it serves plus the **secrets** and **options** it accepts.
 
 This endpoint drives the settings UI's per-backend configuration section. The
-flat model picker lives at [`GET /pipeline/{stage}/model/list`](./pipeline/model-list.md); switching the active
-model is [`POST /pipeline/1/model`](./pipeline/model.md).
+flat model picker lives at [`GET /stt/pipeline/{stage}/model/list`](./pipeline/model-list.md); switching the active
+model is [`POST /stt/pipeline/1/model`](./pipeline/model.md).
 
 ## Secrets vs. options
 
@@ -19,7 +19,7 @@ directly.
 
 - **Secrets** (`[[secrets]]`) — sensitive values such as API keys, managed
   under [`/backend/{backend_id}/secret/list`](./backends/secrets.md) (the `secrets`
-  scope). The daemon stores them in the **system keyring** and reads them only
+  scope). The daemon stores them in its **secrets file** and reads them only
   at model-load time, injecting each as an `x-stt-secret-<name>` request header
   (see [contract.md](../../backend/contract.md#request-headers)). Values are
   **write-only**: a client sets or clears a secret and can check whether one is
@@ -29,8 +29,9 @@ directly.
   `settings` scope). The daemon stores them as plaintext in its config, and
   their values *are* returned.
 
-The keyring account for a backend secret is `backend:<source>:<name>` under the
-`super-stt` service, where `<source>` is the backend's repo id.
+The secrets file is `$XDG_STATE_HOME/super-voice/secrets.ron`, mode 0600. Only the
+daemon reads or writes it. A backend's secrets are kept under its `source`, the
+backend's repo id, and the secret's name.
 
 ## Auth
 
@@ -41,14 +42,15 @@ The keyring account for a backend secret is `backend:<source>:<name>` under the
 ## `GET /backend/list`
 
 List every installed backend with the models it serves and its declared
-secrets and options.
+secrets and options — for both features: one list, whichever feature a backend
+serves, each model marked with its `role`.
 
 **Request:**
 
 ```http
 GET /backend/list HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -75,7 +77,7 @@ Authorization: Bearer stt_…64hex…
           "supported_languages":  ["en", "es-419", "es-ES", "fr"],  // accepted BCP-47 tags
           "supported_devices":    ["none"],
           "estimated_vram_bytes": 0,          // conservative GPU estimate; 0 = cloud/unknown
-          "role":                 "transcription"  // "transcription" | "post_processor"
+          "role":                 "transcription"  // "transcription" | "post_processor" | "synthesis"
         }
       ],
       "secrets": [
@@ -108,21 +110,23 @@ Authorization: Bearer stt_…64hex…
 | `…[].source`      | string           | Backend repo id; the `source` of every model it serves.              |
 | `…[].name`        | string           | Human-readable backend name.                                         |
 | `…[].description` | string           | The installed manifest's `[backend].description`; `""` when it declares none. A registry entry carries one too, but only for backends the registry lists — for a sideloaded or imported-from-dir backend this is the only description there is. |
-| `…[].version`     | string           | The installed backend's `[backend].version`, read from the `backend.toml` on disk **on every request** — what is on the machine now, not what the daemon saw when it last scanned. This is what is installed, not what is published: it is the only version available for a backend the registry does not list — one imported from a directory or installed from an arbitrary repo — and it is authoritative for the rest, since the registry reports what a release offers rather than what this machine has. The same read backs [`installed_version`](./registry/backend/list.md) on the registry listing, so the version reported here and the one an update is judged against cannot disagree. Falls back to the version recorded at the last scan if the manifest cannot be read; empty only for a backend installed before the field existed. |
+| `…[].version`     | string           | The installed backend's `[backend].version`, read from the `backend.toml` on disk **on every request** — what is on the machine now, not what the daemon saw when it last scanned. This is what is installed, not what is published: it is the only version available for a backend the registry does not list — one imported from a directory or installed from an arbitrary repo — and it is authoritative for the rest, since the registry reports what a release offers rather than what this machine has. The same read backs [`installed_version`](./registry/backends.md) on the registry listing, so the version reported here and the one an update is judged against cannot disagree. Falls back to the version recorded at the last scan if the manifest cannot be read; empty only for a backend installed before the field existed. |
 | `…[].kind`        | string           | `wasm` or `subprocess`.                                              |
 | `…[].allowed_hosts` | array of strings | Hosts the backend **declared** in its `backend.toml` (`[network].allowed_hosts`). Empty for `subprocess` backends (which run with no network) and for backends that declare none. Surfaced in the settings UI's "Online model" badge so the user sees where a cloud backend's audio would go. It is the manifest's declaration alone: a user-set [`base_url`](../../backend/config.md#base_url-and-egress) authorizes a further endpoint, which clients read from that option's `value` rather than from this list. |
-| `…[].installed_accel` | array of strings | The accel list of the asset variant actually installed on this host, e.g. `["cuda"]` or `["cpu"]` — see [`accel`](../../backend/config.md#assets). Empty for a `wasm` backend (no asset selection applies) and for a `subprocess` backend imported from a local directory, where the binary's accel is not knowable. See below for how a client derives the offered device list from it. |
+| `…[].installed_accel` | array of strings | The frameworks the installed build runs on, its [`accel`](../../backend/config.md#assets), e.g. `["cuda", "cpu"]` or `["cpu"]`. Empty for a `wasm` backend (no asset selection applies) and for a `subprocess` backend imported from a local directory, where the binary's accel is not knowable. |
 | `…[].models`      | array            | Models served, as `{ name, multilingual, primary_language, supported_languages, supported_devices, estimated_vram_bytes }`. `multilingual` is `true` when the model accepts a language tag. `primary_language` is the model's default BCP-47 tag (the fallback when no override or global setting applies). `supported_languages` is the non-empty array of BCP-47 tags the model accepts; these feed the per-model language picker and the [`/backend/{backend_id}/models/{model}/settings/language`](./pipeline/language.md) resolution. `supported_devices` is a non-empty array drawn from `["cpu", "gpu", "none"]`; `"none"` marks a remote/online model with no local compute. `estimated_vram_bytes` is a conservative GPU memory estimate (weights + KV cache + overhead); `0` when unknown or not GPU-resident. See [`GET /gpu_info`](./gpu_info.md) for the detected GPU memory it's weighed against. |
 | `…[].secrets`     | array            | Declared secrets: `{ name, label, description, required }`. `label` falls back to `name` when absent. Secret **values** are never returned. |
 | `…[].options`     | array            | Declared options: `{ name, label, description, type, default, required, value }`. `label` falls back to `name` when absent; `value` is the effective value (config override if set, else `default`). |
 | `…[].accepts_context` | bool         | Whether the backend declared [`[capabilities] context = true`](../../backend/config.md#capabilities) and is therefore handed the user's [dictation context](./context.md) as `x-stt-prompt` / `x-stt-vocabulary`. `false` for a backend that did not, and from a daemon older than the field — which is the same thing in effect, since such a daemon sends the headers to nobody. A settings UI needs this to say which installed backends will actually use a context: one that ignores the headers has no way to say so at runtime, so without it the user cannot tell a context that did nothing from one that is not working. |
 
-`models[].role` says what a model is for: `"transcription"` (the default, and
-what every model was before the field existed) or `"post_processor"`. A UI
-filters its transcription-model picker and its
-[post-processor](./pipeline.md) picker on this field — the two roles are
-not interchangeable, and selecting a model into the wrong slot is refused. A
-daemon that predates the field omits it; read that as `"transcription"`.
+`models[].role` says what a model is for, and so which feature it serves:
+`"transcription"` and `"post_processor"` are speech to text's, `"synthesis"`
+text to speech's. One backend may serve both features. A UI filters its
+transcription-model picker, its [post-processor](./pipeline.md) picker and its
+[speech](./tts/pipeline.md) picker on this field — the roles are not
+interchangeable, and selecting a model into the wrong slot is refused. Each
+stage's own [`backend/list`](./pipeline/backend-list.md) is this list already
+narrowed to what the stage can run.
 
 `models[].provider` is always an empty string. It is emitted so clients that
 require the key can still parse the response, and carries no information —
@@ -130,22 +134,14 @@ identify a model by `(name, source)` instead. It will be removed.
 
 ### Deriving the offered device list
 
-A model's `supported_devices` says only whether the model can use an
-accelerator at all; whether this particular installation can is a property of
-`installed_accel`. A client presenting a device picker intersects the two:
-
-```
-offered devices = model.supported_devices ∩ devices_provided_by(installed_accel)
-
-  installed_accel == ["cpu"]           → devices_provided_by = { cpu }
-  installed_accel contains a GPU accel → devices_provided_by = { cpu, gpu }
-  installed_accel empty                → fall back to supported_devices alone
-```
-
-A GPU-capable asset still offers `cpu`, since a GPU build runs on the CPU as
-well. An empty `installed_accel` carries no information — a local import or a
-pre-upgrade install — so a client falls back to the model's declared
-`supported_devices` with no narrowing, as it does today.
+Don't. A model's `supported_devices` says only whether the model can use an
+accelerator at all, and which frameworks this machine can run it on is the
+daemon's answer: `available_devices` on the stage's
+[device endpoints](./pipeline/device.md). `installed_accel` is the frameworks
+the installed build runs on, copied from its [`accel`](../../backend/config.md#assets):
+a framework it lists is a switch, one it does not is an install first. An
+empty `installed_accel` carries no information: a local import, or a WASM
+component.
 
 **Errors:**
 
@@ -160,10 +156,10 @@ Setting a secret or option is done per item under the backend's sub-resources,
 not on `/backend/list` itself:
 
 - **Secrets** — [`/backend/{backend_id}/secret/list`](./backends/secrets.md):
-  `GET …/secrets` and `GET`/`POST`/`DELETE …/secrets/{name}`. Requires the
+  `GET …/secret/list` and `GET`/`POST`/`DELETE …/secret/{name}`. Requires the
   `secrets` scope; values are write-only.
 - **Options** — [`/backend/{backend_id}/option/list`](./backends/options.md):
-  `GET …/options` and `GET`/`POST`/`DELETE …/options/{name}`. Requires the
+  `GET …/option/list` and `GET`/`POST`/`DELETE …/option/{name}`. Requires the
   `settings` scope.
 
 For both, `POST` sets a value and `DELETE` resets it to its default — the
@@ -182,7 +178,7 @@ proxy, or local OpenAI-compatible server) without re-installing it.
 
 Uninstalls a backend. Works for any installed backend — registry-installed,
 sideloaded, or imported-from-dir. Removes the backend's directory under
-`<XDG_DATA_HOME>/super-stt/backends/<id>/` and refreshes the in-memory
+`<XDG_DATA_HOME>/super-voice/backends/<id>/` and refreshes the in-memory
 discovery list. Idempotent.
 
 ### Request
@@ -196,7 +192,7 @@ The `source` is URL-percent-encoded.
 ### Response
 
 ```json
-{ "uninstalled": true, "was_active": false, "was_post_processor": false }
+{ "uninstalled": true, "was_active": false, "was_post_processor": false, "was_synthesis": false }
 ```
 
 A backend can be filling either pipeline stage, and each is emptied before
@@ -204,10 +200,12 @@ the files go, so nothing keeps running against a directory that no longer
 exists. `was_active` is `true` if this backend was filling stage 1: its loaded
 model is unloaded (freeing device memory) and the active-backend and
 preferred-model config cleared, so `GET /status` stays consistent with
-`GET /pipeline/1`. `was_post_processor` is `true` if it was selected as the
+`GET /stt/pipeline/1`. `was_post_processor` is `true` if it was selected as the
 post-processor backend, loaded or not: the post-processor is unloaded and the
-selection forgotten, as `DELETE /pipeline/2` would. Both can be `true` for a
-backend serving both roles.
+selection forgotten, as `DELETE /stt/pipeline/2` would. `was_synthesis` is `true`
+if it was filling text to speech's stage, which is emptied the way
+`DELETE /tts/pipeline/1` would. Any of them can be `true` together for a
+backend serving several roles.
 
 ### Failure modes
 
@@ -217,5 +215,5 @@ machine-readable `code`), matching `POST /registry/install`:
 | Status | `error` | Cause |
 |---|---|---|
 | `404` | `not_found` | No backend with that source is installed. |
-| `409` | `backend_busy` | A recording or real-time session is active; the backend set cannot be mutated until it finishes. |
+| `409` | `backend_busy` | A recording, a real-time session or an utterance is active; the backend set cannot be mutated until it finishes. |
 | `500` | `remove_failed` | The backend directory could not be removed (includes a `message`). |

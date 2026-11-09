@@ -1,0 +1,347 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! Language-settings HTTP smoke test: `/v1/language` (global) +
+//! `/v1/stt/pipeline/{stage}/model/{model}/language` (per-model).
+//!
+//! Test cases:
+//! 1. Global round-trip: GET → null; POST `es-MX` → 200 + language; GET → `es-MX`; DELETE → null.
+//! 2. Per-model round-trip (no model loaded): GET fixture model → 200 + resolution
+//!    block (`multilingual: true`); POST a supported tag → 200; GET reflects it; DELETE → 200.
+//! 3. Per-model 404s: unknown model under fixture source → 404; unknown source → 404.
+//! 4. Per-model 400: POST an unsupported tag → 400 (`unsupported_language`).
+//! 5. Scope denial: a `status`-scoped token → 403 on both the global and per-model paths.
+//!
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//!
+//! The fixture backend (`fixture-openai/backend.toml`) is seeded so the daemon
+//! discovers it on startup. Its model is multilingual and secret-gated, so the
+//! daemon comes up idle (no model auto-loaded) — the per-model language
+//! endpoint resolves against the discovered backend, so it works regardless.
+
+mod common;
+
+use common::{Method, StatusCode, TestDaemon};
+
+use std::path::{Path, PathBuf};
+
+/// Seed a multilingual fixture backend into `<data_home>/super-stt/backends/fixture-openai/`.
+/// The model is multilingual and requires a secret, so the daemon starts idle.
+fn seed_fixture_backend(data_home: &Path) {
+    let backend_dir = data_home
+        .join("super-voice")
+        .join("backends")
+        .join("fixture-openai");
+    std::fs::create_dir_all(&backend_dir).expect("create fixture backend dir");
+
+    let toml = r#"[backend]
+source = "github.com/super-stt/openai"
+name = "Fixture OpenAI"
+version = "1.0.0"
+kind = "wasm"
+entrypoint = "openai.wasm"
+contract = "v4"
+id = "app.test.openai"
+product = "super-voice"
+description = "Test backend."
+license = "Apache-2.0"
+
+[network]
+allowed_hosts = ["api.openai.com"]
+
+[[secrets]]
+name = "openai_api_key"
+label = "OpenAI API key"
+description = "Your OpenAI API key."
+required = true
+
+[[models]]
+name = "whisper-1"
+role = "transcription"
+primary_language = "en"
+multilingual = true
+supported_languages = ["en", "es", "es-MX", "fr", "de"]
+supported_devices = ["none"]
+"#;
+    std::fs::write(backend_dir.join("backend.toml"), toml).expect("write fixture backend.toml");
+    // Placeholder entrypoint so the manifest parser does not reject the missing file.
+    std::fs::write(backend_dir.join("openai.wasm"), b"").expect("write placeholder entrypoint");
+}
+
+async fn start_daemon(scopes: &[&str]) -> (TestDaemon, PathBuf, String) {
+    let daemon = common::daemon("language");
+    seed_fixture_backend(&daemon.home().data);
+    let daemon = daemon.start().await;
+    let token = daemon.token("language-smoke", scopes).await;
+    let socket = daemon.socket().to_path_buf();
+    (daemon, socket, token)
+}
+
+/// Issue an HTTP request and return `(status, json_body)`.
+async fn raw_request(
+    socket_path: &PathBuf,
+    method: Method,
+    path: &str,
+    token: &str,
+    body: Option<serde_json::Value>,
+) -> (StatusCode, serde_json::Value) {
+    common::request(socket_path, method, path, Some(token), body.as_ref()).await
+}
+
+async fn get(p: &PathBuf, path: &str, token: &str) -> (StatusCode, serde_json::Value) {
+    raw_request(p, Method::GET, path, token, None).await
+}
+
+async fn post_req(
+    p: &PathBuf,
+    path: &str,
+    token: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    raw_request(p, Method::POST, path, token, Some(body)).await
+}
+
+async fn delete_req(p: &PathBuf, path: &str, token: &str) -> (StatusCode, serde_json::Value) {
+    raw_request(p, Method::DELETE, path, token, None).await
+}
+
+/// Case 1 — GET → null; POST `es-MX` → 200 + language; GET → `es-MX`; DELETE → null.
+#[tokio::test]
+async fn global_language_round_trips() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    // GET → null initially
+    let (st, body) = get(&sock, "/settings/language", &token).await;
+    assert_eq!(st, StatusCode::OK, "initial GET: {body}");
+    assert_eq!(
+        body["language"],
+        serde_json::Value::Null,
+        "language must be null before any SET: {body}"
+    );
+
+    // POST es-MX
+    let (st, body) = post_req(
+        &sock,
+        "/settings/language",
+        &token,
+        serde_json::json!({ "language": "es-MX" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "POST language: {body}");
+    assert_eq!(
+        body["language"], "es-MX",
+        "POST must echo set value: {body}"
+    );
+
+    // GET → es-MX persisted
+    let (st, body) = get(&sock, "/settings/language", &token).await;
+    assert_eq!(st, StatusCode::OK, "GET after POST: {body}");
+    assert_eq!(
+        body["language"], "es-MX",
+        "GET must return persisted value: {body}"
+    );
+
+    // DELETE → null
+    let (st, body) = delete_req(&sock, "/settings/language", &token).await;
+    assert_eq!(st, StatusCode::OK, "DELETE language: {body}");
+    assert_eq!(
+        body["language"],
+        serde_json::Value::Null,
+        "DELETE must clear language to null: {body}"
+    );
+}
+
+/// The fixture backend's source, URL-percent-encoded for the path segment.
+const FIXTURE_SOURCE_ENC: &str = "github.com%2Fsuper-stt%2Fopenai";
+
+/// Fill stage 1 with the fixture backend.
+///
+/// A precondition the `{source}`-addressed endpoint did not have: the stage is
+/// what resolves a bare model name now, so a model whose backend fills no stage
+/// has no path to it. The same precondition
+/// `/stt/pipeline/{stage}/model/{model}/device` has always had.
+async fn select_fixture_backend(sock: &PathBuf, token: &str) {
+    let (st, body) = post_req(
+        sock,
+        "/stt/pipeline/1",
+        token,
+        serde_json::json!({ "source": "github.com/super-stt/openai" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "selecting the fixture backend: {body}");
+}
+
+/// Per-model language path for the fixture's `whisper-1` model, addressed
+/// through stage 1 — which is what resolves the bare model name against the
+/// backend filling it.
+fn fixture_model_lang_path() -> String {
+    "/stt/pipeline/1/model/whisper-1/language".to_string()
+}
+
+/// Case 2 — Per-model round-trip without a loaded model.
+/// GET resolves the fixture model (multilingual: true); POST a supported tag →
+/// 200 + override reflected; GET reflects it; DELETE clears back to default.
+#[tokio::test]
+async fn per_model_language_round_trips_without_loaded_model() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    select_fixture_backend(&sock, &token).await;
+    let path = fixture_model_lang_path();
+
+    // GET resolves even though no model is loaded (resolves against discovery).
+    let (st, body) = get(&sock, &path, &token).await;
+    assert_eq!(st, StatusCode::OK, "initial per-model GET: {body}");
+    assert_eq!(
+        body["language"]["multilingual"], true,
+        "fixture model is multilingual: {body}"
+    );
+    assert_eq!(
+        body["language"]["override"],
+        serde_json::Value::Null,
+        "no override before any POST: {body}"
+    );
+    assert_eq!(
+        body["language"]["primary"], "en",
+        "fixture model's primary_language is en: {body}"
+    );
+
+    // POST a supported tag.
+    let (st, body) = post_req(
+        &sock,
+        &path,
+        &token,
+        serde_json::json!({ "language": "es-MX" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "POST per-model language: {body}");
+    assert_eq!(
+        body["language"]["override"], "es-MX",
+        "POST must echo the stored override: {body}"
+    );
+    assert_eq!(
+        body["language"]["source"], "override",
+        "resolution source is override after POST: {body}"
+    );
+
+    // GET reflects the persisted override.
+    let (st, body) = get(&sock, &path, &token).await;
+    assert_eq!(st, StatusCode::OK, "GET after POST: {body}");
+    assert_eq!(
+        body["language"]["override"], "es-MX",
+        "GET must return the persisted override: {body}"
+    );
+
+    // DELETE clears back to default.
+    let (st, body) = delete_req(&sock, &path, &token).await;
+    assert_eq!(st, StatusCode::OK, "DELETE per-model language: {body}");
+    assert_eq!(
+        body["language"]["override"],
+        serde_json::Value::Null,
+        "DELETE clears the override: {body}"
+    );
+    assert_eq!(
+        body["language"]["source"], "default",
+        "resolution source is default after DELETE: {body}"
+    );
+}
+
+/// Case 3 — Unknown model / unknown source under the per-model path → 404.
+#[tokio::test]
+async fn per_model_language_unknown_targets_are_404() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    select_fixture_backend(&sock, &token).await;
+
+    // Unknown model under the backend filling stage 1.
+    let unknown_model = "/stt/pipeline/1/model/does-not-exist/language".to_string();
+    let (st, body) = get(&sock, &unknown_model, &token).await;
+    assert_eq!(
+        st,
+        StatusCode::NOT_FOUND,
+        "GET unknown model must be 404: {body}"
+    );
+    assert_eq!(body["message"], "unknown_model", "{body}");
+
+    let (st, body) = post_req(
+        &sock,
+        &unknown_model,
+        &token,
+        serde_json::json!({ "language": "es" }),
+    )
+    .await;
+    assert_eq!(
+        st,
+        StatusCode::NOT_FOUND,
+        "POST unknown model must be 404: {body}"
+    );
+    assert_eq!(body["message"], "unknown_model", "{body}");
+
+    // A stage that does not exist. There is no `{source}` segment to get wrong
+    // any more; the equivalent failure is asking about a position the pipeline
+    // does not have.
+    let unknown_source = "/stt/pipeline/9/model/whisper-1/language";
+    let (st, body) = get(&sock, unknown_source, &token).await;
+    assert_eq!(
+        st,
+        StatusCode::NOT_FOUND,
+        "GET unknown stage must be 404: {body}"
+    );
+    assert_eq!(body["error_code"], "unknown_stage", "{body}");
+
+    let (st, body) = post_req(
+        &sock,
+        unknown_source,
+        &token,
+        serde_json::json!({ "language": "es" }),
+    )
+    .await;
+    assert_eq!(
+        st,
+        StatusCode::NOT_FOUND,
+        "POST unknown stage must be 404: {body}"
+    );
+    assert_eq!(body["error_code"], "unknown_stage", "{body}");
+}
+
+/// Case 4 — POST an unsupported tag for a known model → 400.
+#[tokio::test]
+async fn per_model_language_unsupported_tag_is_400() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    select_fixture_backend(&sock, &token).await;
+    let path = fixture_model_lang_path();
+
+    // `ja` is not in the fixture's supported_languages (["en","es","es-MX","fr","de"]).
+    let (st, body) = post_req(
+        &sock,
+        &path,
+        &token,
+        serde_json::json!({ "language": "ja" }),
+    )
+    .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "POST unsupported tag must be 400: {body}"
+    );
+    assert_eq!(body["message"], "unsupported_language", "{body}");
+}
+
+/// Case 5 — A `status`-scoped token must be denied (403) on the global and
+/// per-model language paths.
+#[tokio::test]
+async fn language_endpoints_require_settings_scope() {
+    let (_guard, sock, token) = start_daemon(&["status"]).await;
+    let per_model = fixture_model_lang_path();
+
+    for (method, path) in [
+        (Method::GET, "/settings/language".to_string()),
+        (Method::POST, "/settings/language".to_string()),
+        (Method::GET, per_model.clone()),
+        (Method::POST, per_model.clone()),
+        (Method::DELETE, per_model),
+    ] {
+        let body = (method == Method::POST).then(|| serde_json::json!({ "language": "es" }));
+        let (st, resp) = raw_request(&sock, method.clone(), &path, &token, body).await;
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "{method} /v1{path} should be 403 for status-scoped token: {resp}"
+        );
+    }
+}

@@ -1,0 +1,179 @@
+[package]
+    name = "super-voice-daemon"
+    version.workspace = true
+    authors.workspace = true
+    edition.workspace = true
+    description = "The Super Voice daemon"
+    repository = "https://github.com/jorge-menjivar/super-stt"
+    license = "GPL-3.0-only"
+
+[[bin]]
+    name = "mock_backend"
+    path = "src/bin/mock_backend.rs"
+    required-features = ["test-fixtures"]
+
+# Text to speech's mock subprocess backend, for `tests/tts_subprocess_mock.rs`.
+[[bin]]
+    name = "mock_tts_backend"
+    path = "src/bin/mock_tts_backend.rs"
+    required-features = ["test-fixtures"]
+
+# Writes docs/protocol/openapi.json from the live `/v1` router. CI runs it
+# (`just openapi`) and publishes the result; the file is not committed.
+[[bin]]
+    name = "gen_openapi"
+    path = "src/bin/gen_openapi.rs"
+
+[dependencies]
+    # Core dependencies
+    anyhow.workspace = true
+    async-trait = "0.1.89"
+    axum = {
+        version = "0.8",
+        default-features = false,
+        features = ["json", "query", "tokio", "ws"]
+    }
+    base64 = "0.23.1"
+    bytes = { version = "1.11.1", optional = true }
+    chrono.workspace = true
+    clap.workspace = true
+    cpal.workspace = true
+    # Text to speech plays through cpal 0.18 while speech to text still
+    # captures with the workspace's 0.17. Renamed so both build in one crate
+    # until the capture side moves up.
+    cpal-playback = { package = "cpal", version = "0.18.2" }
+    dashmap.workspace = true
+    dirs.workspace = true
+    futures = "0.3"
+    hex = "0.4.3"
+    hound.workspace = true
+    http-body = { version = "1.0.1", optional = true }
+    http-body-util = "0.1"
+    hyper = { version = "1", features = ["http1", "server"] }
+    hyper-util = {
+        version = "0.1",
+        features = ["http1", "server", "server-auto", "tokio"]
+    }
+    libc.workspace = true
+    log.workspace = true
+    parking_lot.workspace = true
+    reqwest.workspace = true
+    # Hashing for content-addressed blobs
+    ring = "0.17"
+    rustls = {
+        version = "0.23",
+        default-features = false,
+        features = ["ring", "std", "tls12"]
+    }
+    serde.workspace = true
+    serde_json.workspace = true
+    strum.workspace = true
+    strum_macros.workspace = true
+    super-engine-daemon = { workspace = true, features = ["beeper"] }
+    super-engine-forge.workspace = true
+    # `fs::write_atomic_private`, for a cloned voice's clip and metadata.
+    super-engine-spec.workspace = true
+    super-voice-registry-types = { path = "../super-voice-registry-types", features = ["openapi"] }
+    # Shared crate
+    super-voice-shared = {
+        path = "../super-voice-shared",
+        features = [
+            "analysis",
+            "audio",
+            # The protocol types the daemon publishes in its OpenAPI document
+            # carry their own `ToSchema`, so the spec describes each one where it
+            # is defined instead of restating its fields at the router.
+            "openapi",
+        ]
+    }
+    thiserror.workspace = true
+    tokio = {
+        workspace = true,
+        features = [
+            "fs",
+            "io-std",
+            "io-util",
+            "macros",
+            "process",
+            "rt-multi-thread",
+            "signal",
+        ]
+    }
+    tokio-stream = { version = "0.1.18", features = ["sync"] }
+    urlencoding = "2.1.3"
+    utoipa.workspace = true
+    utoipa-axum.workspace = true
+    uuid.workspace = true
+
+# Linux-only dependencies.
+#
+# `zbus` is the session bus: the D-Bus event service, the freedesktop
+# notification bubbles, and the XDG portal write method all speak it, and
+# macOS has no session bus for any of them. `enigo` builds on both platforms
+# but reaches the keyboard differently — see the workspace entry for why the
+# `wayland` feature is named here rather than there.
+[target.'cfg(target_os = "linux")'.dependencies]
+    enigo = { workspace = true, features = ["wayland"] }
+    zbus.workspace = true
+
+# macOS dependencies.
+#
+# enigo with no features: on macOS it types through CoreGraphics
+# (`CGEventCreateKeyboardEvent`), which needs no feature and no display
+# server — only the Accessibility permission, which the user grants once.
+[target.'cfg(target_os = "macos")'.dependencies]
+    enigo.workspace = true
+    # Typing a character at a time (output::keyboard::enigo_backend), with the
+    # features and version enigo itself builds.
+    objc2-core-graphics.version = "0.3"
+    objc2-core-graphics.features = ["CGEventTypes", "CGRemoteOperation"]
+    # Finding the app bundle's executable, which posts notifications for the
+    # daemon (output::notification_center).
+    objc2-foundation = {
+        version = "0.3",
+        default-features = false,
+        features = ["std", "NSBundle", "NSString"],
+    }
+
+[dev-dependencies]
+    futures-util.workspace = true
+    hound.workspace = true
+    http-body-util = "0.1"
+    hyper = { version = "1", features = ["client", "http1"] }
+    hyper-util = { version = "0.1", features = ["tokio"] }
+    libc.workspace = true
+    mockito = "1.7.2"
+    # The daemon's own version must parse, for the index `min_client` check.
+    semver = "1.0.28"
+    # Spawns the daemon for the integration tests, in a home of its own.
+    super-engine-test-daemon.workspace = true
+    tempfile = "3.27.0"
+    # `test-util` enables `#[tokio::test(start_paused = true)]`, so tests covering
+    # the notice key-release delay assert it without spending it in wall-clock time.
+    tokio = { workspace = true, features = ["test-util"] }
+    # The realtime smoke tests speak WebSocket to the daemon.
+    tokio-tungstenite = {
+        version = "0.29.0",
+        default-features = false,
+        features = ["connect", "rustls-tls-webpki-roots"]
+    }
+    wiremock = "0.6.5"
+
+[features]
+    # Models are served by out-of-tree backends; both transports are on by
+    # default. GPU residency now lives in the backend, so the daemon no longer
+    # has cuda/cudnn/flash-attn features.
+    default = ["subprocess-backends", "wasm-backends"]
+    # Spawn backends as sandboxed native subprocesses.
+    subprocess-backends = [
+        "dep:bytes",
+        "dep:http-body",
+        "super-engine-daemon/subprocess",
+    ]
+    # Build the mock_backend test fixture binary (used by tests/subprocess_mock.rs).
+    test-fixtures = ["hyper-util/service"]
+    # Load backends as sandboxed WASM components.
+    wasm-backends = ["dep:bytes", "dep:http-body", "super-engine-daemon/wasm"]
+
+[lints]
+    workspace = true

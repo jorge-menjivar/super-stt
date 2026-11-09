@@ -1,4 +1,4 @@
-# `/context`
+# `/stt/context`
 
 **Dictation contexts**: what the user is dictating, so a model can hear it.
 
@@ -32,13 +32,13 @@ for every backend installed.
 
 One context is **active** at a time, and every backend follows it unless it has
 been pointed elsewhere. Three states, one per verb on
-`/backend/{backend_id}/context`:
+`/stt/backend/{backend_id}/context`:
 
 | State    | How it is set                                   | What the backend is sent               |
 |----------|-------------------------------------------------|----------------------------------------|
-| `active` | `DELETE /backend/{backend_id}/context`          | Whatever `GET /context/active` reports |
-| `pinned` | `POST /backend/{backend_id}/context` `{"id":"coding"}` | That context, whatever is active |
-| `none`   | `POST /backend/{backend_id}/context` `{"id":null}`    | Nothing                          |
+| `active` | `DELETE /stt/backend/{backend_id}/context`          | Whatever `GET /stt/context/active` reports |
+| `pinned` | `POST /stt/backend/{backend_id}/context` `{"id":"coding"}` | That context, whatever is active |
+| `none`   | `POST /stt/backend/{backend_id}/context` `{"id":null}`    | Nothing                          |
 
 A pin to a context that has since been **deleted** resolves to nothing — it does
 **not** fall back to the active one. "Use this context" and "use whatever is
@@ -78,7 +78,7 @@ truncated downstream. These limits only stop a runaway list from being stored.
 router prefers the literal: a context taking either id would be stored fine and
 then be permanently unreachable, every read of it answering with something else.
 
-## `GET /context/list`
+## `GET /stt/context/list`
 
 **Response (200):**
 
@@ -101,7 +101,7 @@ then be permanently unreachable, every read of it answering with something else.
 `contexts` is in the order the user arranged them, which is the order to render.
 `active` is `null` when no context is in force.
 
-## `GET /context/{id}`
+## `GET /stt/context/{id}`
 
 **Response (200):**
 
@@ -117,7 +117,7 @@ then be permanently unreachable, every read of it answering with something else.
 }
 ```
 
-## `POST /context/{id}`
+## `POST /stt/context/{id}`
 
 Create or replace. Upsert rather than a create/update pair, because `id` is the
 client's to choose — there is no id-minting step for two verbs to straddle, and
@@ -129,9 +129,9 @@ An existing context keeps its place in the list; a new one is appended.
 **Request:**
 
 ```http
-POST /context/coding HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+POST /stt/context/coding HTTP/1.1
+Host: voice.local
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 {
@@ -166,7 +166,7 @@ reload to do: a context is delivered as headers, so changing one is a matter of
 changing what the running instance injects. A realtime session reads its headers
 once when it opens, so an edit made mid-recording applies to the next one.
 
-## `DELETE /context/{id}`
+## `DELETE /stt/context/{id}`
 
 Removes the context. If it was active, nothing is active afterwards. A backend
 pinned to it keeps its pin and resolves to nothing until the id exists again.
@@ -177,7 +177,7 @@ pinned to it keeps its pin and resolves to nothing until the id exists again.
 { "status": "success", "message": "Context coding deleted" }
 ```
 
-## `GET /context/active`
+## `GET /stt/context/active`
 
 **Response (200):**
 
@@ -192,7 +192,7 @@ pinned to it keeps its pin and resolves to nothing until the id exists again.
 Both the id and the object, so a picker can render the current choice in one
 request. `id` and `context` are both `null` when nothing is active.
 
-## `POST /context/active`
+## `POST /stt/context/active`
 
 **Request:**
 
@@ -204,11 +204,11 @@ request. `id` and `context` are both `null` when nothing is active.
 |-------|---------------|----------|---------------------------------------------|
 | `id`  | string / null | no       | `null` or absent leaves no context active.  |
 
-**Response (200):** the same shape as `GET /context/active`.
+**Response (200):** the same shape as `GET /stt/context/active`.
 
-## `GET /backend/{backend_id}/context`
+## `GET /stt/backend/{backend_id}/context`
 
-`{backend_id}` is the backend's `source` as [`GET /backend/list`](./backend/list.md)
+`{backend_id}` is the backend's `source` as [`GET /backend/list`](./backends.md)
 reports it, percent-encoded.
 
 **Response (200):**
@@ -228,7 +228,7 @@ reports it, percent-encoded.
 | `id`      | string / null | The pinned id. Only meaningful when `mode` is `pinned`.                    |
 | `context` | object / null | What this backend will actually be sent, already resolved. Read this rather than re-deriving it. |
 
-## `POST /backend/{backend_id}/context`
+## `POST /stt/backend/{backend_id}/context`
 
 **Request:**
 
@@ -242,7 +242,7 @@ reports it, percent-encoded.
 
 **Response (200):** the same shape as the `GET`.
 
-## `DELETE /backend/{backend_id}/context`
+## `DELETE /stt/backend/{backend_id}/context`
 
 Clears the override, so the backend follows whichever context is active.
 
@@ -266,6 +266,6 @@ same — re-read the list.
 | 400  | `invalid_value`   | The id is not a slug or is reserved, the name is blank, or the prompt or vocabulary is longer than can be delivered. The `message` says which. |
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`.                                  |
 | 403  | `scope_denied`    | Token lacks the `settings` scope.                                         |
-| 404  | `unknown_context` | No context has that id (on `GET /context/{id}`).                          |
+| 404  | `unknown_context` | No context has that id (on `GET /stt/context/{id}`).                          |
 | 404  | `not_found`       | No context has that id (on a write naming one that does not exist).       |
 | 404  | `unknown_backend` | No installed backend has that `source`.                                   |

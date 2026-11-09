@@ -10,7 +10,7 @@ carries differs. For HTTP framing and SSE mechanics, see
 
 ## Why scopes
 
-Auth on Super STT is consent-based: the user approves an app once,
+Auth on Super Voice is consent-based: the user approves an app once,
 for a stated set of scopes, and that approval is bound to the binary
 the user just saw — not to the app name the client claimed. A client
 cannot widen its own permissions; it can only present a token that
@@ -25,17 +25,25 @@ need, and the user approves that set.
 | Scope                   | What the token can do                                                       | Reference                                          |
 |-------------------------|-----------------------------------------------------------------------------|----------------------------------------------------|
 | `transcribe`            | Start / stop recording; read back your own transcription results            | [transcribe](./scopes/transcribe.md)               |
-| `status`                | Read the daemon's current model + device                                     | [status](./scopes/status.md)                       |
+| `status`                | Read each feature's current model + device, and whether it is busy           | [status](./scopes/status.md)                       |
 | `settings`              | Read / write every configuration value, backend options, and the registry   | [settings](./scopes/settings.md)                   |
 | `secrets`               | Store / check / clear backend credentials — **write-only**; never read back  | [secrets](./scopes/secrets.md)                     |
 | `recording_events`      | Subscribe to recording lifecycle events on `/events`                        | [recording_events](./scopes/recording_events.md)   |
 | `audio_visualization`   | Subscribe to frequency-band visualization data on `/events`                 | [audio_visualization](./scopes/audio_visualization.md) |
 | `global_transcriptions` | Subscribe to **every** app's live + final transcription text on `/events`   | [global_transcriptions](./scopes/global_transcriptions.md) |
 | `daemon_status`         | Subscribe to model/device/download/registry status on `/events`             | [daemon_status](./scopes/daemon_status.md)         |
+| `speak`                 | Play synthesized speech; stop speech, including another app's               | [speak](./scopes/speak.md)                         |
+| `voices`                | Add, list, play back, rename, and delete cloned-voice recordings            | [voices](./scopes/voices.md)                       |
+| `playback_events`       | Subscribe to speaking-state and playback-progress events on `/events`       | [playback_events](./scopes/playback_events.md)     |
+
+`transcribe`, `recording_events` and `global_transcriptions` belong to speech
+to text; `speak`, `voices` and `playback_events` to text to speech. The rest
+are shared by both features.
 
 A Settings UI, for example, requests several at once
 (`["settings", "secrets", "status", "transcribe", "recording_events", "audio_visualization", "daemon_status"]`),
-while a CLI that only dictates requests `["transcribe", "status"]`.
+while a CLI that only dictates requests `["transcribe", "status"]`, and one
+that only speaks requests `["speak", "status"]`.
 
 ## Endpoints
 
@@ -56,11 +64,11 @@ requires `Authorization: Bearer <token>`.
 
 ```http
 POST /auth/request HTTP/1.1
-Host: stt.local
+Host: voice.local
 Content-Type: application/json
 
 {
-  "app_name": "Super STT Settings App",
+  "app_name": "Super Voice Settings App",
   "scopes":   ["settings", "status", "daemon_status"],
   "version":  "0.10.0"
 }
@@ -74,7 +82,7 @@ Content-Type: application/json
 
 {
   "status":        "success",
-  "session_token": "stt_…64hex…",
+  "session_token": "…64hex…",
   "scopes":        ["settings", "status", "daemon_status"],
   "expires_at":    "2026-06-04T12:34:56Z"
 }
@@ -96,7 +104,7 @@ Content-Type: application/json
 | `data.reason`         | Meaning                                                                                          | What the client should do                                                                 |
 |-----------------------|--------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
 | `user_denied`         | The user clicked **Deny** in the consent popup.                                                  | Don't auto-retry. Offer an explicit "Retry authorization" affordance the user must click. |
-| `user_denied_cached`  | The user previously denied this scope set for this binary; the deny is sticky until the daemon restarts. | Same as `user_denied`. Hint that restarting the daemon (`systemctl --user restart super-stt`) clears the deny. |
+| `user_denied_cached`  | The user previously denied this scope set for this binary; the deny is sticky until the daemon restarts. | Same as `user_denied`. Hint that restarting the daemon (`systemctl --user restart super-voice`) clears the deny. |
 | `user_dismissed`      | The user closed the popup without choosing, or it timed out (60 s default).                      | Recoverable — re-prompt when the user takes an action that requires it.                   |
 | `popup_failed`        | The consent popup couldn't be shown (no display server, no Wayland session, etc.).               | Fall back to read-only mode if possible; surface a hint that a desktop session is needed. |
 | `invalid_scope`       | `scopes` was empty, missing, or contained a name that isn't a known scope.                       | Bug in the client. Fix the request.                                                       |
@@ -110,8 +118,8 @@ popup. Useful for headless / CLI clients that want to fail-fast.
 
 ```http
 GET /auth/status HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 Valid:
@@ -170,7 +178,7 @@ sequenceDiagram
         else Allow
             U-->>D: Allow
             D-->>App: 200 { session_token, scopes, expires_at }
-            App->>App: persist token in own keyring
+            App->>App: persist token
         else Deny
             U-->>D: Deny
             D-->>App: 403 auth_denied<br/>{ reason: "user_denied" }
@@ -189,24 +197,24 @@ The popup the user sees displays:
   requested scope unlocks.
 
 The token returned on Allow is a 32-byte random hex string
-(`stt_…64hex…`). It carries no scope information by itself — the
+(`…64hex…`). It carries no scope information by itself — the
 scope set is bound server-side at issue time and validated per
 request.
 
-**Persist the token in a secure store** (your platform keyring,
-libsecret/KWallet, the OS credential manager). Plaintext on disk
-defeats the design — any other process running as the same user
-can read it and impersonate the app.
+**Persist the token where only the user can read it**: a file at mode
+0600 in the user's state directory, as the daemon's own clients keep
+theirs, or the OS credential manager. A file other users can read lets
+them impersonate the app. Against the user's own processes neither
+protects the token. What limits a copied token is the daemon's check, on
+every request, that the caller is the executable it was granted to.
 
 ## First-party clients
 
-Super STT's own client binaries (`super-stt-app` and `super-stt-cli`)
-and the COSMIC panel applet it shares with Super TTS (`super-cosmic-applet`)
-skip the consent popup. Super STT's former applet, `super-stt-cosmic-applet`,
-is still on the list for installs that have not been updated yet. When one of
-them calls `POST /auth/request`, the daemon mints the session token
-immediately; the response is indistinguishable from a user-approved
-grant.
+Super Voice's own client binaries skip the consent popup: the CLI
+(`super-voice-cli`), the settings app (`super-voice-app`) and
+the COSMIC panel applet (`super-cosmic-applet`). When one of them calls
+`POST /auth/request`, the daemon mints the session token immediately; the
+response is indistinguishable from a user-approved grant.
 
 A peer qualifies as first-party only when **all** of the following
 hold for its kernel-resolved executable (`/proc/<pid>/exe`,
@@ -279,7 +287,7 @@ Content-Type: application/json
 ```
 
 This is a bug in the client (a token without the `settings` scope
-trying to call `POST /pipeline/1/model`, for example). Re-issuing
+trying to call `POST /stt/pipeline/1/model`, for example). Re-issuing
 `/auth/request` with the missing scope added is the only path
 forward, and the user has to explicitly approve the new set.
 
@@ -316,25 +324,28 @@ endpoints leak no per-scope information.
 The endpoints and topics each scope unlocks live in the dedicated
 docs — those are the source of truth, not duplicated here:
 
-- `transcribe` — `/transcribe`, `/transcribe/stop`, `/transcribe/realtime`; see [transcribe.md](./scopes/transcribe.md).
+- `transcribe` — `/stt/transcribe`, `/stt/transcribe/stop`, `/stt/transcribe/realtime`; see [transcribe.md](./scopes/transcribe.md).
+- `speak` — `/tts/speak`, `/tts/speak/stop`, `/tts/speak/stream`; see [speak.md](./scopes/speak.md).
 - `status` — `GET /status`; see [status.md](./scopes/status.md).
 - `settings` — the configuration + registry surface, including backend options; see [settings.md](./scopes/settings.md).
-- `secrets` — backend credential management: `GET/POST/DELETE /backend/{backend_id}/secret/list/*` (write-only; values never returned); see [secrets.md](./scopes/secrets.md).
-- `recording_events`, `audio_visualization`, `global_transcriptions`, `daemon_status` — topic sets on `GET /events`; see each scope doc and [`/events`](./endpoints/v1/events.md).
+- `secrets` — backend credential management: `GET /backend/{backend_id}/secret/list` and `GET/POST/DELETE /backend/{backend_id}/secret/{name}` (write-only; values never returned); see [secrets.md](./scopes/secrets.md).
+- `voices` — the cloned-voice library: `GET/POST/PATCH/DELETE /tts/voice*`; see [voices.md](./scopes/voices.md).
+- `recording_events`, `playback_events`, `audio_visualization`, `global_transcriptions`, `daemon_status` — topic sets on `GET /events`; see each scope doc and [`/events`](./endpoints/v1/events.md).
 
 Rules to remember:
 
 - A token reaches exactly the endpoints and topics its scopes grant.
   Anything else returns `403 scope_denied`. No scope implies another
   — a `settings` token cannot drive recordings unless it also holds
-  `transcribe`.
+  `transcribe`, or make the daemon speak unless it also holds `speak`.
 - On `GET /events`, requesting any topic outside the token's granted
   scopes fails the whole subscription with `403 scope_denied` before
   the stream opens.
 
 ## Token characteristics
 
-- **Shape:** 32-byte random value, hex-encoded, prefixed `stt_`.
+- **Shape:** 32-byte random value, hex-encoded — 64 lowercase hex
+  characters, with no prefix.
 - **Lifetime:** 30 days from issue (`expires_at` returned alongside
   the token).
 - **Scopes:** The set the user approved, bound at issue time. To
@@ -399,9 +410,9 @@ four ways:
 
 Every `GET /events` subscription is long-lived and is checked for
 binary replacement for as long as it stays open, regardless of which
-topics it carries — this covers all four event-stream scopes
-(`recording_events`, `audio_visualization`, `global_transcriptions`,
-`daemon_status`). If your binary's identity changes mid-stream (upgrade
+topics it carries — this covers all five event-stream scopes
+(`recording_events`, `playback_events`, `audio_visualization`,
+`global_transcriptions`, `daemon_status`). If your binary's identity changes mid-stream (upgrade
 in place, replaced on disk), the stream ends with:
 
 ```

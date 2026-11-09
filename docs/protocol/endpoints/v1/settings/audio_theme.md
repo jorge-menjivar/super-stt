@@ -12,7 +12,7 @@ canonical list at any moment is what
 [`GET /settings/audio_theme/list`](./audio_theme/list.md) returns.
 
 To silence one recording, or play cues for one recording under `silent`,
-send `audio_cues` with [`POST /transcribe`](../transcribe.md) instead of
+send `audio_cues` with [`POST /stt/transcribe`](../transcribe.md) instead of
 changing the theme. That needs only the `transcribe` scope and leaves this
 setting untouched.
 
@@ -28,8 +28,8 @@ setting untouched.
 
 ```http
 POST /settings/audio_theme HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 {
@@ -67,8 +67,8 @@ Content-Type: application/json
 
 ```http
 GET /settings/audio_theme HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

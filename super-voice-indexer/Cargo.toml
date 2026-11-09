@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+    name = "super-voice-indexer"
+    edition = "2024"
+    description = "Cron-driven indexer that builds index.json from registry.toml"
+    license = "GPL-3.0-only"
+
+[dependencies]
+    anyhow.workspace = true
+    super-engine-indexer.workspace = true
+    super-voice-registry-types = { path = "../super-voice-registry-types" }
+    tokio.workspace = true
+
+[dev-dependencies]
+    serde_json.workspace = true
+    tempfile = "3"
+
+[lints]
+    workspace = true

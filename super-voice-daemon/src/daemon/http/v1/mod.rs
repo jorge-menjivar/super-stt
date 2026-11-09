@@ -1,0 +1,252 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! `/v1` — one module per path, named for the path it answers on.
+//!
+//! A directory where a path has sub-resources worth separating ([`backends`],
+//! [`pipeline`], [`registry`]); a file otherwise, holding that path and any
+//! sub-path small enough to read beside it. Two modules are named for something
+//! other than a path because they are not endpoints: [`macros`], which
+//! generates the one-value settings handlers, and [`wire`], the narrow response
+//! bodies they answer with.
+//!
+//! `/auth` is the exception: its routes are `super_engine_daemon::auth::routes`,
+//! and only registered here.
+//!
+//! What belongs to one feature is served under that feature's prefix:
+//! speech to text's under `/stt` (see [`STT`]). What the daemon has once,
+//! whatever the feature — auth, events, status, backends, the registry,
+//! settings, updates — stays at the root.
+
+// Must come first: `#[macro_use]` puts the settings-endpoint macros in scope for
+// every module declared after it.
+#[macro_use]
+mod macros;
+
+pub(crate) mod backends;
+pub(crate) mod contexts;
+pub(crate) mod events;
+pub(crate) mod gpu_info;
+pub(crate) mod ping;
+pub(crate) mod pipeline;
+pub(crate) mod registry;
+pub(crate) mod settings;
+pub(crate) mod status;
+pub(crate) mod transcribe;
+pub(crate) mod update;
+pub(crate) mod wire;
+
+use crate::daemon::http::internal::auth::require_transcribe_scope;
+use crate::daemon::http::openapi::ApiDoc;
+use crate::daemon::http::state::AppState;
+use axum::Router;
+use axum::middleware;
+use super_engine_daemon::auth::middleware::{
+    require_allowed_origin, require_any_authenticated, require_rate_limit, require_secrets_scope,
+    require_settings_scope, require_status_scope,
+};
+use super_engine_daemon::auth::routes as auth;
+use utoipa::OpenApi;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
+
+/// The `/v1` routes, grouped by the guard they share.
+///
+/// Registering a route and documenting it is one act here: every entry goes in
+/// through [`routes!`], which reads the `#[utoipa::path]` attribute off the
+/// handler it names. A handler without one does not compile, and a path spelled
+/// two ways cannot exist, because there is only one spelling.
+///
+/// The guards are applied separately, in [`router`], for a practical reason:
+/// `from_fn_with_state` needs a live [`AppState`], and building one needs a
+/// daemon. Keeping route registration free of it is what lets
+/// [`openapi`] generate the document from these same registrations without a
+/// running daemon — see `src/bin/gen_openapi.rs`.
+struct ScopeGroups {
+    /// Any valid token, whatever its scopes. `GET /events` lives here because
+    /// its per-topic scope is enforced inside the handler, against the topics
+    /// actually requested.
+    any: OpenApiRouter<AppState>,
+    status: OpenApiRouter<AppState>,
+    transcribe: OpenApiRouter<AppState>,
+    /// The configuration surface: every module whose paths the `settings`
+    /// scope guards, gathered by [`settings_routes`].
+    settings: OpenApiRouter<AppState>,
+    secrets: OpenApiRouter<AppState>,
+    /// Reachable without a token — it is how a caller gets one.
+    unauthenticated: OpenApiRouter<AppState>,
+}
+
+/// The prefix speech to text's own routes are served under: transcription, its
+/// pipeline, and dictation contexts.
+pub(crate) const STT: &str = "/stt";
+
+/// Every `/v1` route, in its group. Paths are bare here (`/ping`); the `/v1`
+/// prefix is applied once, in [`assemble`], and a feature's prefix where the
+/// group takes its routes.
+fn scope_groups() -> ScopeGroups {
+    ScopeGroups {
+        any: OpenApiRouter::new()
+            .routes(routes!(ping::ping))
+            .routes(routes!(auth::auth_status))
+            .merge(events::routes()),
+        status: OpenApiRouter::new().routes(routes!(status::status)),
+        transcribe: OpenApiRouter::new().nest(STT, transcribe::routes()),
+        settings: settings_routes(),
+        secrets: backends::secrets::routes(),
+        unauthenticated: OpenApiRouter::new().routes(routes!(auth::auth_request)),
+    }
+}
+
+/// Every route the `settings` scope guards, gathered from the modules that hold
+/// them. This is the one place the scope's membership is written down; the
+/// paths themselves live in each module's `#[utoipa::path]`, which is what
+/// `routes!` reads them back off.
+///
+/// The families with their own trees ([`backends`], [`pipeline`], [`registry`])
+/// contribute their own `routes()`. [`backends::secrets`] is deliberately not
+/// among them — those paths carry the `secrets` scope and are guarded
+/// separately in [`scope_groups`].
+fn settings_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(gpu_info::get_gpu_info))
+        .routes(routes!(update::get_update))
+        .routes(routes!(update::post_check))
+        .merge(settings::routes())
+        .merge(backends::routes())
+        .merge(registry::routes())
+        .nest(
+            STT,
+            OpenApiRouter::new()
+                .merge(contexts::routes())
+                .merge(backends::context::routes())
+                .merge(pipeline::routes()),
+        )
+}
+
+/// Apply each group's guard. Rate limiting is layered under the scope check on
+/// every guarded group, so an unauthenticated flood is rejected on the cheaper
+/// test first.
+fn guarded(groups: ScopeGroups, state: &AppState) -> ScopeGroups {
+    /// `.layer(scope).layer(rate_limit)` — the pair every guarded group takes.
+    macro_rules! guard {
+        ($group:expr, $scope:expr) => {
+            $group
+                .layer(middleware::from_fn_with_state(state.auth.clone(), $scope))
+                .layer(middleware::from_fn_with_state(
+                    state.auth.clone(),
+                    require_rate_limit,
+                ))
+        };
+    }
+
+    ScopeGroups {
+        any: guard!(groups.any, require_any_authenticated),
+        status: guard!(groups.status, require_status_scope),
+        transcribe: guard!(groups.transcribe, require_transcribe_scope),
+        settings: guard!(groups.settings, require_settings_scope),
+        secrets: guard!(groups.secrets, require_secrets_scope),
+        // No guard: this is the endpoint that mints the token the others need.
+        unauthenticated: groups.unauthenticated,
+    }
+}
+
+/// Merge the groups under `/v1` and attach the base document. The live router
+/// and the generated spec both come through here, so the two cannot describe
+/// different route sets.
+fn assemble(groups: ScopeGroups) -> OpenApiRouter<AppState> {
+    let v1 = OpenApiRouter::new()
+        .merge(groups.any)
+        .merge(groups.status)
+        .merge(groups.transcribe)
+        .merge(groups.settings)
+        .merge(groups.secrets)
+        .merge(groups.unauthenticated);
+
+    OpenApiRouter::with_openapi(ApiDoc::openapi()).nest("/v1", v1)
+}
+
+/// The live `/v1` router, guards applied and state bound.
+///
+/// The origin gate wraps everything, including `/v1/auth/request` — the one
+/// route no scope guards. That is deliberate: `auth_request` is what opens a
+/// consent dialog, so a page from an unlisted origin must be stopped before it
+/// can put a popup on the user's screen, not merely stopped from using the
+/// token it would mint.
+///
+/// Text to speech's routes come in here, under `/v1/tts`: their handlers are
+/// handed the feature rather than the whole daemon, so they are bound to their
+/// own state and merged once both are. The origin gate goes on last, over both.
+pub(crate) fn router(state: AppState) -> Router {
+    let (router, _spec) = assemble(guarded(scope_groups(), &state)).split_for_parts();
+    let tts = crate::tts::daemon::http::v1::router(crate::tts::daemon::http::state::AppState::new(
+        std::sync::Arc::new(state.daemon.tts.clone()),
+        state.auth.clone(),
+    ));
+    let auth = state.auth.clone();
+    router
+        .with_state(state)
+        .merge(tts)
+        .layer(middleware::from_fn_with_state(auth, require_allowed_origin))
+}
+
+/// The generated document for the same surface. The guards are omitted because
+/// they add no paths — what each endpoint requires is stated in its own
+/// `security` and prose.
+pub(crate) fn openapi() -> utoipa::openapi::OpenApi {
+    let mut spec = stt_and_shared_openapi();
+    let tts = crate::daemon::http::openapi::name_colliding_schemas(
+        &spec,
+        crate::tts::daemon::http::openapi_document(),
+        "Tts",
+    );
+    spec.merge(tts);
+    crate::daemon::http::openapi::name_feature_operations(&mut spec);
+    spec
+}
+
+/// The document for speech to text's routes and the ones the daemon has once,
+/// before text to speech's are merged in.
+pub(super) fn stt_and_shared_openapi() -> utoipa::openapi::OpenApi {
+    let (_router, mut spec) = assemble(scope_groups()).split_for_parts();
+    // Has to happen here, not as an `ApiDoc` modifier: the paths only exist
+    // once the router has been assembled.
+    crate::daemon::http::openapi::annotate_scopes(&mut spec);
+    spec
+}
+
+/// Which scope the router *enforces* on each `/v1` path, read from the grouping
+/// itself rather than restated.
+///
+/// `None` means the path is reachable without a token. `Some(vec![])` means any
+/// valid token will do, whatever its scopes.
+///
+/// This exists so the contract test can check each endpoint's advertised
+/// `security` against the guard it actually sits behind. The two are written in
+/// different places — the scope in a `#[utoipa::path]` attribute, the guard in
+/// [`guarded`] — and nothing else would notice them disagreeing. A client author
+/// told they need `settings` for an endpoint the daemon guards with `secrets`
+/// requests the wrong scope and gets a `403` they cannot explain.
+#[cfg(test)]
+pub(super) fn enforced_scopes() -> std::collections::BTreeMap<String, Option<Vec<&'static str>>> {
+    let groups = scope_groups();
+    let by_group = [
+        (groups.any, Some(vec![])),
+        (groups.status, Some(vec!["status"])),
+        (groups.transcribe, Some(vec!["transcribe"])),
+        (groups.settings, Some(vec!["settings"])),
+        (groups.secrets, Some(vec!["secrets"])),
+        (groups.unauthenticated, None),
+    ];
+
+    let mut enforced = std::collections::BTreeMap::new();
+    for (router, scopes) in by_group {
+        // The groups hold bare paths; `assemble` is what applies the `/v1`
+        // prefix, so apply it here too to match the published document.
+        let (_router, spec) = router.split_for_parts();
+        for path in spec.paths.paths.keys() {
+            enforced.insert(format!("/v1{path}"), scopes.clone());
+        }
+    }
+    // Text to speech's routes are merged in by `router`, guards and all.
+    enforced.extend(crate::tts::daemon::http::v1::enforced_scopes());
+    enforced
+}

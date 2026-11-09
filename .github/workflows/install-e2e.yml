@@ -8,8 +8,8 @@ name: Install E2E
 # path-filtered workflow that doesn't run leaves a required check pending
 # forever and blocks the merge.
 #
-# What actually runs is super-engine's install-e2e action, shared with Super
-# TTS; see its test-install-e2e.sh for the two passes and why the fixture is a
+# What actually runs is super-engine's install-e2e action; see its
+# test-install-e2e.sh for the two passes and why the fixture is a
 # published release rather than a tarball built here. It is pinned at the same
 # rev as the super-engine crates in Cargo.toml.
 
@@ -19,7 +19,7 @@ on:
     paths:
       - install.sh
       - uninstall.sh
-      - super-stt-install/**
+      - super-voice-install/**
       # Pins the super-engine crates the installer is built from:
       # super-engine-installer, and super-engine-forge, which it downloads with.
       - Cargo.toml
@@ -29,7 +29,7 @@ on:
     paths:
       - install.sh
       - uninstall.sh
-      - super-stt-install/**
+      - super-voice-install/**
       # Pins the super-engine crates the installer is built from:
       # super-engine-installer, and super-engine-forge, which it downloads with.
       - Cargo.toml
@@ -59,8 +59,42 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: super-libre/super-engine/.github/actions/install-e2e@3cd940dfbf7c41153dc684e66c272d69cc78b88a
+      # The test installs the channel's newest published release. Until Super
+      # Voice has one there, that release is Super STT's, with none of the
+      # super-voice-* assets the test installs and checks for, and install.sh
+      # hands it to that release's own installer. There is nothing of Super
+      # Voice's to install yet, so the test waits for its first release on the
+      # channel. Remove this step with install.sh's hand-over once Super Voice
+      # has a stable release.
+      - name: Find a Super Voice release on the channel
+        id: release
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          INSTALL_SH_SOURCE_ONLY=1 source ./install.sh
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          if [ "$CHANNEL" = stable ]; then
+            tag=$(resolve_stable_tag "$(gh_api_curl "$api/releases/latest")")
+          else
+            tag=$(resolve_beta_tag "$(gh_api_curl "$api/releases")")
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::Could not resolve the newest $CHANNEL release."
+            exit 1
+          fi
+          release=$(gh_api_curl "$api/releases/tags/$tag")
+          if jq -e '.assets | any(.name == "super-voice-install-x86_64-unknown-linux-gnu")' \
+              <<<"$release" >/dev/null; then
+            echo "published=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice::The newest $CHANNEL release, $tag, is from before Super Voice. The install test runs once Super Voice has a $CHANNEL release."
+            echo "published=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.release.outputs.published == 'true'
+        uses: super-libre/super-engine/.github/actions/install-e2e@79e3ceace42d9492c60277abfaa4c08b63cf3fdb
         with:
-          slug: super-stt
-          short-name: stt
+          slug: super-voice
+          short-name: voice
           channel: ${{ matrix.channel }}

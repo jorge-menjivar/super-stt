@@ -1,0 +1,194 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! Main daemon entry point and coordination.
+//!
+//! Boots the daemon, spawns the HTTP listener on
+//! `$XDG_RUNTIME_DIR/voice/super-voice-http.sock`, and waits for a shutdown
+//! signal. Client commands (`record`, `status`, etc.) live in
+//! `super-voice-cli` (the `voice` command), which talks to the daemon over HTTP.
+
+use crate::cli;
+use crate::config::DaemonConfig;
+use crate::daemon::types::SuperSTTDaemon;
+use anyhow::Result;
+use log::{error, info, warn};
+use super_engine_daemon::instance::InstanceLock;
+
+/// Spawn the HTTP listener that serves every external request the daemon
+/// answers, on the socket `instance` locks. Failure to bind is fatal — there's
+/// no other transport.
+///
+/// Returns the listener task's [`JoinHandle`] so `run` can race it
+/// against the shutdown signal: if the listener task exits before the
+/// shutdown signal fires, the daemon treats itself as unreachable and
+/// exits with a non-zero status.
+///
+async fn spawn_http_listener(
+    daemon: &SuperSTTDaemon,
+    instance: InstanceLock,
+) -> Result<tokio::task::JoinHandle<()>> {
+    crate::daemon::http::start_http_server(
+        std::sync::Arc::new(daemon.clone()),
+        instance,
+        daemon.shutdown_tx.clone(),
+    )
+    .await
+}
+
+/// Main entry point for the daemon
+///
+/// # Errors
+///
+/// Returns an error if the daemon fails to start.
+///
+/// # Panics
+///
+/// Panics if the daemon fails to initialize.
+pub async fn run() -> Result<()> {
+    let matches = cli::build().get_matches();
+    let verbose = matches.get_flag("verbose");
+
+    // Init logging BEFORE loading config so a "config invalid, reset to
+    // defaults" warning emitted during the load is actually captured, instead
+    // of being dropped before any logger exists (Tier 2 #6).
+    super_voice_shared::logging::init_with(if verbose {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    });
+
+    // One daemon per socket, decided before anything another daemon could be
+    // using: a second daemon stops here, before it reads (or rewrites) the
+    // config, builds its state or sweeps backend units.
+    //
+    // The socket path is resolved by `get_http_socket_path`, which honors the
+    // `SUPER_VOICE_HTTP_SOCKET` override (tests use this to bind a unique socket
+    // without overriding `$XDG_RUNTIME_DIR`, which would break the Wayland
+    // connection for spawned consent helpers). Clients resolve through the
+    // same helper, so daemon and clients always agree on the path.
+    let socket_path = super_voice_shared::validation::get_http_socket_path();
+    let instance = match InstanceLock::acquire(&socket_path) {
+        Ok(instance) => instance,
+        Err(e) => {
+            error!("Not starting: {e}");
+            return Err(e.into());
+        }
+    };
+
+    // The daemon that holds the socket is the one whose crash note this is:
+    // read the last run's, then arm the hook that writes the next. See
+    // `crate::crash`.
+    let crash_note = crate::crash::note_path();
+    let crashed = crate::crash::take_note(&crash_note);
+    crate::crash::install_panic_hook(crash_note);
+
+    // Load saved configuration
+    let config = DaemonConfig::load();
+
+    info!("Starting the Super Voice daemon");
+    info!("Model: {}", config.transcription.preferred_model);
+    info!("Audio theme: {}", config.audio.theme);
+
+    let daemon = SuperSTTDaemon::new().await?;
+
+    info!("Daemon initialized successfully");
+
+    if let Some(note) = crashed {
+        warn!("The last run crashed: {}", note.trim());
+        daemon.announce_crash_restart().await;
+    }
+
+    // Defensive: stop any `super-voice-backend-*` --user units left behind by
+    // a previous daemon that exited ungracefully (SIGKILL / panic / a
+    // skipped `Drop`). The transient unit's name embeds the spawning
+    // daemon's PID, so a restarted daemon can't reach it via the regular
+    // unload path — sweeping at startup is the only deterministic way to
+    // recover from that. Only meaningful with the subprocess transport.
+    #[cfg(feature = "subprocess-backends")]
+    crate::stt_models::subprocess::cleanup_orphan_units().await;
+
+    // Find out now, not mid-recording, whether macOS will let the daemon
+    // type — and let the system prompt appear while nothing is in flight.
+    // Advisory: a refusal is logged, never fatal. See the function's docs.
+    #[cfg(target_os = "macos")]
+    crate::output::keyboard::probe_accessibility_permission();
+
+    // SIGTERM as well as SIGINT: `systemctl stop` and `kill` send SIGTERM,
+    // and dying to it skips the graceful path below, which is what stops the
+    // subprocess backend's unit. The handlers are installed here, before the
+    // listener starts.
+    let signal = super_engine_daemon::shutdown::signal();
+    let shutdown_tx = daemon.shutdown_tx.clone();
+    tokio::spawn(async move {
+        signal.await;
+        let _ = shutdown_tx.send(());
+    });
+
+    // Subscribe BEFORE spawning the listener so a Ctrl+C arriving in
+    // the gap between spawn and supervise can't slip past. broadcast
+    // sends are dropped for receivers that don't yet exist; subscribing
+    // first guarantees the supervisor sees every shutdown signal.
+    let mut shutdown_rx = daemon.shutdown_tx.subscribe();
+
+    // Held until the process exits. `serve` drops its copy once the socket is
+    // gone, while the backends are still stopping below; a new daemon must not
+    // start, and spawn a backend under the same instance name, before they are
+    // down. See `InstanceLock`.
+    let _held = instance.clone();
+    let listener_handle = match spawn_http_listener(&daemon, instance).await {
+        Ok(h) => h,
+        Err(e) => {
+            warn!("HTTP listener failed to start: {e}");
+            return Err(e);
+        }
+    };
+
+    // Wait for either the shutdown signal or the listener task ending
+    // early. The listener's spawned task is the daemon's only way to
+    // accept new connections — if it panics or exits unexpectedly,
+    // the daemon would otherwise stay parked here looking healthy
+    // while being unreachable. Racing the JoinHandle catches both
+    // panics (surfaced as `JoinError`) and any future code path that
+    // returns from the loop without a shutdown signal.
+    tokio::select! {
+        biased;
+        _ = shutdown_rx.recv() => {
+            info!("Shutdown signal received");
+        }
+        join_result = listener_handle => {
+            // The listener task ended before the shutdown signal —
+            // signal shutdown defensively (in case anything else is
+            // listening) and return an error so the process exits
+            // non-zero. A `JoinError` indicates a panic; `Ok(())` here
+            // means the spawned task body returned without ever
+            // observing the shutdown_rx arm, which is itself a bug.
+            error!("HTTP listener task exited unexpectedly: {join_result:?}");
+            let _ = daemon.shutdown_tx.send(());
+            return Err(anyhow::anyhow!(
+                "HTTP listener task exited before shutdown signal"
+            ));
+        }
+    }
+
+    info!("Daemon stopped gracefully");
+
+    // `std::process::exit` below skips every `Drop` destructor — without
+    // this explicit unload the `systemd-run --user` subprocess backend
+    // (e.g. Voxtral) would be orphaned. Call the daemon's shutdown unload
+    // path so `Transcribe::shutdown()` runs in an async context and stops
+    // the unit cleanly.
+    daemon.shutdown_unload().await;
+    daemon.tts.shutdown_unload().await;
+
+    // Drain any queued session-store writes before `process::exit` skips the
+    // fire-and-forget persist task — otherwise a token minted or revoked in the
+    // final moments is lost (audit 2 Tier 1 #5). Bounded so a write stuck on
+    // a slow disk can't hang shutdown.
+    crate::daemon::http::flush_persisted_sessions(tokio::time::Duration::from_secs(5)).await;
+
+    // Give a brief moment for any remaining cleanup, then force exit if needed
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    info!("Exiting daemon process");
+    std::process::exit(0);
+}

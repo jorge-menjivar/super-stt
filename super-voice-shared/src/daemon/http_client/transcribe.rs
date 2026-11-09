@@ -1,0 +1,244 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! `POST /stt/transcribe` and `POST /stt/transcribe/stop`: speech to text's own
+//! endpoints, on the engine's transport.
+
+use std::path::PathBuf;
+
+use futures_util::StreamExt;
+use super_engine_client::http_client::HttpResult;
+use super_engine_client::http_client::transport::{self, SseEvent};
+
+use crate::models::protocol::{DaemonResponse, PreviewSource};
+
+/// Options for [`transcribe`]. v1 only wires the daemon-mic capture path
+/// (no `audio_data`); pre-captured audio is handled by the daemon's
+/// `POST /stt/transcribe` when a client sends a top-level `audio_data` array.
+#[derive(Debug, Default, Clone)]
+pub struct TranscribeOptions {
+    pub write_mode: bool,
+    pub stop_mode: Option<String>,
+    /// Hold the connection open for the result. `true` → the daemon streams
+    /// SSE and returns the final transcription; `false` → fire-and-forget, the
+    /// daemon returns `202 {message:"Recording started"}` and records in the
+    /// background (stop it via [`transcribe_stop`]).
+    pub wait: bool,
+    /// Stream incremental `event: preview` SSE frames before the final `done`
+    /// (only meaningful with `wait: true`). Independent of write-mode typing.
+    pub stream_realtime: bool,
+}
+
+/// Build the `POST /stt/transcribe` request body from options. Mic-capture options
+/// are sent at the top level (the daemon reads them from the request body).
+fn record_body(opts: &TranscribeOptions) -> serde_json::Value {
+    let mut data = serde_json::json!({
+        "write_mode":      opts.write_mode,
+        "wait":            opts.wait,
+        "stream_realtime": opts.stream_realtime,
+    });
+    if let Some(mode) = &opts.stop_mode {
+        data["stop_mode"] = serde_json::Value::String(mode.clone());
+    }
+    data
+}
+
+/// One event from the `/stt/transcribe` Server-Sent Events stream.
+///
+/// Matches the daemon's wire-level event types — `preview` for
+/// in-flight text, `done` for the final transcription, `error` for a
+/// daemon-side failure — each an SSE block of `event:` / `data:` lines.
+#[derive(Debug, Clone)]
+pub enum TranscribeEvent {
+    /// Incremental preview text. Never a delta, but what it spans depends on
+    /// `source`: a [`PreviewSource::Stream`] frame is everything heard so far
+    /// and extends the last one, a [`PreviewSource::Window`] frame is the last
+    /// few seconds and replaces it. `None` when the daemon predates the field.
+    Preview {
+        text: String,
+        source: Option<PreviewSource>,
+    },
+    /// Final transcription, after the recording stopped and the model
+    /// produced its result. The string is the transcribed text or an
+    /// empty string if no speech was detected.
+    Done(String),
+    /// Daemon-side error. Recording is no longer running.
+    Error(String),
+}
+
+/// `POST /stt/transcribe` — start a daemon-mic recording. Non-streaming
+/// variant: collapses the entire SSE event stream into a single
+/// final result.
+///
+/// # Errors
+/// Returns an error if the daemon HTTP listener isn't reachable or the
+/// response can't be parsed.
+pub async fn transcribe(
+    socket_path: PathBuf,
+    token: &str,
+    opts: TranscribeOptions,
+) -> HttpResult<DaemonResponse> {
+    // Fire-and-forget: the daemon returns a single `202` JSON ack, not an SSE
+    // stream, so parse the response directly instead of reading events.
+    if !opts.wait {
+        return transport::post_json(socket_path, token, "/stt/transcribe", &record_body(&opts))
+            .await;
+    }
+    let mut stream = Box::pin(transcribe_stream(socket_path, token, opts).await?);
+    let mut last_preview = String::new();
+    while let Some(event) = stream.next().await {
+        match event {
+            TranscribeEvent::Preview { text, .. } => last_preview = text,
+            TranscribeEvent::Done(text) => {
+                return Ok(DaemonResponse::success().with_transcription(text));
+            }
+            TranscribeEvent::Error(msg) => {
+                return Ok(DaemonResponse::error(&msg));
+            }
+        }
+    }
+    // Stream ended without a terminal event; surface what we have.
+    if last_preview.is_empty() {
+        Ok(DaemonResponse::error(
+            "transcribe stream ended unexpectedly",
+        ))
+    } else {
+        Ok(DaemonResponse::success().with_transcription(last_preview))
+    }
+}
+
+/// `POST /stt/transcribe` — start a daemon-mic recording, returning a stream
+/// of [`TranscribeEvent`]s as the recording progresses.
+///
+/// The connection is held open by the daemon: each preview update
+/// arrives as a `Preview(text)` event, then a single terminal `Done`
+/// or `Error` event is emitted before the stream ends. Dropping the
+/// stream early closes the underlying connection, which the daemon
+/// treats as a manual stop signal.
+///
+/// # Errors
+/// Returns an error if the daemon HTTP listener isn't reachable, the initial
+/// request can't be sent, or the daemon refuses it (e.g. 409
+/// `recording_in_progress`, 403 `scope_denied`, 429 `rate_limited`). Errors
+/// *during* the stream (e.g. daemon-side failure) are emitted as a
+/// `TranscribeEvent::Error` item.
+pub async fn transcribe_stream(
+    socket_path: PathBuf,
+    token: &str,
+    opts: TranscribeOptions,
+) -> HttpResult<impl futures_util::Stream<Item = TranscribeEvent> + Send + 'static> {
+    let events =
+        transport::post_json_events(socket_path, token, "/stt/transcribe", &record_body(&opts))
+            .await?;
+    Ok(events.filter_map(|event| {
+        std::future::ready(match event {
+            Ok(event) => parse_event(&event),
+            Err(e) => Some(TranscribeEvent::Error(e.to_string())),
+        })
+    }))
+}
+
+/// The [`TranscribeEvent`] one SSE event carries, or `None` for an event this
+/// client does not know.
+fn parse_event(event: &SseEvent) -> Option<TranscribeEvent> {
+    let payload: serde_json::Value =
+        serde_json::from_str(&event.data).unwrap_or(serde_json::Value::Null);
+    match event.event.as_deref() {
+        Some("preview") => Some(TranscribeEvent::Preview {
+            text: payload
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            // An unrecognized token is treated like an absent one: the text
+            // is still a preview, the client just is not told which kind.
+            source: payload
+                .get("source")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok()),
+        }),
+        Some("done") => Some(TranscribeEvent::Done(
+            payload
+                .get("transcription")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        )),
+        Some("error") => Some(TranscribeEvent::Error(
+            payload
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("transcribe error")
+                .to_string(),
+        )),
+        _ => None,
+    }
+}
+
+/// `POST /stt/transcribe/stop` — stop an in-flight daemon-mic recording.
+///
+/// # Errors
+/// Returns an error if the daemon HTTP listener isn't reachable or the
+/// response can't be parsed.
+pub async fn transcribe_stop(socket_path: PathBuf, token: &str) -> HttpResult<DaemonResponse> {
+    transport::post_json(
+        socket_path,
+        token,
+        "/stt/transcribe/stop",
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn preview(data: &str) -> TranscribeEvent {
+        parse_event(&SseEvent {
+            event: Some("preview".to_string()),
+            data: data.to_string(),
+        })
+        .expect("a preview event yields")
+    }
+
+    fn source_of(event: TranscribeEvent) -> (String, Option<PreviewSource>) {
+        match event {
+            TranscribeEvent::Preview { text, source } => (text, source),
+            other => panic!("expected a preview, got {other:?}"),
+        }
+    }
+
+    /// `source` is the client's only way to tell a window preview (replaces
+    /// the last) from a stream preview (extends it), so a frame that carries
+    /// it must come through typed.
+    #[test]
+    fn a_preview_carries_its_source() {
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello wor","source":"window"}"#)),
+            ("hello wor".to_string(), Some(PreviewSource::Window))
+        );
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello","source":"stream"}"#)),
+            ("hello".to_string(), Some(PreviewSource::Stream))
+        );
+    }
+
+    /// A daemon older than the field sends no `source`. The text is still a
+    /// preview; the client is simply not told which kind.
+    #[test]
+    fn a_preview_without_a_source_still_parses() {
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello"}"#)),
+            ("hello".to_string(), None)
+        );
+    }
+
+    /// A token this client does not know — a newer daemon's, say — is neither
+    /// an error nor a guess: it reads as absent.
+    #[test]
+    fn an_unknown_source_reads_as_absent() {
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello","source":"delta"}"#)),
+            ("hello".to_string(), None)
+        );
+    }
+}

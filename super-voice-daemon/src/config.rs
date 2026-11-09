@@ -1,0 +1,958 @@
+// SPDX-License-Identifier: GPL-3.0-only
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use super_voice_shared::models::contexts::DictationContext;
+use super_voice_shared::models::notification_method::NotificationMethod;
+use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::models::update_beta_optin::UpdateBetaOptIn;
+use super_voice_shared::models::write_method::WriteMethod;
+use super_voice_shared::theme::AudioTheme;
+
+/// Super Voice's one config file. What the daemon has once comes first; then a
+/// section per feature: speech to text's `transcription`, `post_processor` and
+/// `contexts`, and text to speech's `synthesis`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonConfig {
+    pub audio: AudioConfig,
+    /// How a failure is surfaced to the user, a recording's or an
+    /// utterance's. An unparseable stored value degrades to the default
+    /// rather than failing the whole config load.
+    #[serde(
+        default,
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub notification_method: NotificationMethod,
+    /// The global default language every model starts from: a BCP-47 tag,
+    /// the reserved `"auto"`, or `None` (no preference; models use their
+    /// `primary_language`).
+    #[serde(default)]
+    pub primary_language: Option<String>,
+    /// Directory scanned for installed backends, of every feature. `None`
+    /// uses the default (`<data_dir>/super-voice/backends`).
+    #[serde(default)]
+    pub backends_dir: Option<String>,
+    pub transcription: TranscriptionConfig,
+    #[serde(default)]
+    pub synthesis: SynthesisConfig,
+    #[serde(default)]
+    pub backends: BackendsConfig,
+    #[serde(default)]
+    pub update: UpdateConfig,
+    #[serde(default)]
+    pub post_processor: PostProcessorConfig,
+    #[serde(default)]
+    pub contexts: ContextsConfig,
+    #[serde(default)]
+    pub http: HttpConfig,
+}
+
+/// Self-update checking. Contract: docs/protocol/endpoints/v1/update.md
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateConfig {
+    /// Periodic background checks + desktop notification. `POST
+    /// /v1/update/check` works regardless of this flag.
+    #[serde(default = "default_check_enabled")]
+    pub check_enabled: bool,
+    /// An unparseable stored value degrades to the default rather than
+    /// failing the whole config load.
+    #[serde(
+        default,
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub beta_optin: UpdateBetaOptIn,
+}
+
+fn default_check_enabled() -> bool {
+    true
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            check_enabled: true,
+            beta_optin: UpdateBetaOptIn::default(),
+        }
+    }
+}
+
+/// User-set configuration for installed backends. Secrets live in the
+/// secrets file; only non-sensitive **options** are stored here (plaintext).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BackendsConfig {
+    /// Per-backend option overrides: backend `source` → (option name → value).
+    /// An absent entry means "use the manifest default".
+    #[serde(default)]
+    pub options: HashMap<String, HashMap<String, String>>,
+    /// Per-model settings: backend `source` → (model name → settings).
+    #[serde(default)]
+    pub models: HashMap<String, HashMap<String, ModelSettings>>,
+    /// Which dictation context a backend uses, when it is not the active one:
+    /// backend `source` → context id.
+    ///
+    /// Three states in two, deliberately. An absent entry means "follow
+    /// whichever context is active", which is what almost every backend should
+    /// do and what costs no storage. An entry naming an id pins that backend to
+    /// it. An entry holding the empty string — never a valid id, see
+    /// [`DictationContext::is_valid_id`] — means "send this backend no context
+    /// at all", which is a real choice for a backend the user would rather keep
+    /// out of.
+    #[serde(default)]
+    pub context_override: HashMap<String, String>,
+}
+
+/// Per-model configuration. A struct (not a bare value) so future per-model
+/// settings have a home.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelSettings {
+    /// Per-model language override: a BCP-47 tag, `"auto"`, or `None`
+    /// (Automatic — inherit the global `primary_language`, else the model's primary).
+    #[serde(default)]
+    pub language: Option<String>,
+    /// The framework this model loads on (`"cpu"`, `"cuda"`, `"rocm"`,
+    /// `"metal"` or `"vulkan"`), or `None` for the best one the installed
+    /// build runs. A framework belongs to a model because it is a property of
+    /// the model: a small one runs fine on the CPU while the large one beside
+    /// it needs the GPU, and a post-processor sharing the pipeline with
+    /// either has its own answer again. There is no global default.
+    #[serde(default)]
+    pub device: Option<String>,
+    /// The voice a synthesis model speaks in when an utterance names none: a
+    /// `voice` id in any of the three shapes `docs/protocol/backend/config.md`
+    /// defines, or `None` for the model's manifest `default_voice`.
+    ///
+    /// Per model rather than global for the same reason the device is: a
+    /// voice id means nothing to another model. `ryan` is one of the nine
+    /// speakers the `CustomVoice` checkpoints declare and is not a voice any
+    /// Kokoro build has, and a cloned `voice:<uuid>` is refused outright by a
+    /// model whose `voice_kinds` do not include `cloned`.
+    #[serde(default)]
+    pub voice: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioConfig {
+    #[serde(
+        default,
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub theme: AudioTheme,
+    #[serde(default = "default_volume")]
+    pub volume: u8,
+}
+
+fn default_volume() -> u8 {
+    100
+}
+
+/// The transcript post-processor: a second model, selected independently of
+/// the transcription model, that rewrites each final transcript before the
+/// daemon types or returns it.
+///
+/// Contract: `docs/protocol/endpoints/v1/pipeline.md` (stage 2). Every field is
+/// defaulted, so a config without the section loads with post-processing off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct PostProcessorConfig {
+    /// Whether final transcripts are run through the selected post-processor.
+    /// Off by default: post-processing costs latency, and a cloud processor
+    /// would send the transcript text to a third party.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Wire name of the selected post-processor model. Empty when none is
+    /// selected.
+    #[serde(default)]
+    pub model: String,
+    /// Repo id of the backend serving `model`. Empty when none is selected.
+    /// Held with `model` as the `(name, source)` identity pair every other
+    /// model selection uses.
+    #[serde(default)]
+    pub source: String,
+}
+
+impl PostProcessorConfig {
+    /// The selected `(model, source)` pair, or `None` when the selection is
+    /// incomplete. Both halves are required: a name without the backend that
+    /// serves it resolves to nothing.
+    #[must_use]
+    pub fn selection(&self) -> Option<(&str, &str)> {
+        (!self.model.is_empty() && !self.source.is_empty())
+            .then_some((self.model.as_str(), self.source.as_str()))
+    }
+
+    /// Whether post-processing should actually run: enabled *and* pointed at a
+    /// model. The two are stored separately so toggling the feature off does
+    /// not discard the user's choice.
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        self.enabled && self.selection().is_some()
+    }
+}
+
+/// Dictation contexts: what the user is dictating, and which one is in force.
+///
+/// Contract: `docs/protocol/endpoints/v1/context.md`. The contexts themselves
+/// are [`DictationContext`], shared with the settings app.
+///
+/// A `Vec` rather than a map keyed by id, because the list is ordered and the
+/// user sees that order. It is also what keeps the config file still: [`DaemonConfig::load`]
+/// rewrites the file whenever pretty-printing it differs from what is on disk,
+/// and a `HashMap`'s key order is not stable across runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ContextsConfig {
+    /// The id of the context in force, or `None` for none.
+    ///
+    /// An id naming a context that no longer exists reads as `None` — see
+    /// [`DaemonConfig::active_context`] — rather than being pruned on load, so
+    /// deleting a context and undoing it does not silently lose the selection.
+    #[serde(default)]
+    pub active: Option<String>,
+    /// Every context the user has, in the order they arranged them.
+    #[serde(default)]
+    pub items: Vec<DictationContext>,
+}
+
+/// The daemon's HTTP surface beyond the Unix socket it always serves. See
+/// `super_engine_daemon::config::HttpConfig`, bound to [`DEFAULT_TCP_PORT`].
+pub type HttpConfig = super_engine_daemon::config::HttpConfig<DEFAULT_TCP_PORT>;
+
+/// The loopback TCP listener. See `super_engine_daemon::config::TcpConfig`.
+pub type TcpConfig = super_engine_daemon::config::TcpConfig<DEFAULT_TCP_PORT>;
+
+pub use super_engine_daemon::config::ANY_ORIGIN;
+
+/// The loopback port the daemon serves on unless told otherwise.
+///
+/// Public because it is not only a default: it is the number a browser client
+/// hard-codes, the one the published `OpenAPI` document advertises as a server,
+/// and the one the protocol docs quote. Those must all move together, so they
+/// all read it from here.
+///
+/// **7300–7309 is the block reserved for the Super family**, one port per
+/// daemon: `7300` Super STT, `7301` Super TTS, the rest unused for now. A block
+/// rather than a number apiece so a sibling never has to repeat this search,
+/// and so a firewall rule or a document can name the whole family at once.
+///
+/// The band was picked for how empty it is rather than for looking nice. The
+/// 7000s has no conventional block reservation — unlike the 5000s, where VNC
+/// takes 5900–5999, and the 6000s, where X11 takes 6000–6063 — and 7284–7364
+/// is 81 consecutive ports unassigned in IANA's registry, `genstat` at 7283
+/// below and `lcm-server` at 7365 above. This block sits in the middle of that.
+/// The busy parts of the 7000s are all well outside it: 7860 is Gradio's
+/// default, which matters more than its absence from the registry suggests
+/// since it is where ML demo apps land; 7777, 7474 and 7687 are likewise taken
+/// in practice.
+///
+/// See [`TcpConfig::port`] for why a fixed number rather than an OS-chosen one.
+/// It is also the product's `ProductSpec::tcp_port`, which a test holds it to.
+pub const DEFAULT_TCP_PORT: u16 = 7300;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptionConfig {
+    /// Whether the user has stage 1 switched on: what Load sets and Unload
+    /// clears. Held separately from `preferred_model` so an unload can stay
+    /// idle across a restart *without* discarding the selection — which is how
+    /// [`PostProcessorConfig::enabled`] has always worked, and which stage 1
+    /// lacked until the stages were made to behave alike.
+    ///
+    /// Starts `false`, because nothing is selected yet.
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub preferred_model: String,
+    #[serde(default)]
+    pub preferred_source: String,
+    #[serde(default)]
+    pub write_mode: bool, // Auto-type transcriptions
+    #[serde(default)] // For backwards compatibility with existing configs
+    pub preview_typing_enabled: bool, // Beta feature: show preview while typing
+    #[serde(
+        default,
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub recording_stop_mode: RecordingStopMode,
+    #[serde(
+        default,
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub write_method: WriteMethod,
+    /// Relative install dir (subdir of [`DaemonConfig::backends_dir`]) of the selected active
+    /// backend, or `None` when idle. Metadata (name/source/models) is read from
+    /// that dir's `backend.toml`. An active backend with an empty
+    /// `preferred_model` means "backend selected, no model loaded".
+    #[serde(default)]
+    pub active_backend: Option<String>,
+}
+
+/// Text to speech's section: the synthesis stage's selection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SynthesisConfig {
+    #[serde(default)]
+    pub preferred_model: String,
+    #[serde(default)]
+    pub preferred_source: String,
+    /// Relative install dir (subdir of [`DaemonConfig::backends_dir`]) of the
+    /// selected synthesis backend, or `None` when idle. An active backend with
+    /// an empty `preferred_model` means "backend selected, no model loaded".
+    #[serde(default)]
+    pub active_backend: Option<String>,
+}
+
+impl TranscriptionConfig {
+    /// The selected `(model, source)` pair, or `None` when the selection is
+    /// incomplete. Deliberately the same shape as
+    /// [`PostProcessorConfig::selection`]: both halves are required, since a
+    /// name without the backend that serves it resolves to nothing.
+    #[must_use]
+    pub fn selection(&self) -> Option<(&str, &str)> {
+        (!self.preferred_model.is_empty() && !self.preferred_source.is_empty()).then_some((
+            self.preferred_model.as_str(),
+            self.preferred_source.as_str(),
+        ))
+    }
+
+    /// Whether stage 1 should actually be running: switched on *and* pointed at
+    /// a model. The twin of [`PostProcessorConfig::is_active`], and the value
+    /// the stage reports as `enabled` — a stage switched on with nothing
+    /// selected is not running, and a card told otherwise would offer to unload
+    /// a model that does not exist.
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        self.enabled && self.selection().is_some()
+    }
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        Self {
+            audio: AudioConfig {
+                theme: AudioTheme::default(),
+                volume: default_volume(),
+            },
+            notification_method: NotificationMethod::default(),
+            primary_language: None,
+            backends_dir: None,
+            transcription: TranscriptionConfig {
+                // Empty preference: the daemon stays idle until a model is
+                // selected — it never auto-picks one, since loading a model can
+                // pull gigabytes.
+                // Nothing is selected yet, so the stage is not switched on.
+                // Distinct from the serde default above, which answers a
+                // different question: what an *older* config meant.
+                enabled: false,
+                preferred_model: String::new(),
+                preferred_source: String::new(),
+                write_mode: false,             // Default to not auto-typing
+                preview_typing_enabled: false, // Default to disabled (beta feature)
+                recording_stop_mode: RecordingStopMode::default(),
+                write_method: WriteMethod::default(),
+                active_backend: None,
+            },
+            synthesis: SynthesisConfig::default(),
+            backends: BackendsConfig::default(),
+            update: UpdateConfig::default(),
+            post_processor: PostProcessorConfig::default(),
+            contexts: ContextsConfig::default(),
+            http: HttpConfig::default(),
+        }
+    }
+}
+
+/// The `daemon.ron` path used by `DaemonConfig::get_config_path()` under
+/// `#[cfg(test)]`: a directory under the OS temp dir, unique per test
+/// *process* (keyed by pid) and cached for the life of that process so every
+/// test in the binary agrees on the same path. This is what keeps unit tests
+/// that call `load()`/`save()` off the developer's real config file.
+#[cfg(test)]
+fn test_config_path() -> PathBuf {
+    use std::sync::OnceLock;
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
+    // A static is never dropped, so the directory is removed when the test
+    // binary exits instead, failed tests or not.
+    extern "C" fn remove_test_config_dir() {
+        if let Some(dir) = PATH.get().and_then(|path| path.parent()) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+    PATH.get_or_init(|| {
+        let dir =
+            std::env::temp_dir().join(format!("super-stt-test-config-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        // SAFETY: registers a plain `extern "C" fn` with no captured state.
+        unsafe {
+            libc::atexit(remove_test_config_dir);
+        }
+        dir.join("daemon.ron")
+    })
+    .clone()
+}
+
+/// Devices are bare `String`s, not an enum, so no `deserialize_or_default`
+/// catches a stale value at the serde layer — they are normalized here
+/// instead. Unlike the wire setter, which rejects an unparseable value
+/// outright, a persisted value has no such option: a daemon that refused to
+/// start over a stale config field would be worse than one that falls back,
+/// so a model's device that is not a framework degrades to "none of its own"
+/// rather than triggering a full reset.
+impl super_engine_daemon::config::ConfigFile for DaemonConfig {
+    fn normalize(&mut self) {
+        use crate::daemon::device_management::parse_device_preference;
+
+        for settings in self
+            .backends
+            .models
+            .values_mut()
+            .flat_map(HashMap::values_mut)
+        {
+            settings.device = settings.device.as_deref().and_then(parse_device_preference);
+        }
+    }
+}
+
+impl DaemonConfig {
+    /// Get the config file path.
+    ///
+    /// Under `#[cfg(test)]` this resolves to a process-local temp file instead
+    /// of the real XDG config path, so `load()`/`save()` in this crate's unit
+    /// tests can never read or clobber the developer's real
+    /// `~/.config/super-stt/daemon.ron`. Known limitation: this only covers
+    /// unit tests compiled *into* this crate (`cfg(test)`). Integration tests
+    /// under `tests/` link against the crate without `cfg(test)`, so they
+    /// still resolve the real path — not addressed here.
+    fn get_config_path() -> PathBuf {
+        #[cfg(test)]
+        {
+            test_config_path()
+        }
+        #[cfg(not(test))]
+        {
+            super_engine_daemon::config::config_path(&super_voice_shared::product::SUPER_VOICE)
+        }
+    }
+
+    /// Parse config file `content`, falling back to defaults on a parse
+    /// error. See `super_engine_daemon::config::parse_or_reset`; what a
+    /// stale value is repaired to is `ConfigFile::normalize` above.
+    #[cfg(test)]
+    fn parse_or_reset(content: &str) -> (Self, bool) {
+        super_engine_daemon::config::parse_or_reset(content)
+    }
+
+    /// Load configuration from disk. See `super_engine_daemon::config::load`.
+    ///
+    /// Super Voice started fresh: the files Super STT and Super TTS wrote are
+    /// left where they are and never read.
+    #[must_use]
+    pub fn load() -> Self {
+        super_engine_daemon::config::load(&Self::get_config_path())
+    }
+
+    /// Save configuration to disk, atomically. Blocking (it `fsync`s); on the
+    /// async runtime call it via `persist_config()` / `spawn_blocking`, not
+    /// inline.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration directory cannot be created,
+    /// serialization fails, or the file cannot be written.
+    pub fn save(&self) -> anyhow::Result<()> {
+        super_engine_daemon::config::save(&Self::get_config_path(), self)
+    }
+
+    // Config mutators are PURE (Tier 3 #3): they mutate in-memory state only.
+    // The caller persists once via `persist_config()` (which writes off the
+    // async runtime), so there are no blocking `fs::write`s under the config
+    // lock and no double writes.
+
+    /// Set (`Some`) or clear (`None`) the device a model loads on. The value
+    /// is the normalized `cpu`/`gpu` preference; callers validate before
+    /// storing.
+    pub fn update_model_device(&mut self, source: &str, model: &str, device: Option<String>) {
+        match device {
+            Some(v) => {
+                self.backends
+                    .models
+                    .entry(source.to_string())
+                    .or_default()
+                    .entry(model.to_string())
+                    .or_default()
+                    .device = Some(v);
+            }
+            None => {
+                if let Some(models) = self.backends.models.get_mut(source)
+                    && let Some(settings) = models.get_mut(model)
+                {
+                    settings.device = None;
+                }
+            }
+        }
+    }
+
+    /// A model's own device, if it has one.
+    #[must_use]
+    pub fn model_device(&self, source: &str, model: &str) -> Option<&str> {
+        self.backends
+            .models
+            .get(source)
+            .and_then(|m| m.get(model))
+            .and_then(|s| s.device.as_deref())
+    }
+
+    /// Update audio theme.
+    pub fn update_audio_theme(&mut self, theme: AudioTheme) {
+        self.audio.theme = theme;
+    }
+
+    /// Update preferred model + source.
+    pub fn update_preferred_model(&mut self, model: String, source: String) {
+        // Selecting a model switches the stage on, exactly as
+        // `enable_post_processor` does for stage 2.
+        self.transcription.enabled = true;
+        self.transcription.preferred_model = model;
+        self.transcription.preferred_source = source;
+    }
+
+    /// Stop running stage 1, keeping the selection so re-loading it is one
+    /// call. The exact twin of [`Self::disable_post_processor`].
+    ///
+    /// This used to erase `preferred_model`/`preferred_source` outright — the
+    /// only way, before the stage had an `enabled` flag, to keep a restart from
+    /// reloading the model the user had just unloaded. The cost was that the
+    /// card came back empty and the app had to remember the pick itself. The
+    /// flag is what lets the selection stay.
+    pub fn disable_transcription(&mut self) {
+        self.transcription.enabled = false;
+    }
+
+    /// Set the active backend (its relative install dir) and drop the loaded
+    /// model preference — selecting a backend does not load a model.
+    pub fn update_active_backend(&mut self, dir: String) {
+        self.transcription.active_backend = Some(dir);
+        self.transcription.enabled = false;
+        self.transcription.preferred_model = String::new();
+    }
+
+    /// Repoint the active backend to `new_dir` without touching the loaded
+    /// model preference.
+    ///
+    /// Deliberately narrower than [`update_active_backend`]: that method
+    /// clears `preferred_model` because it models the
+    /// user *choosing a different backend*, where any previously loaded
+    /// model no longer applies. This method models an install-time directory
+    /// rename of the *same* backend — its identity, models, and selection are
+    /// unchanged, only the on-disk directory name moved. Using
+    /// `update_active_backend` here would silently wipe the user's model
+    /// choice as a side effect of an update. Do not merge the two.
+    pub fn rename_active_backend(&mut self, new_dir: String) {
+        self.transcription.active_backend = Some(new_dir);
+    }
+
+    /// Clear the active backend and the loaded-model preference (→ idle).
+    pub fn clear_active_backend(&mut self) {
+        self.transcription.active_backend = None;
+        self.transcription.enabled = false;
+        self.transcription.preferred_model = String::new();
+        self.transcription.preferred_source = String::new();
+    }
+
+    /// Select the post-processor model and whether it runs. Stored as the same
+    /// `(name, source)` pair every model selection uses.
+    pub fn enable_post_processor(&mut self, model: String, source: String) {
+        self.post_processor.enabled = true;
+        self.post_processor.model = model;
+        self.post_processor.source = source;
+    }
+
+    /// Stop running the post-processor, keeping the selection so re-enabling
+    /// is one call. The counterpart of `DELETE /active_model`, which unloads
+    /// the model but leaves its backend selected.
+    pub fn disable_post_processor(&mut self) {
+        self.post_processor.enabled = false;
+    }
+
+    /// Select the backend that provides the post-processor.
+    ///
+    /// Switching to a *different* backend drops the model with it: the name
+    /// belonged to the old backend and means nothing under the new one. This
+    /// mirrors `POST /active_backend`, which unloads the current model when the
+    /// backend changes.
+    pub fn select_post_processor_backend(&mut self, source: String) {
+        if self.post_processor.source != source {
+            self.post_processor.model.clear();
+            self.post_processor.enabled = false;
+        }
+        self.post_processor.source = source;
+    }
+
+    /// Deselect the backend and forget everything with it (→ nothing loaded).
+    pub fn clear_post_processor_backend(&mut self) {
+        self.post_processor = PostProcessorConfig::default();
+    }
+
+    /// Update master volume.
+    pub fn update_volume(&mut self, volume: u8) {
+        self.audio.volume = volume;
+    }
+
+    /// Set or clear a backend option override. An empty `value` clears the
+    /// override (the backend falls back to its manifest default).
+    pub fn update_backend_option(&mut self, source: String, name: String, value: String) {
+        if value.is_empty() {
+            if let Some(opts) = self.backends.options.get_mut(&source) {
+                opts.remove(&name);
+                if opts.is_empty() {
+                    self.backends.options.remove(&source);
+                }
+            }
+        } else {
+            self.backends
+                .options
+                .entry(source)
+                .or_default()
+                .insert(name, value);
+        }
+    }
+
+    /// The configured override for a backend option, if any.
+    #[must_use]
+    pub fn backend_option(&self, source: &str, name: &str) -> Option<&str> {
+        self.backends
+            .options
+            .get(source)
+            .and_then(|opts| opts.get(name))
+            .map(String::as_str)
+    }
+
+    /// Store a context, replacing one with the same id or appending it.
+    ///
+    /// Append rather than insert-sorted: the list order is the user's, and a
+    /// new context belongs at the end of it rather than wherever its id sorts.
+    pub fn upsert_context(&mut self, context: DictationContext) {
+        match self
+            .contexts
+            .items
+            .iter_mut()
+            .find(|existing| existing.id == context.id)
+        {
+            Some(existing) => *existing = context,
+            None => self.contexts.items.push(context),
+        }
+    }
+
+    /// Remove a context by id, reporting whether there was one.
+    ///
+    /// Clears the active selection when it named this one, so the daemon never
+    /// resolves to a context that no longer exists. A per-backend override
+    /// naming it is left alone — see [`Self::resolve_context`], which reads a
+    /// dangling override as "no context" without discarding what the user set,
+    /// so re-creating the context restores the pin.
+    pub fn remove_context(&mut self, id: &str) -> bool {
+        let before = self.contexts.items.len();
+        self.contexts.items.retain(|context| context.id != id);
+        if self.contexts.active.as_deref() == Some(id) {
+            self.contexts.active = None;
+        }
+        self.contexts.items.len() != before
+    }
+
+    /// One context by id.
+    #[must_use]
+    pub fn context(&self, id: &str) -> Option<&DictationContext> {
+        self.contexts.items.iter().find(|context| context.id == id)
+    }
+
+    /// Point the active selection at a context, or clear it.
+    pub fn set_active_context(&mut self, id: Option<String>) {
+        self.contexts.active = id;
+    }
+
+    /// The context in force by default, if any.
+    ///
+    /// `None` when nothing is selected *and* when the selection names a context
+    /// that is gone — a stored id is a preference, not a promise, and reading it
+    /// as nothing beats resolving to a context the user deleted.
+    #[must_use]
+    pub fn active_context(&self) -> Option<&DictationContext> {
+        self.context(self.contexts.active.as_deref()?)
+    }
+
+    /// Pin a backend to a context, follow the active one (`None`), or send it
+    /// no context at all (`Some("")`).
+    ///
+    /// The empty string is the "none" marker because it is never a valid id
+    /// (see [`DictationContext::is_valid_id`]), so it cannot collide with a
+    /// context the user made.
+    pub fn update_backend_context(&mut self, source: String, id: Option<String>) {
+        match id {
+            Some(id) => {
+                self.backends.context_override.insert(source, id);
+            }
+            None => {
+                self.backends.context_override.remove(&source);
+            }
+        }
+    }
+
+    /// What a backend was pinned to: a context id, `Some("")` for none at all,
+    /// or `None` to follow the active context.
+    #[must_use]
+    pub fn backend_context_override(&self, source: &str) -> Option<&str> {
+        self.backends
+            .context_override
+            .get(source)
+            .map(String::as_str)
+    }
+
+    /// The context a given backend should actually be sent.
+    ///
+    /// The whole resolution in one place, because it is the question every
+    /// injection site asks and the one place the three states have to agree:
+    /// an unpinned backend follows the active context, a pinned one takes what
+    /// it was pinned to, and one pinned to nothing gets nothing. A pin naming a
+    /// context that has since been deleted also gets nothing — deliberately not
+    /// falling back to the active one, since "use this specific context" and
+    /// "use whatever is active" are different instructions and silently
+    /// promoting the first to the second would send the user's coding
+    /// vocabulary to a backend they had pinned elsewhere.
+    #[must_use]
+    pub fn resolve_context(&self, source: &str) -> Option<&DictationContext> {
+        match self.backend_context_override(source) {
+            Some("") => None,
+            Some(id) => self.context(id),
+            None => self.active_context(),
+        }
+    }
+
+    pub fn update_primary_language(&mut self, language: Option<String>) {
+        self.primary_language = language;
+    }
+
+    #[must_use]
+    pub fn primary_language(&self) -> Option<&str> {
+        self.primary_language.as_deref()
+    }
+
+    /// Set (`Some`) or clear (`None`) the voice a synthesis model speaks in
+    /// by default.
+    pub fn update_model_voice(&mut self, source: String, model: String, voice: Option<String>) {
+        match voice {
+            Some(v) => {
+                self.backends
+                    .models
+                    .entry(source)
+                    .or_default()
+                    .entry(model)
+                    .or_default()
+                    .voice = Some(v);
+            }
+            None => {
+                if let Some(models) = self.backends.models.get_mut(&source)
+                    && let Some(settings) = models.get_mut(&model)
+                {
+                    settings.voice = None;
+                }
+            }
+        }
+    }
+
+    /// A synthesis model's own default voice, if it has one.
+    #[must_use]
+    pub fn model_voice(&self, source: &str, model: &str) -> Option<&str> {
+        self.backends
+            .models
+            .get(source)
+            .and_then(|m| m.get(model))
+            .and_then(|s| s.voice.as_deref())
+    }
+
+    /// Select the synthesis model, and the backend serving it.
+    pub fn update_synthesis_model(&mut self, model: String, source: String) {
+        self.synthesis.preferred_model = model;
+        self.synthesis.preferred_source = source;
+    }
+
+    /// Clear the synthesis model preference while keeping its backend
+    /// selected. Used by the unload path so a daemon restart stays idle
+    /// instead of reloading the unloaded model.
+    pub fn clear_synthesis_model(&mut self) {
+        self.synthesis.preferred_model = String::new();
+        self.synthesis.preferred_source = String::new();
+    }
+
+    /// Select the synthesis backend (its relative install dir) and drop the
+    /// model preference — selecting a backend does not load a model.
+    pub fn update_synthesis_backend(&mut self, dir: String) {
+        self.synthesis.active_backend = Some(dir);
+        self.synthesis.preferred_model = String::new();
+    }
+
+    /// Repoint the synthesis backend to `new_dir` without touching the model
+    /// preference: an install renamed the same backend's directory. See
+    /// [`rename_active_backend`](Self::rename_active_backend), the same
+    /// distinction for speech to text.
+    pub fn rename_synthesis_backend(&mut self, new_dir: String) {
+        self.synthesis.active_backend = Some(new_dir);
+    }
+
+    /// Clear the synthesis backend and its model preference (→ idle).
+    pub fn clear_synthesis_backend(&mut self) {
+        self.synthesis.active_backend = None;
+        self.synthesis.preferred_model = String::new();
+        self.synthesis.preferred_source = String::new();
+    }
+
+    /// Set (`Some`) or clear (`None`) a per-model language override.
+    pub fn update_model_language(
+        &mut self,
+        source: String,
+        model: String,
+        language: Option<String>,
+    ) {
+        match language {
+            Some(v) => {
+                self.backends
+                    .models
+                    .entry(source)
+                    .or_default()
+                    .entry(model)
+                    .or_default()
+                    .language = Some(v);
+            }
+            None => {
+                if let Some(models) = self.backends.models.get_mut(&source)
+                    && let Some(settings) = models.get_mut(&model)
+                {
+                    settings.language = None;
+                }
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn model_language(&self, source: &str, model: &str) -> Option<&str> {
+        self.backends
+            .models
+            .get(source)
+            .and_then(|m| m.get(model))
+            .and_then(|s| s.language.as_deref())
+    }
+}
+
+#[cfg(test)]
+mod language_config_tests {
+    use super::*;
+
+    #[test]
+    fn primary_and_model_language_round_trip_through_the_file() {
+        let mut cfg = DaemonConfig::default();
+        assert_eq!(cfg.primary_language(), None);
+
+        cfg.update_primary_language(Some("es-MX".to_string()));
+        cfg.update_model_language(
+            "github.com/x/whisper".to_string(),
+            "whisper-large".to_string(),
+            Some("fr".to_string()),
+        );
+
+        let written = super_engine_daemon::config::to_string(&cfg).expect("serialize");
+        let (back, reset) = DaemonConfig::parse_or_reset(&written);
+        assert!(!reset);
+
+        assert_eq!(back.primary_language(), Some("es-MX"));
+        assert_eq!(
+            back.model_language("github.com/x/whisper", "whisper-large"),
+            Some("fr")
+        );
+        assert_eq!(back.model_language("github.com/x/whisper", "absent"), None);
+    }
+
+    #[test]
+    fn clearing_model_language_sets_none() {
+        let mut cfg = DaemonConfig::default();
+        cfg.update_model_language("s".into(), "m".into(), Some("de".into()));
+        cfg.update_model_language("s".into(), "m".into(), None);
+        assert_eq!(cfg.model_language("s", "m"), None);
+    }
+}
+
+#[cfg(test)]
+mod device_config_tests {
+    use super::*;
+
+    /// A model's device is its own, and a sibling's is untouched.
+    #[test]
+    fn a_model_device_is_its_own() {
+        let mut cfg = DaemonConfig::default();
+        assert_eq!(cfg.model_device("s", "m"), None);
+
+        cfg.update_model_device("s", "m", Some("cpu".into()));
+        assert_eq!(cfg.model_device("s", "m"), Some("cpu"));
+        assert_eq!(
+            cfg.model_device("s", "other"),
+            None,
+            "a sibling is untouched"
+        );
+
+        cfg.update_model_device("s", "m", None);
+        assert_eq!(cfg.model_device("s", "m"), None);
+    }
+
+    /// Setting a device on a model that already has a language keeps the
+    /// language, and vice versa: both live in the same per-model row.
+    #[test]
+    fn device_and_language_share_the_model_row() {
+        let mut cfg = DaemonConfig::default();
+        cfg.update_model_language("s".into(), "m".into(), Some("fr".into()));
+        cfg.update_model_device("s", "m", Some("vulkan".into()));
+        assert_eq!(cfg.model_language("s", "m"), Some("fr"));
+        assert_eq!(cfg.model_device("s", "m"), Some("vulkan"));
+
+        let written = super_engine_daemon::config::to_string(&cfg).expect("serialize");
+        let (back, reset) = DaemonConfig::parse_or_reset(&written);
+        assert!(!reset);
+        assert_eq!(back.model_language("s", "m"), Some("fr"));
+        assert_eq!(back.model_device("s", "m"), Some("vulkan"));
+    }
+
+    /// A persisted per-model device is normalized on load: a framework is
+    /// kept, and anything else, `gpu` included, degrades to "no device of its
+    /// own" rather than resetting the whole config. A `device` section a
+    /// config written with the old global default still carries is ignored.
+    #[test]
+    fn persisted_model_devices_are_normalized_on_load() {
+        let content = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 80),
+    transcription: (
+        write_mode: true,
+        recording_stop_mode: "manual_only",
+        write_method: "ydotool",
+    ),
+    backends: (
+        models: {
+            "github.com/x/whisper": {
+                "large": (device: Some("cuda")),
+                "medium": (device: Some("gpu")),
+                "small": (device: Some("xpu"), language: Some("fr")),
+            },
+        },
+    ),
+)"#;
+        let (cfg, reset) = DaemonConfig::parse_or_reset(content);
+        assert!(!reset);
+        assert_eq!(
+            cfg.model_device("github.com/x/whisper", "large"),
+            Some("cuda")
+        );
+        assert_eq!(cfg.model_device("github.com/x/whisper", "medium"), None);
+        assert_eq!(cfg.model_device("github.com/x/whisper", "small"), None);
+        assert_eq!(
+            cfg.model_language("github.com/x/whisper", "small"),
+            Some("fr"),
+            "normalizing the device leaves the rest of the row alone"
+        );
+    }
+}
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;

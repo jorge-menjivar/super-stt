@@ -1,6 +1,6 @@
-# Contributing to Super STT
+# Contributing to Super Voice
 
-Thank you for your interest in contributing to Super STT! This document provides guidelines for contributing to the project.
+Thank you for your interest in contributing to Super Voice! This document provides guidelines for contributing to the project.
 
 ## Development Setup
 
@@ -54,14 +54,14 @@ puts every Wayland crate behind that same Apple gate, and has a
 `cfg(target_os = "windows")` table beside it. The settings app builds and
 runs on macOS once its libcosmic feature list drops `applet` and the
 Wayland/D-Bus features — see the two `[target.…]` tables in
-`super-stt-app/Cargo.toml`.
+`super-voice-app/Cargo.toml`.
 
 So a plain `cargo build`/`cargo test` over the workspace still fails on macOS
 by design — use the platform-scoped recipes, which select the members that do
 build:
 
 ```bash
-just install            # Super STT.app into /Applications; see below
+just install            # Super Voice.app into /Applications; see below
 just check-macos        # clippy over the members that build here
 just test-macos         # their tests
 just doctest-macos      # their doctests
@@ -79,18 +79,18 @@ right thing instead: they skip the parts that have no macOS counterpart.
 
 ##### The app bundle
 
-On macOS Super STT installs as one bundle, `Super STT.app`. `just
+On macOS Super Voice installs as one bundle, `Super Voice.app`. `just
 bundle-macos` builds it into `target/release/`, and `just install` (or
 `install-daemon`, `install-app`, `install-cli`: the bundle carries all of
 them) puts it in `/Applications`:
 
 ```
-Super STT.app/Contents/
-  Info.plist                      super-stt-app/resources/macos/Info.plist
-  MacOS/super-stt-app             the settings app, the bundle's executable
-  MacOS/super-stt-daemon
-  MacOS/super-stt-cli             `stt` on the PATH is a wrapper around this
-  Helpers/super-stt-cli           the same CLI, which the shortcut agent runs
+Super Voice.app/Contents/
+  Info.plist                      super-voice-app/resources/macos/Info.plist
+  MacOS/super-voice-app           the settings app, the bundle's executable
+  MacOS/super-voice-daemon
+  MacOS/super-voice-cli           `voice` on the PATH is a wrapper around this
+  Helpers/super-voice-cli         the same CLI, which the shortcut agent runs
   Library/LaunchAgents/           the daemon's and the shortcut's agents
   Resources/AppIcon.icns          rendered from the app's SVG
 ```
@@ -98,14 +98,14 @@ Super STT.app/Contents/
 The daemon and the CLI sit beside the app for two reasons. The daemon trusts
 a first-party client only when it is in the daemon's own directory. And an
 executable in `Contents/MacOS` has the app as its main bundle, which is how
-`stt service` finds the agents and how the daemon finds the app.
+`voice service` finds the agents and how the daemon finds the app.
 
 A main bundle is not enough for notifications, though: Notification Center
 serves only the bundle's own executable, and every request the daemon makes
 fails as "not allowed" whatever the user has chosen. So the daemon runs
-`super-stt-app --notify <title> <body>`, which sets up a windowless
-`NSApplication`, posts as Super STT and exits
-(`super-stt-app/src/core/app/macos/notifier.rs`). A bare daemon falls back
+`super-voice-app --notify <title> <body>`, which sets up a windowless
+`NSApplication`, posts as Super Voice and exits
+(`super-voice-app/src/core/app/macos/notifier.rs`). A bare daemon falls back
 to `osascript`, whose banners read "Script Editor".
 
 The main bundle is also why the shortcut listener runs from the copy in
@@ -118,11 +118,11 @@ the daemon under a name of its own, since the daemon binds a session to the
 path that obtained it.
 
 The agents are never copied into `~/Library/LaunchAgents`. They are
-registered with `SMAppService` (`super-stt-shared/src/launch_agents.rs`),
+registered with `SMAppService` (`super-voice-shared/src/launch_agents.rs`),
 which has launchd load them from the bundle and lists them under System
 Settings › General › Login Items. The app registers them whenever it opens
 and finds them unregistered, which is all a drag-and-drop install needs;
-`stt service register|unregister|status` does the same from a terminal, and
+`voice service register|unregister|status` does the same from a terminal, and
 the `start-`, `enable-` and `disable-daemon` recipes use it. It has to run as
 the CLI inside the bundle, since `SMAppService` finds the agents through the
 caller's bundle, and `launchctl bootstrap` cannot stand in for it: launchd
@@ -134,7 +134,7 @@ notifications through `osascript`.
 
 ##### The global shortcut
 
-`stt hotkey` (`super-stt-cli/src/hotkey.rs`) is the macOS stand-in for a
+`voice hotkey` (`super-voice-cli/src/hotkey.rs`) is the macOS stand-in for a
 desktop environment's custom shortcut, and the app bundle runs it as a
 second LaunchAgent. To try a change without reinstalling:
 
@@ -143,7 +143,7 @@ just run-cli hotkey --key ctrl+alt+shift+F19
 ```
 
 Pick a binding the installed listener is not already holding, or stop it
-first with `launchctl bootout gui/$(id -u)/ai.menjivar.super-stt.hotkey`.
+first with `launchctl bootout gui/$(id -u)/ai.menjivar.super-voice.hotkey`.
 
 Two constraints shape that module. The crate's macOS backend needs an event
 loop on the main thread, so `hotkey` is dispatched before `main` builds a
@@ -152,13 +152,12 @@ are handled strictly one at a time: `cmd_record` decides start-or-stop from
 the daemon's `busy` flag, so two presses in flight together would both see
 "idle" and both try to start.
 
-To exercise it without a daemon, a microphone or your Keychain, point it at a
-socket that does not exist and use the in-memory keyring — a press then logs
-`pressed` followed by a connection error:
+To exercise it without a daemon or a microphone, point it at a socket that
+does not exist — a press then logs `pressed` followed by a connection error:
 
 ```bash
-SUPER_STT_KEYRING_MOCK=1 RUST_LOG=super_stt_cli=debug \
-  ./target/debug/super-stt-cli --socket /tmp/nope.sock hotkey --key ctrl+alt+shift+F19
+RUST_LOG=super_stt_cli=debug \
+  ./target/debug/super-voice-cli --socket /tmp/nope.sock hotkey --key ctrl+alt+shift+F19
 ```
 
 ##### Sign your local builds, or macOS will forget every permission
@@ -166,7 +165,7 @@ SUPER_STT_KEYRING_MOCK=1 RUST_LOG=super_stt_cli=debug \
 Set this up before you spend an afternoon fighting permissions:
 
 ```bash
-export SUPER_STT_SIGN_IDENTITY="Super STT Dev"
+export SUPER_VOICE_SIGN_IDENTITY="Super Voice Dev"
 ```
 
 macOS ties Accessibility and Microphone grants, and Keychain ACLs, to a
@@ -175,14 +174,14 @@ ad-hoc, and an ad-hoc requirement is the content hash — so every `cargo
 build` produces what macOS considers a different program from the one you
 granted. What you actually see:
 
-- The Accessibility pane lists `super-stt-daemon` with its switch **on**
+- The Accessibility pane lists `super-voice-daemon` with its switch **on**
   while the daemon insists it is not allowed to control the keyboard. The row
   is keyed by path, so it survives; the requirement behind it does not.
 - The Keychain re-prompts no matter how many times you click Always Allow.
 - The daemon's `exe_changed` session revocation fires on every rebuild, and
   the client retries against a session it can never get back.
 
-None of that is a bug in Super STT, and none of it is fixable in code.
+None of that is a bug in Super Voice, and none of it is fixable in code.
 
 With the variable set, every `just run-daemon`, `just run-app`, `just
 run-cli`, `just build-*` and `just bundle-macos` re-signs its output with a
@@ -197,7 +196,7 @@ ad-hoc (what the linker gives you)
   designated => cdhash H"828ac4ed4175c86a6aa18c6b618d923a22eafca5"
 
 Developer ID
-  designated => identifier "ai.menjivar.super-stt-daemon"
+  designated => identifier "ai.menjivar.super-voice-daemon"
                 and anchor apple generic
                 and certificate leaf[subject.OU] = "8JDTBFQ3F5"
 ```
@@ -211,7 +210,7 @@ to be redone:
 
 ```bash
 security find-identity -v -p codesigning
-export SUPER_STT_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export SUPER_VOICE_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
 ```
 
 Without one, a self-signed certificate works for local development —
@@ -240,27 +239,27 @@ just audit              # security audit (cargo audit)
 
 ## Workspace layout
 
-Super STT is a Rust workspace:
+Super Voice is a Rust workspace:
 
 | Crate                      | Role                                                              |
 |----------------------------|------------------------------------------------------------------|
-| `super-stt-daemon`         | The engine: installs backends, loads models, serves the protocol |
-| `super-stt-app`            | Desktop settings & management app                                |
-| `super-stt-cli`            | The `stt` command-line client                                    |
-| `super-stt-consent`        | Consent-popup helper for the auth handshake                      |
-| `super-stt-shared`         | Common types, protocol definitions, validation                   |
-| `super-stt-registry-types` | Super STT's backend contract, on `super-engine-spec`             |
-| `super-stt-indexer`        | CI tool that builds the published registry `index.json`          |
+| `super-voice-daemon`         | The engine: installs backends, loads models, serves the protocol |
+| `super-voice-app`          | Desktop settings & management app                                |
+| `super-voice-cli`          | The `voice` command-line client, for both features               |
+| `super-voice-consent`        | Consent-popup helper for the auth handshake                      |
+| `super-voice-shared`         | Common types, protocol definitions, validation                   |
+| `super-voice-registry-types` | Super Voice's backend contract, on `super-engine-spec`         |
+| `super-voice-indexer`      | CI tool that builds the published registry `index.json`          |
 
-The code Super STT shares with Super TTS lives in
+The code Super Voice shares with the other super-libre products lives in
 [super-engine](https://github.com/super-libre/super-engine), pinned by rev in
 the root `Cargo.toml`. A fix to the backend manifest types, for example, goes
 there, and reaches this workspace when the pin is bumped. So does a fix to the
 daemon's session tokens, consent checks or route guards.
 
-The COSMIC panel applet is shared with Super TTS too, and lives in
+The COSMIC panel applet lives in
 [super-cosmic-applet](https://github.com/super-libre/super-cosmic-applet),
-which publishes its own releases. Super STT's releases don't carry it: the
+which publishes its own releases. Super Voice's releases don't carry it: the
 installer installs the applet's newest release for the channel. `just
 install-applet` builds and installs it from a checkout of that repo instead,
 `SHARED_APPLET_DIR` or else `../super-cosmic-applet`.
@@ -279,7 +278,7 @@ against live in [`docs/protocol/`](./docs/protocol/).
 
 - Never bypass the process authentication system
 - All network communication must validate inputs
-- Use the shared validation framework in `super-stt-shared/src/validation/`
+- Use the shared validation framework in `super-voice-shared/src/validation/`
 - Follow the development vs production security model (debug vs release builds)
 - Run security audits before proposing changes: `cargo audit`
 
@@ -320,7 +319,7 @@ If you discover a security vulnerability, please:
 
 ## License
 
-By contributing to Super STT, you agree that your contributions will be licensed under the GPL-3.0-only license.
+By contributing to Super Voice, you agree that your contributions will be licensed under the GPL-3.0-only license.
 
 ## Questions?
 
@@ -330,6 +329,6 @@ By contributing to Super STT, you agree that your contributions will be licensed
 
 ### Interface translations
 
-The settings app uses Fluent resources in `super-stt-app/i18n/<language>/super_stt_app.ftl`. Its explicit domain is `super_stt_app`; the older hyphenated English scaffold is not used. English is the fallback. Keep message IDs and variables aligned with English when adding a language, and route user-facing labels through `fl!` rather than changing enum wire values. Backend-provided names, descriptions and diagnostic details remain supplied by their backends.
+The settings app uses Fluent resources in `super-voice-app/i18n/<language>/super_voice_app.ftl`. Its explicit domain is `super_voice_app`; the older hyphenated English scaffold is not used. English is the fallback. Keep message IDs and variables aligned with English when adding a language, and route user-facing labels through `fl!` rather than changing enum wire values. Backend-provided names, descriptions and diagnostic details remain supplied by their backends.
 
-The app follows the desktop language; `LANGUAGE=fr super-stt-app` selects French when testing. Run `cargo test -p super-stt-app i18n::tests` to check regional French selection, English fallback, variable substitution and catalog parity.
+The app follows the desktop language; `LANGUAGE=fr super-voice-app` selects French when testing. Run `just test -p super-voice-app i18n::tests` to check regional French selection, English fallback, variable substitution and catalog parity.

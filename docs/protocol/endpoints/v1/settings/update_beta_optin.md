@@ -31,8 +31,8 @@ load, never to a wire `SET`.
 
 ```http
 POST /settings/update_beta_optin HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 {
@@ -70,8 +70,8 @@ Content-Type: application/json
 
 ```http
 GET /settings/update_beta_optin HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

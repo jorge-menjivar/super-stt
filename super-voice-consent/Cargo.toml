@@ -1,0 +1,35 @@
+[package]
+    name = "super-voice-consent"
+    version.workspace = true
+    authors.workspace = true
+    edition.workspace = true
+    description = "Floating libcosmic consent dialog spawned by the Super Voice daemon"
+    repository = "https://github.com/jorge-menjivar/super-stt"
+    license = "GPL-3.0-only"
+
+[[bin]]
+    name = "super-voice-consent"
+    path = "src/main.rs"
+
+[dependencies]
+    # Deliberately lean: no "default", so the helper skips a11y, dbus-config
+    # and x11 that the app pulls in. It's a short-lived dialog.
+    libcosmic = {
+        workspace = true,
+        features = [
+            "autosize",
+            "multi-window",
+            "tokio",
+            "wayland",
+            "winit",
+        ]
+    }
+    libc.workspace = true
+    log.workspace = true
+    super-voice-shared = { path = "../super-voice-shared" }
+
+[dev-dependencies]
+    libc.workspace = true
+
+[lints]
+    workspace = true

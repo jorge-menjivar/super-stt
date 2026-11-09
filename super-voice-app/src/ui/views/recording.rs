@@ -1,0 +1,203 @@
+// SPDX-License-Identifier: GPL-3.0-only
+use cosmic::Element;
+use cosmic::iced::widget::row;
+use cosmic::iced::{Alignment, Length};
+use cosmic::widget::{self, button, settings, text};
+use super_voice_shared::models::protocol::PreviewSource;
+use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+
+use super::common::error_banner;
+use crate::state::RecordingStatus;
+use crate::ui::messages::{
+    Message, PreviewTypingMessage, RecordingMessage, RecordingStopModeMessage,
+};
+
+/// Recording settings section: stop mode + preview typing
+fn settings_section(
+    recording_stop_mode: RecordingStopMode,
+    preview_typing_enabled: bool,
+) -> Element<'static, Message> {
+    let modes = [
+        RecordingStopMode::SilenceOnly,
+        RecordingStopMode::SilenceAndManual,
+        RecordingStopMode::ManualOnly,
+    ];
+    let mode_names: Vec<String> = modes
+        .iter()
+        .map(|m| crate::i18n::recording_stop_mode_name(*m))
+        .collect();
+    let selected_index = modes.iter().position(|m| *m == recording_stop_mode);
+
+    settings::section()
+        .title(crate::fl!("settings"))
+        .add(
+            settings::item::builder(crate::fl!("stop-mode"))
+                .description(crate::fl!("controls-how-to-stop-transcribing"))
+                .control(widget::dropdown(mode_names, selected_index, move |index| {
+                    Message::RecordingStopMode(RecordingStopModeMessage::Changed(modes[index]))
+                })),
+        )
+        .add(
+            settings::item::builder(crate::fl!("preview-typing"))
+                .description(crate::fl!(
+                    "shows-transcription-as-you-speak-experimental-may"
+                ))
+                .control(
+                    cosmic::widget::toggler(preview_typing_enabled)
+                        .on_toggle(|b| Message::PreviewTyping(PreviewTypingMessage::Toggled(b))),
+                ),
+        )
+        .into()
+}
+
+/// How much of the live preview to keep on screen. Sized to fill the row
+/// without wrapping at the default window width.
+const LIVE_LINE_CHARS: usize = 90;
+
+/// Height of the transcript box. Three lines of body text, so a short test
+/// transcript reads without scrolling and a long one still has a fixed size.
+const TRANSCRIPT_HEIGHT: f32 = 66.0;
+
+/// The last `max_chars` characters of `text`, prefixed with an ellipsis when
+/// something was dropped. Counts chars, not bytes — a multibyte transcript must
+/// not be sliced mid-character.
+fn live_tail(text: &str, max_chars: usize) -> String {
+    let total = text.chars().count();
+    if total <= max_chars {
+        return text.to_string();
+    }
+    let tail: String = text.chars().skip(total - max_chars).collect();
+    format!("\u{2026}{tail}")
+}
+
+/// What the Live line's caption says the text is, for each kind of preview.
+///
+/// A window preview restarts every few seconds, which looks like text being
+/// lost unless the line says it only ever shows the last few seconds.
+fn live_caption(source: PreviewSource) -> String {
+    match source {
+        PreviewSource::Stream => crate::fl!("so-far"),
+        PreviewSource::Window => crate::fl!("last-few-seconds"),
+    }
+}
+
+/// Test recording section: record button, audio level, live preview line,
+/// transcription output
+fn test_section<'a>(
+    recording_status: &'a RecordingStatus,
+    transcription_text: &'a str,
+    preview_text: &'a str,
+    preview_source: Option<PreviewSource>,
+    audio_level: f32,
+    is_speech_detected: bool,
+) -> Element<'a, Message> {
+    let recording_text = match recording_status {
+        RecordingStatus::Recording => {
+            if is_speech_detected {
+                crate::fl!("speech")
+            } else {
+                crate::fl!("silence")
+            }
+        }
+        RecordingStatus::Idle => crate::fl!("not-recording"),
+    };
+
+    let record_button = match recording_status {
+        RecordingStatus::Recording => button::destructive(crate::fl!("stop-recording"))
+            .on_press(Message::Recording(RecordingMessage::StopRecording)),
+        RecordingStatus::Idle => button::suggested(crate::fl!("test-recording"))
+            .on_press(Message::Recording(RecordingMessage::StartRecording)),
+    };
+
+    let audio_widget = row![
+        record_button,
+        widget::determinate_linear(audio_level.max(if audio_level > 0.0 { 0.1 } else { 0.0 }))
+            .width(Length::Fill),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(10);
+
+    // One line that keeps changing: the newest incremental text, held to a
+    // single row so the section doesn't reflow on every update. The tail is
+    // the part worth showing either way, but what the text *is* depends on
+    // the model — a stream preview is the whole take so far, a window preview
+    // only the last few seconds — so the daemon's `source` becomes a caption.
+    let live_widget = {
+        let content = if preview_text.is_empty() {
+            "\u{2014}".to_string()
+        } else {
+            live_tail(preview_text, LIVE_LINE_CHARS)
+        };
+        let mut line = row![].spacing(8).align_y(Alignment::Center);
+        if let Some(caption) = preview_source.map(live_caption) {
+            line = line.push(text::caption(caption));
+        }
+        line = line.push(
+            text::body(content)
+                .wrapping(cosmic::iced::widget::text::Wrapping::None)
+                .width(Length::Fill),
+        );
+        widget::container(line).width(Length::Fill).clip(true)
+    };
+
+    // The transcript has no label, so it goes into the section as a plain list
+    // item. Routing it through `flex_item("", ...)` instead gave the empty
+    // label a flex slot of its own, which grew the row and left the text
+    // sitting against the bottom of it with a gap above.
+    let transcription_widget = {
+        let content = if transcription_text.is_empty() {
+            crate::fl!("transcriptions-will-appear-here-after-test-recordings")
+        } else {
+            transcription_text.to_string()
+        };
+
+        widget::scrollable(text::body(content).width(Length::Fill))
+            .height(Length::Fixed(TRANSCRIPT_HEIGHT))
+            .width(Length::Fill)
+    };
+
+    settings::section()
+        .title(crate::fl!("test"))
+        .add(settings::item(
+            crate::fl!("status"),
+            text::body(recording_text),
+        ))
+        .add(settings::flex_item(crate::fl!("audio-level"), audio_widget))
+        .add(settings::flex_item(crate::fl!("live"), live_widget))
+        .add(transcription_widget)
+        .into()
+}
+
+/// Recording page: settings + test recording
+// reason: one parameter per piece of view state the page renders; grouping them would only add indirection.
+#[allow(clippy::too_many_arguments)]
+pub fn page<'a>(
+    recording_stop_mode: RecordingStopMode,
+    preview_typing_enabled: bool,
+    recording_status: &'a RecordingStatus,
+    transcription_text: &'a str,
+    preview_text: &'a str,
+    preview_source: Option<PreviewSource>,
+    audio_level: f32,
+    is_speech_detected: bool,
+    action_error: Option<&'a str>,
+) -> Element<'a, Message> {
+    let mut blocks = Vec::new();
+    if let Some(message) = action_error {
+        blocks.push(error_banner(message));
+    }
+    blocks.push(settings_section(
+        recording_stop_mode,
+        preview_typing_enabled,
+    ));
+    blocks.push(test_section(
+        recording_status,
+        transcription_text,
+        preview_text,
+        preview_source,
+        audio_level,
+        is_speech_detected,
+    ));
+
+    settings::view_column(blocks).into()
+}

@@ -1,0 +1,459 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+mod preview;
+#[cfg(feature = "wasm-backends")]
+mod realtime;
+mod transcribe;
+
+use crate::daemon::types::SuperSTTDaemon;
+use crate::output::notice;
+use crate::{audio::recorder::DaemonAudioRecorder, output::typer::Typer};
+use anyhow::{Context, Result};
+use chrono::Utc;
+use log::{error, info, warn};
+use std::collections::VecDeque;
+use std::sync::Arc;
+use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::theme::AudioTheme;
+use tokio::time::Instant;
+
+/// `client_id` reported on every daemon-mic lifecycle event.
+const CLIENT_ID: &str = "daemon_recorder";
+
+/// Outputs from the recorder-spawn phase, consumed by the loop and collect phases.
+struct RecordingSession {
+    pub(super) recorder_handle: tokio::task::JoinHandle<Result<Vec<f32>>>,
+    pub(super) model_processing_interval: std::time::Duration,
+    // Whether previews are forced onto the model at all
+    // (`ModelDefinition::force_preview_support`). Off unless its manifest
+    // turns it on: every sliding-window pass is a transcription Phase 4
+    // repeats, and for an online model a billed one.
+    pub(super) force_preview_support: bool,
+    // Whether previews are typed on screen during this recording: the
+    // request's override, or the daemon-wide default when it gave none.
+    // Resolved once at the start so a settings change mid-recording neither
+    // affects the take in progress nor gets reverted when it ends.
+    pub(super) preview_typing: bool,
+    pub(super) actually_typed: Arc<std::sync::Mutex<String>>,
+    // Shared with the recorder's ring buffer (`get_audio_buffer_ref`), which is
+    // a `parking_lot::Mutex` (Tier 3 #5).
+    pub(super) preview_buffer: Arc<parking_lot::Mutex<VecDeque<f32>>>,
+    // Shared with the recorder's speech-detection state. `recording` is a
+    // one-way per-take latch: false after the take means no speech was ever
+    // detected, so there is nothing to transcribe.
+    pub(super) speech_state: Arc<parking_lot::Mutex<crate::audio::state::RecordingState>>,
+    pub(super) device_sample_rate: u32,
+    pub(super) start_time: Instant,
+}
+
+/// The take's audio for the final decode: cut back to its last speech.
+///
+/// A take's last moments are the stop key and a breath, and a batch model
+/// invents words for them ("…everything works. you"). The cut is judged by the
+/// same adaptive threshold the recorder used to hear the speech. A streamed
+/// take never comes here: its backend heard the audio live.
+fn audio_for_final_decode<'a>(
+    full_audio_data: &'a [f32],
+    speech_state: &parking_lot::Mutex<crate::audio::state::RecordingState>,
+) -> &'a [f32] {
+    let threshold = speech_state.lock().get_speech_threshold();
+    let audio = crate::audio::trim::trim_trailing_silence(full_audio_data, 16000, threshold);
+    if audio.len() < full_audio_data.len() {
+        info!(
+            "Trimmed {} ms of trailing non-speech before the final decode",
+            (full_audio_data.len() - audio.len()) * 1000 / 16000
+        );
+    }
+    audio
+}
+
+impl SuperSTTDaemon {
+    /// Surface a recording failure through the user's configured channel.
+    ///
+    /// The failure is always reported to the caller through the response and
+    /// the `error` event; this is the additional human-facing notice. It fires
+    /// for every recording, write mode or not — the trigger is the failure, not
+    /// the output mode.
+    async fn surface_failure(
+        &self,
+        typer: &mut Typer,
+        failure: &notice::Failure,
+        write_mode: bool,
+    ) {
+        let method = self.config.read().await.notification_method;
+        let mut notifier = self.notifier.lock().await;
+        crate::output::notification::deliver(method, &mut notifier, typer, failure, write_mode)
+            .await;
+    }
+
+    /// Tell the user the keyboard could not be set up. See
+    /// [`crate::output::notification::deliver_without_keyboard`] for why this
+    /// cannot go through [`Self::surface_failure`].
+    pub(crate) async fn surface_keyboard_unavailable(&self, detail: &str) {
+        let method = self.config.read().await.notification_method;
+        let mut notifier = self.notifier.lock().await;
+        crate::output::notification::deliver_without_keyboard(
+            method,
+            &mut notifier,
+            &notice::Failure::keyboard_unavailable(detail),
+        )
+        .await;
+    }
+
+    /// Internal record handling implementation
+    pub async fn handle_record_internal(
+        &self,
+        typer: &mut Typer,
+        write_mode: bool,
+        stop_mode: RecordingStopMode,
+        preview_typing: bool,
+        cue_theme: AudioTheme,
+        request_language: Option<&str>,
+    ) -> DaemonResponse {
+        // Check if already busy - prevent multiple simultaneous recordings
+        {
+            let busy_guard = self.busy.read().await;
+            if *busy_guard {
+                warn!("Recording request rejected - already recording");
+                return DaemonResponse::error_with_code(
+                    ErrorCode::RecordingInProgress,
+                    "Recording already in progress. Please wait for current recording to complete.",
+                );
+            }
+        }
+
+        // Fail before capture. With no model loaded the cycle can only end in a
+        // discarded recording, so starting the mic would cost the user a full
+        // take — beeps, speech, and all — to learn nothing. In write mode the
+        // reason lands in the field they are actually looking at.
+        if self.model.read().await.is_none() {
+            warn!("Recording request rejected - no model loaded");
+            self.surface_failure(typer, &notice::Failure::no_model_loaded(), write_mode)
+                .await;
+            return DaemonResponse::error_with_code(
+                ErrorCode::ModelNotLoaded,
+                "No model is loaded. Load a model and try again.",
+            );
+        }
+
+        // Wait for recording to complete and return the transcription.
+        match self
+            .record_and_transcribe(
+                typer,
+                write_mode,
+                stop_mode,
+                preview_typing,
+                cue_theme,
+                request_language,
+            )
+            .await
+        {
+            // Cycle completed successfully (empty text = no speech, still success).
+            Ok(Ok(transcription)) => {
+                if transcription.trim().is_empty() {
+                    info!("🎤 Recording completed - No speech detected");
+                    DaemonResponse::success()
+                        .with_message("Recording completed - No speech detected".to_string())
+                        .with_transcription(String::new())
+                } else {
+                    info!("🎤 Recording completed: '{transcription}'");
+                    DaemonResponse::success()
+                        .with_message("Recording completed successfully".to_string())
+                        .with_transcription(transcription)
+                }
+            }
+            // Capture/transcription failed after the cycle started. `finalize`
+            // already cleared `busy` and emitted `transcribing_stopped`; surface
+            // it as an error so the HTTP layer emits the `error` SSE event
+            // instead of a `done` with error text as the transcription.
+            Ok(Err(detail)) => {
+                warn!("🎤 Recording cycle failed: {detail}");
+                DaemonResponse::error(&detail)
+            }
+            // Setup failed before capture began: no `recording_started`/state(true)
+            // went out, so just release the busy guard the setup claimed.
+            Err(e) => {
+                error!("🎤 Recording setup failed: {e}");
+                {
+                    let mut guard = self.busy.write().await;
+                    *guard = false;
+                }
+                self.surface_failure(
+                    typer,
+                    &notice::Failure::could_not_start_recording(&format!("{e:#}")),
+                    write_mode,
+                )
+                .await;
+                DaemonResponse::error(&format!("Recording failed: {e}"))
+            }
+        }
+    }
+
+    /// Record audio directly in daemon and transcribe
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if recording setup fails, audio processing fails,
+    /// or if model execution encounters a fatal error.
+    ///
+    /// # Panics
+    ///
+    /// Panics if internal locks (e.g., audio theme or buffers) are poisoned.
+    /// Run one record→transcribe cycle. The outer `Result` is a *setup* failure
+    /// (before capture began, busy not yet consumed by a cycle); the inner
+    /// `Result` is the cycle outcome — `Ok(text)` on success, `Err(detail)` when
+    /// capture or transcription failed after the cycle started. A failure is
+    /// never returned as `Ok` success text and is never typed into the user's
+    /// window (finalize already reported it via `transcribing_stopped`).
+    pub async fn record_and_transcribe(
+        &self,
+        typer: &mut Typer,
+        write_mode: bool,
+        stop_mode: RecordingStopMode,
+        preview_typing: bool,
+        cue_theme: AudioTheme,
+        request_language: Option<&str>,
+    ) -> Result<Result<String, String>> {
+        info!("Starting direct audio recording in daemon with simplified architecture");
+
+        // Phase 1: spawn the recorder. `busy` is set inside setup.
+        let (session, capture_started) = self
+            .spawn_recorder(write_mode, stop_mode, preview_typing, cue_theme)
+            .await?;
+        // Announce capture once the microphone is capturing, not when the
+        // recorder is spawned: the start cue plays first, and a widget lit up
+        // during it invites speech the take never hears. A recorder that fails
+        // first drops the sender; the event still goes out, so the
+        // `recording_stopped` Phase 3 sends for the failure follows a start.
+        let _ = capture_started.await;
+        self.emit_recording_started(write_mode);
+
+        // Phase 2: stream incremental transcripts while capturing.
+        //
+        // A realtime model streams through one live session for the whole take,
+        // which also produces the final transcript — so Phase 4 is skipped when
+        // it succeeds. Every other model has no incremental output, so previews
+        // are simulated by re-transcribing a sliding window — when the model
+        // asks for it (`session.force_preview_support`); otherwise the loop only waits for
+        // capture to end.
+        #[cfg(feature = "wasm-backends")]
+        let streamed = self
+            .run_realtime_stream_loop(&session, typer, write_mode, request_language)
+            .await;
+        #[cfg(not(feature = "wasm-backends"))]
+        let streamed: Option<String> = None;
+        if streamed.is_none() {
+            self.run_preview_loop(&session, typer, write_mode, request_language)
+                .await;
+        }
+
+        // Cloned out before `collect_and_clear_preview` consumes the session.
+        let speech_state = Arc::clone(&session.speech_state);
+
+        // Phase 3: await the recorder; the mic releases here.
+        let full_audio_data = match self
+            .collect_and_clear_preview(session, typer, write_mode)
+            .await
+        {
+            Ok(data) => {
+                self.emit_mic_stopped();
+                data
+            }
+            Err(e) => {
+                // The recorder failed after capture started. Tell widgets the
+                // mic is done, then close the cycle as a failed transcription —
+                // surfaced as an inner `Err`, never as success text.
+                self.emit_mic_stopped();
+                warn!("Recording capture failed: {e}");
+                self.finalize_recording_session("", false, Some(e.to_string()))
+                    .await;
+                self.surface_failure(
+                    typer,
+                    &notice::Failure::recording_failed(&format!("{e:#}")),
+                    write_mode,
+                )
+                .await;
+                return Ok(Err(format!("recording error: {e}")));
+            }
+        };
+
+        // Nothing was spoken. Stopping a recording without speaking is not a
+        // failure, so the backend is never asked to transcribe silence and
+        // nothing is typed — the cycle simply completes with no text.
+        if !speech_state.lock().recording {
+            info!("🎤 No speech detected during the take; skipping transcription");
+            if write_mode {
+                // Typed nothing, but the per-recording transcript state still
+                // has to be cleared or it feeds the next recording's window
+                // stitching.
+                typer.reset_after_recording();
+            }
+            // `transcribing_started` is deliberately NOT emitted: decode never
+            // begins. `finalize_recording_session` still emits `final_stt` with
+            // empty text plus the closing `transcribing_stopped`, which is what
+            // the events contract requires (docs/protocol/endpoints/v1/events.md).
+            self.finalize_recording_session("", true, None).await;
+            return Ok(Ok(String::new()));
+        }
+
+        // Phase 4: final transcription. A realtime session already produced it
+        // while capturing; the event pair is still emitted so the events
+        // contract sees a `transcribing_started` for every
+        // `transcribing_stopped` `finalize_recording_session` sends.
+        self.emit_transcribing_started();
+        let raw_transcript = match streamed {
+            Some(text) => text,
+            None => match self
+                .transcribe_final(
+                    audio_for_final_decode(&full_audio_data, &speech_state),
+                    request_language,
+                )
+                .await
+            {
+                Ok(text) => text,
+                Err(e) => {
+                    // A transcription failure is not typed into the user's
+                    // focused window (the old code typed "[STT error: …]"):
+                    // finalize reports it via `transcribing_stopped`, and it
+                    // surfaces as an inner `Err` so the HTTP layer emits the
+                    // contract's `error` event.
+                    warn!("Final transcription failed: {e}");
+                    self.finalize_recording_session("", false, Some(e.to_string()))
+                        .await;
+                    // `e.origin` is why the notice can say whether the daemon or
+                    // the backend is the one refusing; the chain form is the
+                    // reason it shows.
+                    self.surface_failure(
+                        typer,
+                        &notice::Failure::transcription_failed(e.origin, &e.detail()),
+                        write_mode,
+                    )
+                    .await;
+                    return Ok(Err(format!("STT error: {e}")));
+                }
+            },
+        };
+
+        // Best-effort cleanup of the transcript before it is typed. Both
+        // producers converge here on purpose: a streamed take never calls
+        // `transcribe_final`, so keeping this inside that call made a realtime
+        // model the one model that typed raw text while post-processing was
+        // enabled. Previews stay raw by design — only the final transcript
+        // is rewritten.
+        let language = self.resolve_active_language(request_language).await;
+        let transcription_result = self.post_process_final(raw_transcript, language).await;
+
+        // Phase 5: type the final transcript.
+        if write_mode {
+            info!("Writing transcription via {}", typer.write_method_name());
+            typer.process_final_text(&transcription_result).await;
+        }
+
+        // Phase 6: finalize the cycle.
+        self.finalize_recording_session(&transcription_result, true, None)
+            .await;
+
+        Ok(Ok(transcription_result))
+    }
+
+    /// Set up recording state and create audio recorder
+    pub(super) async fn setup_recording_session(
+        &self,
+        _write_mode: bool,
+        cue_theme: AudioTheme,
+    ) -> Result<DaemonAudioRecorder> {
+        // Double-check busy state and set atomically
+        {
+            let mut busy_guard = self.busy.write().await;
+            if *busy_guard {
+                error!("Recording already in progress - rejecting duplicate request");
+                return Err(anyhow::anyhow!("Recording already in progress"));
+            }
+            // Set busy state to true atomically
+            *busy_guard = true;
+        }
+
+        // Create audio recorder with this take's cue theme and the current
+        // volume. Construction runs the cpal cold-start (default host/output
+        // device/config) and a `std::thread::sleep` device-verification spin —
+        // up to ~1.6s of real blocking on a cold start. Run it on a blocking
+        // thread so it doesn't park a runtime worker and stall concurrent
+        // SSE/event/status handling exactly when the user starts talking
+        // (audit 2 Tier 1 #3).
+        let current_volume = self.get_volume_f32();
+        let mut recorder = tokio::task::spawn_blocking(move || {
+            DaemonAudioRecorder::new_with_theme(cue_theme, current_volume)
+        })
+        .await
+        .context("Audio recorder construction task panicked")?
+        .context("Failed to create audio recorder")?;
+
+        // Initialize the recorder for threaded operation
+        recorder.prepare_for_threaded_recording();
+
+        Ok(recorder)
+    }
+
+    /// Emit "mic capture ended" on the widget bus the instant audio capture
+    /// stops (Phase 3), independent of the transcription that follows so
+    /// widgets drop the live visualization immediately. `busy` stays true.
+    pub(super) fn emit_mic_stopped(&self) {
+        self.events
+            .publish_recording_stopped(crate::daemon::events::RecordingStoppedEvent {
+                client_id: CLIENT_ID.to_string(),
+                timestamp: Utc::now().to_rfc3339(),
+            });
+        self.broadcast_recording_state_change(false);
+    }
+
+    /// Emit "model decode has begun" (Phase 4).
+    pub(super) fn emit_transcribing_started(&self) {
+        self.events
+            .publish_transcribing_started(crate::daemon::events::TranscribingStartedEvent {
+                client_id: CLIENT_ID.to_string(),
+                timestamp: Utc::now().to_rfc3339(),
+            });
+    }
+
+    /// Emit "capture has begun" (Phase 1): the mic state and `recording_started`.
+    fn emit_recording_started(&self, write_mode: bool) {
+        self.broadcast_recording_state_change(true);
+        self.events
+            .publish_recording_started(crate::daemon::events::RecordingStartedEvent {
+                client_id: CLIENT_ID.to_string(),
+                timestamp: Utc::now().to_rfc3339(),
+                write_mode,
+            });
+    }
+
+    /// Finalize the cycle: clear the busy guard and emit the transcription
+    /// result + the transcribing-stopped lifecycle event. Called exactly
+    /// once per cycle that reached the transcription phase.
+    pub(super) async fn finalize_recording_session(
+        &self,
+        final_text: &str,
+        transcription_success: bool,
+        error: Option<String>,
+    ) {
+        {
+            let mut busy_guard = self.busy.write().await;
+            *busy_guard = false;
+        }
+
+        // Final transcription text — success only; failures are conveyed by
+        // transcribing_stopped's `error`. Widgets need `global_transcriptions`.
+        if transcription_success {
+            self.events.publish_final_stt(final_text.to_string(), 1.0);
+        }
+
+        // Transcribing phase ended (widget bus).
+        self.events
+            .publish_transcribing_stopped(crate::daemon::events::TranscribingStoppedEvent {
+                client_id: CLIENT_ID.to_string(),
+                timestamp: Utc::now().to_rfc3339(),
+                transcription_success,
+                error,
+            });
+    }
+}

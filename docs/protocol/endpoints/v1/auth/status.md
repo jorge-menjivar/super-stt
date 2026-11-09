@@ -19,8 +19,8 @@ negative response does **not** trigger consent.
 
 ```http
 GET /auth/status HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200, valid token):**

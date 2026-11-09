@@ -1,0 +1,336 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! End-to-end smoke tests for the new HTTP daemon protocol.
+//!
+//! Spawns the `super-voice-daemon` binary against a temp `XDG_RUNTIME_DIR`
+//! with `SUPER_VOICE_AUTO_APPROVE=1` (so the consent popup is bypassed and
+//! `/auth/request` auto-approves), then
+//! exercises every endpoint via the shared `http_client` module:
+//!
+//! - `POST /auth/request` mints a session token (auto-approved).
+//! - `GET  /ping` / `GET /status` succeed with the token.
+//! - `POST /stt/transcribe` / `POST /stt/transcribe/stop` succeed with the token.
+//! - Requests without a token (or with a bogus token) get `401 invalid_session`.
+//!
+//! Run with:
+//!
+//! ```bash
+//! cargo test -p super-stt --test http_smoke -- --nocapture
+//! ```
+
+mod common;
+
+use common::TestDaemon;
+
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+use super_voice_shared::daemon::http_client::{self, TranscribeOptions};
+
+const APP_NAME: &str = "super-stt smoke test";
+const SCOPES: &[&str] = &["transcribe", "status"];
+
+/// The socket is left where the daemon puts it when told nothing, under a
+/// runtime directory of the test's own, so these tests cover that default too.
+async fn start_daemon() -> (TestDaemon, PathBuf) {
+    let daemon = common::daemon("smoke").default_socket().start().await;
+    let socket = daemon.socket().to_path_buf();
+    (daemon, socket)
+}
+
+#[tokio::test]
+async fn http_endpoints_respond() {
+    let (_guard, http_socket) = start_daemon().await;
+
+    // --- POST /auth/request (auto-approved by SUPER_VOICE_AUTO_APPROVE=1) ---
+    let auth = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
+        .await
+        .expect("auth_request should succeed under SUPER_VOICE_AUTO_APPROVE=1");
+    assert!(!auth.session_token.is_empty(), "token should not be empty");
+    assert!(
+        SCOPES
+            .iter()
+            .all(|s| auth.scopes.iter().any(|g| g.as_str() == *s)),
+        "granted scopes {:?} should cover requested {SCOPES:?}",
+        auth.scopes
+    );
+    let token = auth.session_token;
+
+    // --- GET /ping with the token ---
+    let pong = http_client::ping(http_socket.clone(), &token)
+        .await
+        .expect("ping should succeed");
+    assert!(
+        pong.to_lowercase().contains("pong") || pong.to_lowercase().contains("running"),
+        "unexpected ping response: {pong}"
+    );
+
+    // --- GET /auth/status with the token: reports back the scope +
+    // expiry without spawning a popup or extending the expiry. ---
+    let status_info = http_client::auth_status(http_socket.clone(), &token)
+        .await
+        .expect("auth_status should succeed");
+    assert_eq!(status_info.status, "success");
+    assert!(
+        SCOPES
+            .iter()
+            .all(|s| status_info.scopes.iter().any(|g| g.as_str() == *s)),
+        "auth_status scopes {:?} should cover {SCOPES:?}",
+        status_info.scopes
+    );
+    assert!(
+        !status_info.expires_at.is_empty(),
+        "auth_status should report an expires_at"
+    );
+
+    // --- GET /auth/status with a bogus token: should be rejected
+    // with `invalid_session` (same shape as any other 401). ---
+    let bad_status = http_client::auth_status(http_socket.clone(), "not-a-real-token").await;
+    assert!(
+        bad_status.is_err(),
+        "auth_status with bogus token should fail"
+    );
+    let err = bad_status.unwrap_err();
+    assert!(
+        err.is_invalid_session(),
+        "expected InvalidSession variant, got: {err}"
+    );
+
+    // --- GET /status with the token ---
+    let status = http_client::status(http_socket.clone(), &token)
+        .await
+        .expect("status should succeed");
+    assert_eq!(status.status, "success", "status response: {status:?}");
+    // With no backends installed (hermetic test), the daemon is idle and has
+    // no current model; with a backend it would report one. Either is valid.
+    // Each feature reports its own part.
+    for (feature, part) in [("stt", &status.stt), ("tts", &status.tts)] {
+        assert_eq!(
+            part.device, "unknown",
+            "{feature}: nothing is loaded: {status:?}"
+        );
+        assert!(
+            !part.model_loaded,
+            "{feature}: nothing is loaded: {status:?}"
+        );
+        // `busy` is the affordance the CLI uses to decide start-vs-stop on
+        // the toggle hotkey — must always be present.
+        assert!(
+            !part.busy,
+            "{feature}: a freshly-booted daemon is not busy: {status:?}"
+        );
+    }
+
+    // --- POST /stt/transcribe (fire-and-forget) ---
+    // Hermetic test harness => no backend installed => no model loaded, so
+    // the daemon now fails fast with `409 model_not_loaded` before
+    // committing to `202` (see docs/protocol/endpoints/v1/transcribe.md).
+    // Tolerate either that typed error or (should a backend somehow be
+    // present) a normal `202`/`200` response.
+    let result = http_client::transcribe(
+        http_socket.clone(),
+        &token,
+        TranscribeOptions {
+            wait: false,
+            write_mode: false,
+            stop_mode: Some("manual_only".to_string()),
+            stream_realtime: false,
+        },
+    )
+    .await;
+    match result {
+        Ok(resp) => assert!(
+            resp.status == "success" || resp.status == "error",
+            "transcribe returned unknown status: {:?}",
+            resp.status
+        ),
+        Err(e) => assert!(
+            e.to_string().contains("model_not_loaded"),
+            "expected model_not_loaded, got: {e}"
+        ),
+    }
+
+    // --- POST /stt/transcribe/stop ---
+    let resp = http_client::transcribe_stop(http_socket.clone(), &token)
+        .await
+        .expect("transcribe/stop should respond");
+    assert!(
+        resp.status == "success" || resp.status == "error",
+        "transcribe/stop returned unknown status: {:?}",
+        resp.status
+    );
+
+    // --- Requests without a token must be rejected ---
+    // Build a raw request directly so we can omit the Authorization header.
+    let unauthorized = http_client::ping(http_socket.clone(), "not-a-real-token").await;
+    assert!(
+        unauthorized.is_err(),
+        "ping with bogus token should be rejected (got Ok: {unauthorized:?})"
+    );
+    let err = unauthorized.unwrap_err();
+    assert!(
+        err.is_invalid_session(),
+        "expected InvalidSession variant, got: {err}"
+    );
+}
+
+/// `POST /v1/stt/transcribe/stop` must be idempotent when no recording is
+/// in progress — it returns `200` with `message: "No recording in
+/// progress"`. The CLI's record subcommand relies on this when the
+/// user presses the hotkey twice while audio failed to start: the
+/// second press hits the stop endpoint and must NOT start a fresh
+/// recording.
+///
+/// Regression for the daemon refactor where `transcribe_stop` was
+/// briefly dispatching `record` unconditionally — which would START
+/// a recording when called against an idle daemon.
+#[tokio::test]
+async fn transcribe_stop_idempotent_when_idle() {
+    let (_guard, http_socket) = start_daemon().await;
+    let auth = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
+        .await
+        .expect("auth_request should succeed");
+    let token = auth.session_token;
+
+    // Idle daemon: status must report busy=false BEFORE we
+    // call /stt/transcribe/stop.
+    let pre = http_client::status(http_socket.clone(), &token)
+        .await
+        .expect("status before stop");
+    assert!(
+        !pre.stt.busy,
+        "test setup: daemon must be idle before calling transcribe_stop"
+    );
+
+    // First stop call: nothing to stop.
+    let resp = http_client::transcribe_stop(http_socket.clone(), &token)
+        .await
+        .expect("transcribe/stop should respond");
+    assert_eq!(resp.status, "success", "got: {resp:?}");
+    assert_eq!(
+        resp.message.as_deref(),
+        Some("No recording in progress"),
+        "got message: {:?}",
+        resp.message
+    );
+
+    // Idempotent: calling again must still report idle, NOT have
+    // accidentally kicked off a recording.
+    let resp = http_client::transcribe_stop(http_socket.clone(), &token)
+        .await
+        .expect("transcribe/stop should respond a second time");
+    assert_eq!(resp.message.as_deref(), Some("No recording in progress"));
+
+    // Confirm via /status that no recording was started.
+    let post = http_client::status(http_socket.clone(), &token)
+        .await
+        .expect("status after stop");
+    assert!(
+        !post.stt.busy,
+        "transcribe_stop on idle daemon must not start a recording; got {post:?}"
+    );
+}
+
+/// Pins the documented `/v1/stt/transcribe` second-call behavior: when a
+/// daemon-mic capture is already in progress, the daemon rejects
+/// the second call with `409 recording_in_progress` and `http_client`
+/// surfaces that JSON body as a typed error (NOT as "transcribe
+/// stream ended unexpectedly" — that was the symptom of an earlier
+/// bug where the SSE parser ate a non-SSE response body).
+///
+/// We can't reliably exercise the recording pipeline in CI (no audio
+/// device, no display server), so the assertion is the
+/// negative-space property: both calls must surface a well-formed
+/// outcome — either success/error `DaemonResponse`, or
+/// `HttpError::Other("recording_in_progress")` — and never the
+/// broken-stream message.
+#[tokio::test]
+async fn second_transcribe_during_active_recording_surfaces_recording_in_progress() {
+    let (_guard, http_socket) = start_daemon().await;
+
+    let auth = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
+        .await
+        .expect("auth_request should succeed");
+    let token = auth.session_token;
+
+    let opts = || TranscribeOptions {
+        wait: true,
+        write_mode: false,
+        stop_mode: Some("manual_only".to_string()),
+        stream_realtime: false,
+    };
+
+    // Fire the two transcribe calls concurrently. When audio works
+    // (real machine), call A reaches the recording path and B sees
+    // `409 recording_in_progress`. When audio is unavailable (CI),
+    // A errors out fast and B may also start fresh and error — both
+    // outcomes are valid; the assertion is just that neither call
+    // gets the broken-stream message.
+    let socket_a = http_socket.clone();
+    let token_a = token.clone();
+    let a = tokio::spawn(async move { http_client::transcribe(socket_a, &token_a, opts()).await });
+
+    // Slight stagger so A almost certainly reaches the daemon first.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let b = http_client::transcribe(http_socket.clone(), &token, opts()).await;
+    let a = a.await.expect("transcribe A task should not panic");
+
+    for (label, result) in [("A", a), ("B", b)] {
+        match result {
+            Ok(resp) => {
+                assert_ne!(
+                    resp.message.as_deref(),
+                    Some("transcribe stream ended unexpectedly"),
+                    "transcribe {label}: SSE-broken message escaped; got {resp:?}"
+                );
+            }
+            Err(e) => {
+                // Typed errors are fine — they're how non-2xx
+                // responses (including `409 recording_in_progress`)
+                // surface to the caller now. What's NOT fine is the
+                // EOF-without-event symptom of the old bug.
+                let msg = e.to_string();
+                assert!(
+                    !msg.contains("transcribe stream ended unexpectedly"),
+                    "transcribe {label} surfaced broken-stream message in error: {msg}"
+                );
+            }
+        }
+    }
+}
+
+/// A recording that types nothing answers without building a keyboard. This
+/// daemon's `XDG_RUNTIME_DIR` hides the compositor, so a keyboard here would
+/// come from the portal, which puts a permission dialog on the developer's
+/// screen and holds the request for 10 s waiting on it.
+#[tokio::test]
+async fn a_recording_without_write_mode_does_not_wait_on_a_keyboard() {
+    let (_guard, http_socket) = start_daemon().await;
+    let token = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
+        .await
+        .expect("auth_request should succeed")
+        .session_token;
+
+    let started = Instant::now();
+    let result = http_client::transcribe(
+        http_socket.clone(),
+        &token,
+        TranscribeOptions {
+            wait: false,
+            write_mode: false,
+            stop_mode: Some("manual_only".to_string()),
+            stream_realtime: false,
+        },
+    )
+    .await;
+    let elapsed = started.elapsed();
+
+    let err = result.expect_err("no model is loaded");
+    assert!(
+        err.to_string().contains("model_not_loaded"),
+        "expected model_not_loaded, got: {err}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "took {elapsed:?}: the daemon built a keyboard for a recording that types nothing"
+    );
+}

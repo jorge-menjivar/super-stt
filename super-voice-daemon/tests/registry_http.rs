@@ -1,0 +1,884 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! HTTP integration tests for the `/registry/*` endpoints.
+//!
+//! These tests spawn the real `super-voice-daemon` binary and wire it to a
+//! mockito HTTP server in place of the live registry, so the whole surface is
+//! exercised without reaching the published catalog:
+//!
+//! - `GET  /v1/registry/backend/list`  — index fetched, compat evaluated, list
+//!   returned.
+//! - `POST /v1/registry/backend/install` + `GET /v1/events` — hash mismatch
+//!   in the install pipeline surfaces as a `registry.install.failed` SSE
+//!   event.
+//! - `POST /v1/registry/backend/refresh` — re-fetch, and what an unreachable
+//!   catalog answers.
+//! - `POST /v1/registry/backend/preview` — resolve a source without
+//!   installing it, and the ways a body can be malformed.
+//! - `POST /v1/registry/backend/update` — the version lookup's failure modes,
+//!   and that a failed update releases its inflight marker.
+
+mod common;
+
+use common::{Method, StatusCode, TestDaemon};
+use hyper::Request;
+
+use http_body_util::{BodyExt, Empty};
+use hyper::body::Bytes;
+use hyper::client::conn::http1::handshake;
+use std::path::PathBuf;
+use std::time::Duration;
+use super_voice_shared::daemon::http_client;
+use super_voice_shared::registry::RegistryListResponse;
+use tokio::net::UnixStream;
+
+// ---------- harness ----------------------------------------------------------
+
+/// Spawn a hermetic daemon configured to use `registry_url` instead of the
+/// live registry URL. Returns the guard and the Unix socket path.
+async fn start_daemon_with_registry(registry_url: &str) -> (TestDaemon, PathBuf) {
+    start_daemon_with_registry_and_backend(registry_url, None).await
+}
+
+/// As [`start_daemon_with_registry`], but with `installed` seeded into the
+/// daemon's backends directory before it starts.
+///
+/// Seeding has to happen before the spawn: the daemon discovers backends once,
+/// during `post_init`, so a manifest written afterwards is not found until the
+/// next start.
+async fn start_daemon_with_registry_and_backend(
+    registry_url: &str,
+    installed: Option<&str>,
+) -> (TestDaemon, PathBuf) {
+    let daemon = common::daemon("registry").env("SUPER_VOICE_REGISTRY_URL", registry_url);
+    if let Some(manifest) = installed {
+        common::BackendFixture {
+            dir_name: "fixture-openai",
+            manifest,
+            entrypoint: "openai.wasm",
+            // Discovery reads the manifest and never execs the entrypoint, and
+            // nothing here asks the backend to run — only what version of it is
+            // installed.
+            component: None,
+        }
+        .install(&daemon.home().data);
+    }
+    let daemon = daemon.start().await;
+    let socket = daemon.socket().to_path_buf();
+    (daemon, socket)
+}
+
+// ---------- raw HTTP helpers -------------------------------------------------
+
+async fn raw_get_json(
+    socket_path: &PathBuf,
+    path: &str,
+    token: &str,
+) -> (StatusCode, serde_json::Value) {
+    common::request(socket_path, Method::GET, path, Some(token), None).await
+}
+
+async fn raw_post_json(
+    socket_path: &PathBuf,
+    path: &str,
+    token: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    common::request(socket_path, Method::POST, path, Some(token), Some(&body)).await
+}
+
+/// Open `GET /v1/events?topics=registry_install` and return the raw response
+/// body stream, which the caller drives line-by-line.
+///
+/// Returns `(sender_handle, raw_bytes_receiver)` so the caller can drive
+/// the connection without blocking. We return the body bytes one
+/// chunk at a time via the collected stream.
+///
+/// Because SSE streams are infinite, we open the connection here and hand
+/// back an `hyper::Response` whose body can be read with `.collect()` after
+/// a timeout — we abort it via `tokio::time::timeout` at the call site.
+async fn open_sse_stream(
+    socket_path: &PathBuf,
+    token: &str,
+) -> hyper::Response<hyper::body::Incoming> {
+    let stream = UnixStream::connect(socket_path).await.expect("connect sse");
+    let io = hyper_util::rt::TokioIo::new(stream);
+    let (mut sender, conn) = handshake::<_, Empty<Bytes>>(io)
+        .await
+        .expect("handshake sse");
+    // Drive the connection in the background — it outlives the request.
+    tokio::spawn(async move {
+        let _ = conn.await;
+    });
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("http://voice.local/v1/events?topics=registry_install")
+        .header("host", "voice.local")
+        .header("authorization", format!("Bearer {token}"))
+        .header("accept", "text/event-stream")
+        .body(Empty::<Bytes>::new())
+        .expect("build sse req");
+
+    sender.send_request(req).await.expect("send sse req")
+}
+
+// ---------- SSE frame parser -------------------------------------------------
+
+/// Parse SSE frames from a byte buffer. Returns all `data:` payloads whose
+/// corresponding `event:` line equals `event_name`. Each item is the raw JSON
+/// string from the `data:` line.
+fn extract_sse_data_for_event(raw: &[u8], event_name: &str) -> Vec<String> {
+    let text = String::from_utf8_lossy(raw);
+    let mut out = Vec::new();
+    // SSE frames are separated by blank lines. Within a frame, fields are
+    // `key: value\n` lines. We collect (event, data) pairs.
+    for frame in text.split("\n\n") {
+        let mut cur_event: Option<&str> = None;
+        let mut cur_data: Option<&str> = None;
+        for line in frame.lines() {
+            if let Some(rest) = line.strip_prefix("event: ") {
+                cur_event = Some(rest.trim());
+            } else if let Some(rest) = line.strip_prefix("data: ") {
+                cur_data = Some(rest.trim());
+            }
+        }
+        if cur_event == Some(event_name)
+            && let Some(d) = cur_data
+        {
+            out.push(d.to_owned());
+        }
+    }
+    out
+}
+
+// ---------- index.json fixture -----------------------------------------------
+
+/// Minimal `index.json` with a single wasm backend whose `source` is
+/// `"github.com/x/y"` and `id` is `"openai"`.
+fn fixture_index_wasm(asset_url: &str) -> String {
+    serde_json::json!({
+        "schema_version": 1,
+        "generated_at": "2026-01-01T00:00:00Z",
+        "min_client": "0.0.0",
+        "backends": [{
+            "id": "openai",
+            "source": "github.com/x/y",
+            "version": "1.0.0",
+            "tag": "v1.0.0",
+            "name": "OpenAI",
+            "description": null,
+            "license": "Apache-2.0",
+            "kind": "wasm",
+            "contract": "v4",
+            "entrypoint": "openai.wasm",
+            "allowed_hosts": ["api.openai.com"],
+            "online": true,
+            "supports_gpu": false,
+            "supports_cpu": true,
+            "models": [],
+            "secrets": [],
+            "options": [],
+            "assets": {
+                "wasm": {
+                    "url": asset_url,
+                    "size": 4,
+                    "sha256": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                }
+            }
+        }]
+    })
+    .to_string()
+}
+
+/// Same fixture but with a correct sha256 for the wasm-magic bytes
+/// `\x00\x61\x73\x6d`, at whatever version the caller wants to publish.
+///
+/// The version is a parameter because `/registry/backend/update` decides what
+/// to do by comparing it against the version installed on disk: newer is an
+/// update, equal (or older) is a no-op. Both answers need the same catalog with
+/// a different number in it.
+fn fixture_index_at_version(asset_url: &str, version: &str) -> String {
+    serde_json::json!({
+        "schema_version": 1,
+        "generated_at": "2026-01-01T00:00:00Z",
+        "min_client": "0.0.0",
+        "backends": [{
+            "id": "openai",
+            "source": "github.com/x/y",
+            "version": version,
+            "tag": format!("v{version}"),
+            "name": "OpenAI",
+            "description": null,
+            "license": "Apache-2.0",
+            "kind": "wasm",
+            "contract": "v4",
+            "entrypoint": "openai.wasm",
+            "allowed_hosts": ["api.openai.com"],
+            "online": true,
+            "supports_gpu": false,
+            "supports_cpu": true,
+            "models": [],
+            "secrets": [],
+            "options": [],
+            "assets": {
+                "wasm": {
+                    "url": asset_url,
+                    "size": 4,
+                    "sha256": "cd5d4935a48c0672cb06407bb443bc0087aff947c6b864bac886982c73b3027f"
+                }
+            }
+        }]
+    })
+    .to_string()
+}
+
+/// The catalog at `1.0.0` — the same version [`FIXTURE_BACKEND_MANIFEST`]
+/// installs, so tests that are not about updating see nothing on offer.
+fn fixture_index_correct_hash(asset_url: &str) -> String {
+    fixture_index_at_version(asset_url, "1.0.0")
+}
+
+/// The catalog's `github.com/x/y` as an *installed* backend at `1.0.0`.
+///
+/// `source` is what ties the two together: it is the key
+/// `/registry/backend/update` matches on to find the installed version, and the
+/// same key `/registry/backend/list` uses to decide `update_available`. A
+/// fixture whose `source` does not match the index entry is simply a different
+/// backend, and every update against it answers `not_installed`.
+const FIXTURE_BACKEND_MANIFEST: &str = r#"[backend]
+source = "github.com/x/y"
+name = "OpenAI"
+version = "1.0.0"
+kind = "wasm"
+entrypoint = "openai.wasm"
+contract = "v4"
+id = "app.test.y"
+product = "super-voice"
+description = "Installed at 1.0.0, so the catalog can offer something newer."
+license = "Apache-2.0"
+
+[network]
+allowed_hosts = ["api.openai.com"]
+
+[[models]]
+name = "whisper-1"
+role = "transcription"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["none"]
+"#;
+
+// ---------- tests -------------------------------------------------------------
+
+/// `GET /v1/registry/backend/list` returns the list from the mockito index, with
+/// `compatibility.compatible == true` for a wasm backend (wasm is always
+/// compatible on any host) and `id == "openai"`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn list_registry_backends_returns_compat() {
+    let mut mock_server = mockito::Server::new_async().await;
+
+    // Serve the index with a placeholder asset URL (not fetched by this test).
+    let asset_url = format!("{}/openai.wasm", mock_server.url());
+    let index_body = fixture_index_correct_hash(&asset_url);
+
+    let _mock = mock_server
+        .mock("GET", "/index.json")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(index_body)
+        .create_async()
+        .await;
+
+    let registry_url = format!("{}/index.json", mock_server.url());
+    let (_guard, http_socket) = start_daemon_with_registry(&registry_url).await;
+
+    // Mint a settings-scope token (registry endpoints require settings scope).
+    let auth = http_client::auth_request(http_socket.clone(), "registry-test", &["settings"])
+        .await
+        .expect("auth_request should succeed under SUPER_VOICE_AUTO_APPROVE=1");
+    let token = auth.session_token;
+
+    let (status, body) = raw_get_json(&http_socket, "/registry/backend/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "GET /registry/backend/list: {body}");
+
+    let list: RegistryListResponse =
+        serde_json::from_value(body.clone()).expect("body should decode as RegistryListResponse");
+
+    assert_eq!(
+        list.backends.len(),
+        1,
+        "expected 1 backend; got {}: {body}",
+        list.backends.len()
+    );
+    let backend = &list.backends[0];
+    assert_eq!(backend.id, "openai", "id mismatch: {backend:?}");
+    assert!(
+        backend.compatibility.compatible,
+        "wasm backend must always be compatible; got: {backend:?}"
+    );
+}
+
+/// `POST /v1/registry/backend/install` with a backend whose index entry
+/// advertises a wrong sha256 surfaces a `registry.install.failed` SSE event
+/// with `error == "asset_hash_mismatch"`.
+///
+/// Setup:
+/// - Mockito index server hosts the index with `sha256 = "deadbeef..."`.
+/// - Mockito asset server serves the 4-byte wasm magic `\x00\x61\x73\x6d`.
+///   Real sha256 of those bytes: `cd5d4935...`, not `deadbeef...`.
+/// - Daemon is pointed at the index server via `SUPER_VOICE_REGISTRY_URL`.
+/// - Subscribe to `/events?topics=registry_install` before posting the
+///   install so no events are missed.
+/// - POST returns `202 Accepted` with an `install_id`.
+/// - Drain the SSE stream (with a timeout) looking for
+///   `registry.install.failed` carrying `error == "asset_hash_mismatch"`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn install_pipeline_rejects_hash_mismatch() {
+    // Two independent mockito servers: one for the registry index, one for
+    // the asset download. Using separate servers avoids path-collision issues
+    // when both would otherwise share the same `mockito::Server`.
+    let mut index_server = mockito::Server::new_async().await;
+    let mut asset_server = mockito::Server::new_async().await;
+
+    // Asset server: serve 4-byte wasm magic (sha256 ≠ "deadbeef...").
+    let wasm_magic: &[u8] = &[0x00, 0x61, 0x73, 0x6d];
+    let _asset_mock = asset_server
+        .mock("GET", "/openai.wasm")
+        .with_status(200)
+        .with_header("content-type", "application/wasm")
+        .with_body(wasm_magic)
+        .create_async()
+        .await;
+
+    // Index server: advertise deadbeef sha256 so the pipeline must fail.
+    let asset_url = format!("{}/openai.wasm", asset_server.url());
+    let index_body = fixture_index_wasm(&asset_url);
+    let _index_mock = index_server
+        .mock("GET", "/index.json")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(index_body)
+        .create_async()
+        .await;
+
+    let registry_url = format!("{}/index.json", index_server.url());
+    let (_guard, http_socket) = start_daemon_with_registry(&registry_url).await;
+
+    // `settings` for the install POST, `daemon_status` for the SSE topic:
+    // `/events` scopes per *topic*, and `registry_install` sits under
+    // `daemon_status`. A settings-only token opens the stream with a `403`,
+    // which is what this test did while it was `#[ignore]`d.
+    let auth = http_client::auth_request(
+        http_socket.clone(),
+        "registry-test",
+        &["settings", "daemon_status"],
+    )
+    .await
+    .expect("auth_request should succeed");
+    let token = auth.session_token;
+
+    // Open SSE subscription BEFORE posting the install so no events are
+    // lost between the POST returning and the consumer subscribing.
+    let sse_resp = open_sse_stream(&http_socket, &token).await;
+    assert_eq!(
+        sse_resp.status(),
+        StatusCode::OK,
+        "SSE stream must open successfully"
+    );
+
+    // POST install.
+    let (status, body) = raw_post_json(
+        &http_socket,
+        "/registry/backend/install",
+        &token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "install POST must return 202; got {status}: {body}"
+    );
+    let install_id = body["install_id"]
+        .as_str()
+        .expect("response must contain install_id")
+        .to_owned();
+    assert!(!install_id.is_empty(), "install_id must not be empty");
+
+    // Read the stream frame by frame until the failed event shows up.
+    //
+    // Not `collect()`: an SSE stream does not end, so collecting the whole
+    // body never resolves, and a `timeout` around it drops the future along
+    // with every byte it had buffered — leaving nothing to match on. This
+    // test reported "frames seen: []" for exactly that reason the first time
+    // it was run after its `#[ignore]` came off.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut sse_bytes: Vec<u8> = Vec::new();
+    let mut body = sse_resp.into_body();
+
+    let failed = loop {
+        if let Some(found) = extract_sse_data_for_event(&sse_bytes, "registry_install")
+            .into_iter()
+            .find(|data| {
+                let v: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
+                v["type"] == "registry.install.failed" && v["install_id"] == install_id.as_str()
+            })
+        {
+            break found;
+        }
+
+        match tokio::time::timeout_at(deadline, body.frame()).await {
+            Ok(Some(Ok(frame))) => {
+                if let Some(chunk) = frame.data_ref() {
+                    sse_bytes.extend_from_slice(chunk);
+                }
+            }
+            Ok(Some(Err(e))) => panic!("SSE stream errored while waiting: {e}"),
+            Ok(None) => panic!(
+                "SSE stream closed before registry.install.failed for \
+                 install_id={install_id}; saw: {:?}",
+                String::from_utf8_lossy(&sse_bytes)
+            ),
+            Err(_) => panic!(
+                "no registry.install.failed event for install_id={install_id} within 30 s; \
+                 saw: {:?}",
+                String::from_utf8_lossy(&sse_bytes)
+            ),
+        }
+    };
+
+    let v: serde_json::Value = serde_json::from_str(&failed).expect("parse failed frame");
+    assert_eq!(
+        v["error"], "asset_hash_mismatch",
+        "wrong error variant: {v}"
+    );
+    assert_eq!(v["source"], "github.com/x/y", "wrong source in event: {v}");
+}
+
+/// A POST carrying no body at all — no `content-type`, no bytes. The
+/// `Option<Json<_>>` extractor answers `None` for this, which the handlers
+/// turn into `missing_body`; sending `{}` instead would take a different
+/// branch, so this needs its own helper.
+async fn raw_post_no_body(
+    socket_path: &PathBuf,
+    path: &str,
+    token: &str,
+) -> (StatusCode, serde_json::Value) {
+    common::request(socket_path, Method::POST, path, Some(token), None).await
+}
+
+/// A daemon wired to a mock catalog, and everything a test needs to talk to it.
+///
+/// The two `mockito` handles are held, not used: a `Mock` de-registers itself
+/// when dropped and a `ServerGuard` shuts the server down, so letting either go
+/// early pulls the catalog out from under a daemon that is still running. That
+/// is invisible to anything reading a *cached* index and fatal to
+/// `/registry/backend/refresh`, whose whole job is to fetch it again.
+///
+/// Field order is drop order: the daemon stops before the server it talks to.
+struct CatalogFixture {
+    _daemon: TestDaemon,
+    socket: PathBuf,
+    token: String,
+    _index_mock: mockito::Mock,
+    _server: mockito::ServerGuard,
+}
+
+/// Spawn a daemon against an index server serving `fixture_index_correct_hash`,
+/// and mint a `settings`-scope token. The shape every test below opens with.
+async fn start_with_catalog() -> CatalogFixture {
+    let mut server = mockito::Server::new_async().await;
+    let asset_url = format!("{}/openai.wasm", server.url());
+    let index_mock = server
+        .mock("GET", "/index.json")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(fixture_index_correct_hash(&asset_url))
+        // The daemon fetches at startup and again on every refresh.
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let registry_url = format!("{}/index.json", server.url());
+    let (daemon, socket) = start_daemon_with_registry(&registry_url).await;
+
+    let token = http_client::auth_request(socket.clone(), "registry-test", &["settings"])
+        .await
+        .expect("auth_request should succeed under SUPER_VOICE_AUTO_APPROVE=1")
+        .session_token;
+
+    CatalogFixture {
+        _daemon: daemon,
+        socket,
+        token,
+        _index_mock: index_mock,
+        _server: server,
+    }
+}
+
+// ---------- POST /registry/backend/refresh -----------------------------------
+
+/// The catalog is re-fetched and the count reported back. `backend_count` is
+/// what a client renders after a publish, so it has to be the count of the
+/// index just fetched rather than of whatever was cached.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn refresh_reports_the_refetched_catalog() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_no_body(sock, "/registry/backend/refresh", token).await;
+    assert_eq!(status, StatusCode::OK, "POST refresh: {body}");
+    assert_eq!(body["backend_count"], 1, "{body}");
+    assert_eq!(body["schema_version"], 1, "{body}");
+    assert_eq!(body["generated_at"], "2026-01-01T00:00:00Z", "{body}");
+}
+
+/// An index the daemon cannot fetch is `503 registry_unavailable`, not a `500`
+/// and not an empty `200`: "the catalog is unreachable" and "the catalog is
+/// empty" are different answers and a client shows different things for them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn refresh_reports_an_unreachable_catalog_as_unavailable() {
+    let mut index_server = mockito::Server::new_async().await;
+    let _index_mock = index_server
+        .mock("GET", "/index.json")
+        .with_status(500)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let registry_url = format!("{}/index.json", index_server.url());
+    let (_guard, sock) = start_daemon_with_registry(&registry_url).await;
+    let token = http_client::auth_request(sock.clone(), "registry-test", &["settings"])
+        .await
+        .expect("auth_request")
+        .session_token;
+
+    let (status, body) = raw_post_no_body(&sock, "/registry/backend/refresh", &token).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["error"], "registry_unavailable", "{body}");
+    // transport.md: every error carries the machine-readable code too.
+    assert_eq!(body["error_code"], "registry_unavailable", "{body}");
+}
+
+// ---------- POST /registry/backend/preview -----------------------------------
+
+/// A catalog `source` is described in the same shape `/registry/backend/list`
+/// returns, and nothing is installed as a result — the whole point of the
+/// endpoint being that it runs before the install's point of no return.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn preview_describes_a_catalog_source_without_installing_it() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/preview",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "POST preview: {body}");
+
+    assert_eq!(body["backend"]["id"], "openai", "{body}");
+    assert_eq!(body["backend"]["source"], "github.com/x/y", "{body}");
+    assert!(
+        body["backend"]["compatibility"]["compatible"]
+            .as_bool()
+            .unwrap_or(false),
+        "a wasm backend is compatible on any host: {body}"
+    );
+    // A catalog source is the trusted route, so no `unverified_source`.
+    assert!(body["warning"].is_null(), "{body}");
+    assert!(
+        body["backend"]["installed_version"].is_null(),
+        "nothing is installed on a fresh daemon: {body}"
+    );
+
+    // Preview writes nothing: the backend list still holds no install, and a
+    // second identical call answers the same. (Two calls are one call.)
+    let (status, again) = raw_post_json(
+        sock,
+        "/registry/backend/preview",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "second preview: {again}");
+    assert_eq!(again, body, "preview is not idempotent");
+}
+
+/// `source` / `repo_url` / `local_path` are exactly-one-of. Neither zero nor
+/// two is a request the daemon can act on, and both have to say so before any
+/// resolution happens.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn preview_requires_exactly_one_source_field() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    for body in [
+        serde_json::json!({}),
+        serde_json::json!({ "source": "github.com/x/y", "repo_url": "github.com/a/b" }),
+    ] {
+        let (status, resp) =
+            raw_post_json(sock, "/registry/backend/preview", &token, body.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "for {body}: {resp}");
+        assert_eq!(resp["error"], "bad_request", "for {body}: {resp}");
+        assert_eq!(
+            resp["message"], "provide exactly one of source, repo_url, local_path",
+            "for {body}: {resp}"
+        );
+    }
+
+    // No body at all is its own code — the client sent nothing, rather than
+    // sending something the daemon could not act on.
+    let (status, resp) = raw_post_no_body(sock, "/registry/backend/preview", token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{resp}");
+    assert_eq!(resp["error"], "missing_body", "{resp}");
+}
+
+/// A `source` the catalog does not carry is `404`, not an empty `200`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn preview_404s_for_a_source_the_catalog_lacks() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/preview",
+        token,
+        serde_json::json!({ "source": "github.com/nobody/nothing" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"], "not_found", "{body}");
+}
+
+// ---------- POST /registry/backend/update ------------------------------------
+
+/// Updating something that was never installed is `not_installed`, and that is
+/// deliberately a different code from `not_found`: the first says "install it
+/// first", the second says "no such backend anywhere". A client that conflated
+/// them would offer the wrong recovery.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_distinguishes_not_installed_from_not_found() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    // In the catalog, absent from disk.
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/update",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"], "not_installed", "{body}");
+
+    // In neither.
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/update",
+        token,
+        serde_json::json!({ "source": "github.com/nobody/nothing" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"], "not_found", "{body}");
+}
+
+/// The inflight marker must be released on every early return, not just the
+/// happy path. If a failed update left its marker behind, the next attempt for
+/// that source would answer `409 update_in_progress` forever — recoverable only
+/// by restarting the daemon. Two failing updates in a row is what catches it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_releases_its_inflight_marker_when_it_fails() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    for attempt in 1..=2 {
+        let (status, body) = raw_post_json(
+            &sock,
+            "/registry/backend/update",
+            token,
+            serde_json::json!({ "source": "github.com/x/y" }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "attempt {attempt} should still be not_installed, not a stuck 409: {body}"
+        );
+        assert_eq!(body["error"], "not_installed", "attempt {attempt}: {body}");
+    }
+}
+
+/// `POST /registry/backend/update` with no body is `missing_body`, and is
+/// rejected before the inflight marker is taken — there is no source to key it
+/// on yet.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_rejects_a_missing_body() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_no_body(sock, "/registry/backend/update", token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"], "missing_body", "{body}");
+}
+
+/// A daemon with `github.com/x/y` installed at `1.0.0` and a catalog offering
+/// `catalog_version`. Returns the fixture plus the asset server, which has to
+/// outlive the daemon that may fetch from it.
+async fn start_with_installed_backend(catalog_version: &str) -> CatalogFixture {
+    let mut server = mockito::Server::new_async().await;
+    let asset_url = format!("{}/openai.wasm", server.url());
+    let index_mock = server
+        .mock("GET", "/index.json")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(fixture_index_at_version(&asset_url, catalog_version))
+        .expect_at_least(1)
+        .create_async()
+        .await;
+    // The update pipeline downloads in the background once the endpoint has
+    // answered. Serve the bytes the catalog's sha256 is for, so the fetch that
+    // follows the `202` is a real one rather than a connection error in the log.
+    let _asset_mock = server
+        .mock("GET", "/openai.wasm")
+        .with_status(200)
+        .with_header("content-type", "application/wasm")
+        .with_body(&[0x00, 0x61, 0x73, 0x6d][..])
+        .create_async()
+        .await;
+
+    let registry_url = format!("{}/index.json", server.url());
+    let (daemon, socket) =
+        start_daemon_with_registry_and_backend(&registry_url, Some(FIXTURE_BACKEND_MANIFEST)).await;
+
+    let token = http_client::auth_request(socket.clone(), "registry-test", &["settings"])
+        .await
+        .expect("auth_request should succeed under SUPER_VOICE_AUTO_APPROVE=1")
+        .session_token;
+
+    CatalogFixture {
+        _daemon: daemon,
+        socket,
+        token,
+        _index_mock: index_mock,
+        _server: server,
+    }
+}
+
+/// The catalog offering something newer than what is on disk: the update is
+/// accepted, `202`, with an `install_id` to follow and both versions named so a
+/// client can say what it is upgrading from and to.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_accepts_a_newer_catalog_version() {
+    let fx = start_with_installed_backend("2.0.0").await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/update",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    assert_eq!(body["from_version"], "1.0.0", "{body}");
+    assert_eq!(body["to_version"], "2.0.0", "{body}");
+    assert_eq!(body["noop"], false, "{body}");
+    assert!(
+        body["install_id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("ins_")),
+        "an accepted update must name the install to follow: {body}"
+    );
+}
+
+/// The catalog offering the version already installed is a no-op: `200`, not
+/// `202`, and no `install_id` — there is nothing to follow.
+///
+/// The interesting half is that `noop` is a *refusal to act*, not just a label.
+/// A client that polled an `install_id` here would wait forever.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_is_a_noop_when_the_catalog_matches_what_is_installed() {
+    let fx = start_with_installed_backend("1.0.0").await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/update",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a no-op is not an accepted job: {body}"
+    );
+    assert_eq!(body["noop"], true, "{body}");
+    assert_eq!(body["from_version"], "1.0.0", "{body}");
+    assert_eq!(body["to_version"], "1.0.0", "{body}");
+    assert!(body["install_id"].is_null(), "{body}");
+}
+
+/// A catalog *older* than what is installed is refused the same way — as a
+/// no-op, never as an update.
+///
+/// This is the downgrade guard (audit Tier 1 #31). Before the shared semver
+/// check, a lower registry version "updated" happily and walked the install
+/// backwards. Nothing else in the suite covers it: the equal-version case above
+/// passes whether the check is `!=` or `is_newer`, and only this one fails if
+/// the comparison loosens.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_refuses_to_walk_backwards_to_an_older_catalog_version() {
+    let fx = start_with_installed_backend("0.9.0").await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/update",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a downgrade must not be accepted: {body}"
+    );
+    assert_eq!(body["noop"], true, "{body}");
+    assert_eq!(
+        body["to_version"], "1.0.0",
+        "a no-op reports the installed version on both sides, never the older \
+         one it declined to install: {body}"
+    );
+    assert!(body["install_id"].is_null(), "{body}");
+}
+
+/// With the backend installed, the catalog listing says so: `installed_version`
+/// is filled in and `update_available` reflects the comparison the update
+/// endpoint would make. The two read the same manifest through the same helper,
+/// so a client can trust Browse and the update to agree.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn list_reports_installed_version_and_offers_the_update() {
+    let fx = start_with_installed_backend("2.0.0").await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_get_json(sock, "/registry/backend/list", token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let backend = &body["backends"][0];
+    assert_eq!(backend["source"], "github.com/x/y", "{body}");
+    assert_eq!(backend["installed_version"], "1.0.0", "{body}");
+    assert_eq!(backend["version"], "2.0.0", "{body}");
+    assert_eq!(
+        backend["update_available"], true,
+        "the catalog is newer, so Browse must offer it: {body}"
+    );
+}

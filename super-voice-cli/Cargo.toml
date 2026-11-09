@@ -1,0 +1,43 @@
+[package]
+    name = "super-voice-cli"
+    version.workspace = true
+    authors.workspace = true
+    edition.workspace = true
+    description = "The voice command: Super Voice's command-line client"
+    repository = "https://github.com/jorge-menjivar/super-stt"
+    license = "GPL-3.0-only"
+
+[[bin]]
+    name = "super-voice-cli"
+    path = "src/main.rs"
+
+[dependencies]
+    anyhow.workspace = true
+    clap.workspace = true
+    super-voice-shared = { path = "../super-voice-shared" }
+    tokio = {
+        workspace = true,
+        features = ["io-util", "macros", "net", "rt-multi-thread"]
+    }
+
+# `voice hotkey` (src/hotkey.rs). macOS only: on Linux the desktop environment
+# owns global shortcuts, and these crates would have nothing to register with.
+# objc2 / objc2-app-kit are the versions global-hotkey already pulls in, named
+# here only for NSApplication, whose event loop delivers the shortcut.
+[target.'cfg(target_os = "macos")'.dependencies]
+    global-hotkey = "0.9"
+    log.workspace = true
+    objc2 = "0.6"
+    objc2-app-kit = {
+        version = "0.3",
+        default-features = false,
+        features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"],
+    }
+
+[dev-dependencies]
+    # Spawns the daemon for the integration tests, in a home of its own.
+    super-engine-test-daemon.workspace = true
+    tempfile = "3.27.0"
+
+[lints]
+    workspace = true
