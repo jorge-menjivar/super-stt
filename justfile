@@ -1179,7 +1179,7 @@ install-daemon:
     echo "Installing consent helper to {{ consent_dst }}"
     sudo install -m755 {{ consent_src }} {{ consent_dst }}
 
-    # Install the CLI alongside the daemon. The `stt` wrapper created below
+    # Install the CLI alongside the daemon. The `voice` wrapper created below
     # execs the CLI (client commands like `record`/`stop` live there, not in
     # the daemon binary), so the wrapper is broken without it.
     if ! just install-cli; then
@@ -1229,11 +1229,50 @@ install-daemon:
     sudo install -m755 "$wrapper_tmp" {{ wrapper_dst }}
     rm -f "$wrapper_tmp"
 
-    # Setup COSMIC keyboard shortcut if available
-    # Setup COSMIC keyboard shortcut
+    # Set up the COSMIC keyboard shortcut.
     if command -v cosmic-panel &> /dev/null; then
         COSMIC_SHORTCUTS_DIR="$HOME/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1"
         COSMIC_SHORTCUTS_FILE="$COSMIC_SHORTCUTS_DIR/custom"
+
+        # A shortcut that runs Super STT's `stt`, which was removed above,
+        # would do nothing: point it at `voice`, as the installer does
+        # (super-voice-install/src/shortcut.rs, `migrate_shortcut_content`).
+        # The arguments carry over, and `stt stop` is `voice record stop`.
+        # Run before the prompt, so the migrated binding is the one it finds.
+        if [ -f "$COSMIC_SHORTCUTS_FILE" ]; then
+            python3 - "$COSMIC_SHORTCUTS_FILE" "{{ bin_dir }}/voice" <<'PYEOF'
+    import sys
+
+    path, voice = sys.argv[1], sys.argv[2]
+    content = open(path).read()
+    spawn = 'Spawn("'
+    out, rest, changed = [], content, False
+    while (at := rest.find(spawn)) >= 0:
+        start = at + len(spawn)
+        out.append(rest[:start])
+        rest = rest[start:]
+        end = rest.find('"')
+        end = len(rest) if end < 0 else end
+        command = rest[:end]
+        program, sep, args = command.partition(" ")
+        args = sep + args
+        if program == "stt" or program.endswith("/stt"):
+            if args.startswith(" stop"):
+                args = " record stop" + args[len(" stop"):]
+            out.append(voice + args)
+            changed = True
+        else:
+            out.append(command)
+        rest = rest[end:]
+    out.append(rest)
+    if changed:
+        migrated = "".join(out).replace(
+            'description: Some("Super STT")', 'description: Some("Super Voice")'
+        )
+        open(path, "w").write(migrated)
+        print(f"✓ Moved the Super STT shortcut to {voice}")
+    PYEOF
+        fi
 
         echo -n "Add COSMIC keyboard shortcut (Super+Space)? [Y/n]: "
         read -r add_shortcut
@@ -1280,7 +1319,6 @@ install-daemon:
 
     echo "✓ Super Voice installed to {{ daemon_dst }}"
     echo "✓ Wrapper script created at {{ wrapper_dst }}"
-    echo "✓ Convenience shortcut 'stt' created"
     echo ""
     echo "🚀 Ready to use!"
     echo "-- voice record --write         # Record, transcribe, and type result"
