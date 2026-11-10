@@ -92,7 +92,7 @@ pub(crate) async fn get_stage(State(s): State<AppState>, Path(stage): Path<u32>)
 pub(crate) struct SetBackendBody {
     /// The backend's repo id, as `GET /pipeline/{stage}/backend/list` reports
     /// it.
-    #[schema(example = "github.com/super-libre/super-tts-kokoro")]
+    #[schema(example = "github.com/super-libre/super-voice-kokoro")]
     pub(crate) source: String,
 }
 
