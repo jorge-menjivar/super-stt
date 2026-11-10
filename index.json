@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-10T06:28:59Z",
+  "generated_at": "2026-11-10T06:46:36Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -427,6 +427,137 @@
         "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.1/backend.toml",
         "size": 5547,
         "sha256": "375d47c484ed8a17764aba7e6df328ef7eec6419d25bf3f783b21f6677f6f8bf"
+      }
+    },
+    {
+      "id": "qwen_tts",
+      "backend_id": "app.super-voice.qwen-tts",
+      "source": "github.com/super-libre/super-voice-qwen-tts",
+      "version": "0.1.0",
+      "tag": "v0.1.0",
+      "name": "Qwen TTS",
+      "description": "Qwen local text-to-speech, 24 kHz, 10 languages. Serves the Qwen3-TTS checkpoints: nine preset voices, or a voice built from a description.",
+      "license": "GPL-3.0-only",
+      "kind": "subprocess",
+      "contract": "v4",
+      "min_client": "0.3.0",
+      "entrypoint": "super-voice-backend-qwen-tts",
+      "allowed_hosts": [],
+      "online": false,
+      "supports_gpu": true,
+      "supports_cpu": false,
+      "models": [
+        {
+          "name": "qwen3-tts-0.6b-custom-voice",
+          "provider": "",
+          "supported_devices": [
+            "gpu"
+          ],
+          "role": "synthesis"
+        },
+        {
+          "name": "qwen3-tts-1.7b-custom-voice",
+          "provider": "",
+          "supported_devices": [
+            "gpu"
+          ],
+          "role": "synthesis"
+        },
+        {
+          "name": "qwen3-tts-1.7b-voice-design",
+          "provider": "",
+          "supported_devices": [
+            "gpu"
+          ],
+          "role": "synthesis"
+        },
+        {
+          "name": "qwen3-tts-0.6b-base",
+          "provider": "",
+          "supported_devices": [
+            "gpu"
+          ],
+          "role": "synthesis"
+        },
+        {
+          "name": "qwen3-tts-1.7b-base",
+          "provider": "",
+          "supported_devices": [
+            "gpu"
+          ],
+          "role": "synthesis"
+        }
+      ],
+      "secrets": [],
+      "options": [
+        {
+          "name": "voice_design_description",
+          "label": "Custom voice description",
+          "type": "string"
+        },
+        {
+          "name": "temperature",
+          "label": "Temperature",
+          "type": "float",
+          "default": 0.9
+        }
+      ],
+      "assets": {
+        "subprocess": [
+          {
+            "target": "x86_64-unknown-linux-gnu",
+            "accel": "cuda",
+            "cuda_major": 12,
+            "url": "https://github.com/super-libre/super-voice-qwen-tts/releases/download/v0.1.0/qwen-x86_64-unknown-linux-gnu-cuda12.tar.gz",
+            "size": 56236208,
+            "sha256": "3ff0bc61e9ed6e9df03b46969be6e2ae298e110c6e3ca0560d9352d957af8be7"
+          },
+          {
+            "target": "x86_64-unknown-linux-gnu",
+            "accel": "cuda",
+            "cuda_major": 13,
+            "url": "https://github.com/super-libre/super-voice-qwen-tts/releases/download/v0.1.0/qwen-x86_64-unknown-linux-gnu-cuda13.tar.gz",
+            "size": 56236404,
+            "sha256": "a9ebe043e680da2a4392806f4d0c75179f886c8b45ffb1bcfb51aab1013b2472"
+          },
+          {
+            "target": "x86_64-unknown-linux-gnu",
+            "accel": "rocm",
+            "gfx": [
+              "gfx90a",
+              "gfx942",
+              "gfx1030",
+              "gfx1100",
+              "gfx1101",
+              "gfx1102",
+              "gfx1200",
+              "gfx1201"
+            ],
+            "url": "https://github.com/super-libre/super-voice-qwen-tts/releases/download/v0.1.0/qwen-x86_64-unknown-linux-gnu-rocm.tar.gz",
+            "size": 64421810,
+            "sha256": "1c54206823451f29190629bfcf8e83299ba38834a7a8bde6155471ba0e2e01b1"
+          },
+          {
+            "target": "x86_64-unknown-linux-gnu",
+            "accel": "vulkan",
+            "vulkan_api": "1.2",
+            "url": "https://github.com/super-libre/super-voice-qwen-tts/releases/download/v0.1.0/qwen-x86_64-unknown-linux-gnu-vulkan.tar.gz",
+            "size": 32929570,
+            "sha256": "e9869307ec2a593e2bdf63e542da6d2863cb8b2978066be3c4ddd3738d80bd17"
+          },
+          {
+            "target": "aarch64-apple-darwin",
+            "accel": "metal",
+            "url": "https://github.com/super-libre/super-voice-qwen-tts/releases/download/v0.1.0/qwen-aarch64-apple-darwin-metal.tar.gz",
+            "size": 27666460,
+            "sha256": "cd8b33d4f5a461790ea38ad5cf08534aee6b61d1534264eb0f5825e4551b55a4"
+          }
+        ]
+      },
+      "manifest": {
+        "url": "https://github.com/super-libre/super-voice-qwen-tts/releases/download/v0.1.0/backend.toml",
+        "size": 26432,
+        "sha256": "8df34164a58faa04ffa78c526746062768f4c97af032d01dc207f4a4a6a02204"
       }
     },
     {
