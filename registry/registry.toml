@@ -7,6 +7,11 @@
   repo  = "github.com/jorge-menjivar/super-stt-deepgram"
   forge = "github"
 
+[kokoro]
+  id    = "app.super-voice.kokoro"
+  repo  = "github.com/super-libre/super-voice-kokoro"
+  forge = "github"
+
 [mistral]
   id    = "app.super-stt.mistral"
   repo  = "github.com/jorge-menjivar/super-stt-mistral"
