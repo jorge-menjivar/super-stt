@@ -27,6 +27,11 @@
   repo  = "github.com/jorge-menjivar/super-stt-qwen-asr"
   forge = "github"
 
+[qwen_tts]
+  id    = "app.super-voice.qwen-tts"
+  repo  = "github.com/super-libre/super-voice-qwen-tts"
+  forge = "github"
+
 [s1_mini]
   id    = "app.super-stt.s1-mini"
   repo  = "github.com/jorge-menjivar/super-stt-s1-mini"
