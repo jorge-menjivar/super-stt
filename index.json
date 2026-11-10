@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-10T18:05:55Z",
+  "generated_at": "2026-11-10T22:53:59Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -50,6 +50,59 @@
         "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/backend.toml",
         "size": 2110,
         "sha256": "4cf34eaee84404fb31b0e7f120626cbcde63e9a4da233cd45e43feea8cc873c1"
+      }
+    },
+    {
+      "id": "kokoro",
+      "backend_id": "app.super-voice.kokoro",
+      "source": "github.com/super-libre/super-voice-kokoro",
+      "version": "0.1.0",
+      "tag": "v0.1.0",
+      "name": "Kokoro",
+      "description": "Kokoro-82M local text-to-speech, 24 kHz, 54 preset voices.",
+      "license": "GPL-3.0-only",
+      "kind": "subprocess",
+      "contract": "v4",
+      "min_client": "0.3.0",
+      "entrypoint": "super-voice-backend-kokoro",
+      "allowed_hosts": [],
+      "online": false,
+      "supports_gpu": false,
+      "supports_cpu": true,
+      "models": [
+        {
+          "name": "kokoro-82m",
+          "provider": "",
+          "supported_devices": [
+            "cpu"
+          ],
+          "role": "synthesis"
+        }
+      ],
+      "secrets": [],
+      "options": [],
+      "assets": {
+        "subprocess": [
+          {
+            "target": "x86_64-unknown-linux-gnu",
+            "accel": "cpu",
+            "url": "https://github.com/super-libre/super-voice-kokoro/releases/download/v0.1.0/kokoro-x86_64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 20599871,
+            "sha256": "0e8c32a30168440392609341061d4da4be74ed5e4cc5b915dcd4e75c20d5bc44"
+          },
+          {
+            "target": "aarch64-unknown-linux-gnu",
+            "accel": "cpu",
+            "url": "https://github.com/super-libre/super-voice-kokoro/releases/download/v0.1.0/kokoro-aarch64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 21547952,
+            "sha256": "9af4ec8072b334567af45091532b3e3c532c88baa4d2e7877a39354de24b1c4a"
+          }
+        ]
+      },
+      "manifest": {
+        "url": "https://github.com/super-libre/super-voice-kokoro/releases/download/v0.1.0/backend.toml",
+        "size": 25170,
+        "sha256": "a7536232a3b1d917d35af822f56f3bb61d7fbcadc05e418be30d87c0632990e6"
       }
     },
     {
