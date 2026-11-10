@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/bbbe20c3-6802-4797-afc8-aa81d1b48415
 
 ## What is Super Voice?
 
-Super Voice does two things on Linux: speech to text, typed into whatever app you're in, and text to speech, read aloud by a model you pick. Super STT and Super TTS were its two halves; they are one product now, with one daemon.
+Super Voice is speech to text and text to speech for Linux, with any model you want. Speak, and your words are typed into whatever app you're in. Give it text, and the model you pick reads it aloud.
 
 It makes speech-to-text with automatic text input **trivial on Linux, for everyone**. Bind a shortcut (Super+Space by convention), speak, and your words are typed straight into whatever app is focused, e.g. your editor, browser, chat, terminal. No copy-paste, no fiddling.
 
@@ -44,7 +44,7 @@ cd super-stt
 just install
 ```
 
-Either way you get the daemon, the `voice` CLI, a consent helper, the two desktop apps (one for speech to text, one for text to speech), and (on COSMIC) the panel applet, wired up as a `systemctl --user` service. Everything installs system-wide (root-owned, so the installer asks for sudo), while the daemon itself runs unprivileged in your user session. On COSMIC the installer offers to bind Super+Space → `voice record --write` for you. GPU acceleration comes from the model you run (see [Models](#-models)).
+Either way you get the daemon, the `voice` CLI, a consent helper, the desktop app, and (on COSMIC) the panel applet, wired up as a `systemctl --user` service. Everything installs system-wide (root-owned, so the installer asks for sudo), while the daemon itself runs unprivileged in your user session. On COSMIC the installer offers to bind Super+Space → `voice record --write` for you. GPU acceleration comes from the model you run (see [Models](#-models)).
 
 ### Upgrading from Super STT
 
