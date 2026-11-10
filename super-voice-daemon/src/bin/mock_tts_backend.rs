@@ -255,7 +255,7 @@ async fn synthesize(
     (
         StatusCode::OK,
         [
-            (CONTENT_TYPE, "application/vnd.super-tts.frames"),
+            (CONTENT_TYPE, "application/vnd.super-voice.frames"),
             (
                 axum::http::HeaderName::from_static("x-tts-sample-rate"),
                 "24000",

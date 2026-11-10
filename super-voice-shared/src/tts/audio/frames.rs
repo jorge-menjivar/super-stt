@@ -49,7 +49,7 @@ pub const HEADER_CHANNELS: &str = "x-tts-channels";
 /// Header naming the response's sample format.
 pub const HEADER_FORMAT: &str = "x-tts-format";
 /// Content type a framed synthesis response carries.
-pub const CONTENT_TYPE: &str = "application/vnd.super-tts.frames";
+pub const CONTENT_TYPE: &str = "application/vnd.super-voice.frames";
 
 /// How PCM samples are encoded in an [`FrameKind::Audio`] payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
