@@ -12,21 +12,6 @@ impl SuperTTSDaemon {
         configured.map_or_else(backends::default_backends_dir, PathBuf::from)
     }
 
-    /// Re-read text to speech's backends from the folder. Duplicates are
-    /// the daemon's to remove, in its own refresh, which also refreshes this
-    /// list; this only reads.
-    pub async fn refresh_backends(&self) {
-        let dir = self.backends_dir().await;
-        let (live, _superseded) = crate::stt_models::backends::discover_all(&dir);
-        let mine = backends::synthesis(&live);
-        info!(
-            "Synthesis backends: {} backend(s) from {}",
-            mine.len(),
-            dir.display()
-        );
-        *self.backends.write().await = mine;
-    }
-
     /// Choose the model to load at startup: the configured preference, but only
     /// if it is installed. Returns `None` (daemon stays idle)
     /// when there is no preference or it can't be loaded — the daemon never
