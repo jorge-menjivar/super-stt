@@ -5,7 +5,7 @@
     "description": "HTTP/1.1 + JSON on two transports that serve the identical API.\n\nOne daemon serves both of Super Voice's features. What is speech to text's own is under `/v1/stt`, what is text to speech's own under `/v1/tts`, and what the daemon has once — auth, events, status, backends, the registry, settings, updates — at `/v1`.\n\n**A Unix domain socket** under the per-user runtime directory at `<runtime dir>/voice/super-voice-http.sock` (override with `SUPER_VOICE_HTTP_SOCKET`), which is what native clients use. The runtime directory is `$XDG_RUNTIME_DIR` on Linux and the Darwin per-user temp directory on macOS — ask the daemon rather than assuming, or read the `runtime_dir` server variable below. Its filesystem permissions are the first layer of access control, and the daemon reads the peer credentials on each connection to identify the calling binary. It is the second server below, listed by its real path — dial that path directly and send whatever `Host` you like, since the daemon ignores it.\n\n**A loopback TCP listener**, which is what a browser can reach, since no browser can dial a Unix socket. It is the first server below, and it is a real address. There are no peer credentials on TCP, so a caller there is identified by its `Origin` instead — a claim from the browser rather than a fact from the kernel, which is why the consent dialog says so.\n\nEvery endpoint except `POST /v1/auth/request` requires `Authorization: Bearer <token>`. A token is minted only after the user approves your client in a consent dialog, and is bound to whichever identity was approved — a binary or an origin, never interchangeable. A client cannot widen its own permissions. See `docs/protocol/auth.md`.\n\nWith curl, over the socket:\n\n```\ncurl --unix-socket \"${XDG_RUNTIME_DIR:-$TMPDIR}/voice/super-voice-http.sock\" \\\n     -H \"Authorization: Bearer $VOICE_TOKEN\" \\\n     http://voice.local/v1/ping\n```",
     "contact": {
       "name": "Super Voice",
-      "url": "https://github.com/jorge-menjivar/super-stt"
+      "url": "https://github.com/jorge-menjivar/super-voice"
     },
     "license": {
       "name": "GPL-3.0-only",
@@ -9927,7 +9927,7 @@
       },
       "ErrorEnvelope": {
         "type": "object",
-        "description": "The error envelope, as [`transport.md`] specifies it.\n\n`error_code` is the stable, machine-readable identifier clients switch on\nand the field that determines the HTTP status; `message` is prose for a\nhuman and may be reworded at any time.\n\n[`transport.md`]:\nhttps://github.com/jorge-menjivar/super-stt/blob/main/docs/protocol/transport.md",
+        "description": "The error envelope, as [`transport.md`] specifies it.\n\n`error_code` is the stable, machine-readable identifier clients switch on\nand the field that determines the HTTP status; `message` is prose for a\nhuman and may be reworded at any time.\n\n[`transport.md`]:\nhttps://github.com/jorge-menjivar/super-voice/blob/main/docs/protocol/transport.md",
         "required": [
           "status"
         ],
@@ -11938,7 +11938,7 @@
       },
       "TtsErrorEnvelope": {
         "type": "object",
-        "description": "The error envelope, as [`transport.md`] specifies it.\n\n`error_code` is the stable, machine-readable identifier clients switch on\nand the field that determines the HTTP status; `message` is prose for a\nhuman and may be reworded at any time.\n\n[`transport.md`]:\nhttps://github.com/jorge-menjivar/super-tts/blob/main/docs/protocol/transport.md",
+        "description": "The error envelope, as [`transport.md`] specifies it.\n\n`error_code` is the stable, machine-readable identifier clients switch on\nand the field that determines the HTTP status; `message` is prose for a\nhuman and may be reworded at any time.\n\n[`transport.md`]:\nhttps://github.com/jorge-menjivar/super-voice/blob/main/docs/protocol/transport.md",
         "required": [
           "status"
         ],
