@@ -4,7 +4,7 @@
     authors.workspace = true
     edition.workspace = true
     description = "Floating libcosmic consent dialog spawned by the Super Voice daemon"
-    repository = "https://github.com/jorge-menjivar/super-stt"
+    repository = "https://github.com/jorge-menjivar/super-voice"
     license = "GPL-3.0-only"
 
 [[bin]]

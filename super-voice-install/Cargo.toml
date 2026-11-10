@@ -4,7 +4,7 @@
     authors.workspace = true
     edition.workspace = true
     description = "Installer and self-updater for Super Voice"
-    repository = "https://github.com/jorge-menjivar/super-stt"
+    repository = "https://github.com/jorge-menjivar/super-voice"
     license = "GPL-3.0-only"
 
 [dependencies]

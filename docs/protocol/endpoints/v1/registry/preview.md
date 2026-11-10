@@ -24,7 +24,7 @@ The three body shapes `/registry/backend/install` accepts — provide exactly on
 ```
 
 ```json
-{ "source": "github.com/jorge-menjivar/super-stt" }
+{ "source": "github.com/jorge-menjivar/super-stt-whisper" }
 ```
 
 `forge` is accepted alongside `repo_url` and means what it means on install: the

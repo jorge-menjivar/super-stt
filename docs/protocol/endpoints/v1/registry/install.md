@@ -18,7 +18,7 @@ Three body shapes — provide exactly one.
 
 **Registry install:**
 ```json
-{ "source": "github.com/jorge-menjivar/super-stt" }
+{ "source": "github.com/jorge-menjivar/super-stt-whisper" }
 ```
 
 The daemon looks up the entry whose `source` matches and installs its
@@ -143,7 +143,7 @@ archive that decompresses beyond the budget, fails the install.
 ```json
 {
   "install_id": "ins_01HE5…",
-  "source": "github.com/jorge-menjivar/super-stt",
+  "source": "github.com/jorge-menjivar/super-stt-whisper",
   "version": "0.2.0",
   "selected_asset": {
     "target": "x86_64-unknown-linux-gnu",

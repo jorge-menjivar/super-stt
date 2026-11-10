@@ -6,7 +6,7 @@
 # replaced left behind, regardless of which channel installed them.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/uninstall.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-voice/main/uninstall.sh | bash
 #   bash uninstall.sh
 #
 # What gets removed:

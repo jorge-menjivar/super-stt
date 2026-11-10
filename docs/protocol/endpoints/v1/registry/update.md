@@ -12,7 +12,7 @@ installed version. No-op if already current.
 ## Request
 
 ```json
-{ "source": "github.com/jorge-menjivar/super-stt" }
+{ "source": "github.com/jorge-menjivar/super-stt-whisper" }
 ```
 
 ## Response

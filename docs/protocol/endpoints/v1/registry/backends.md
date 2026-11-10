@@ -41,7 +41,7 @@ GET /registry/backend/list?include_incompatible=false&kind=wasm&online=true&q=op
     {
       "id": "voxtral",
       "backend_id": "app.super-stt.voxtral",
-      "source": "github.com/jorge-menjivar/super-stt",
+      "source": "github.com/jorge-menjivar/super-stt-whisper",
       "version": "0.2.0",
       "name": "Voxtral",
       "description": "…",
