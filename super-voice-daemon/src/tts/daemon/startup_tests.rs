@@ -15,7 +15,7 @@ use crate::tts::daemon::types::test_daemon;
 use crate::tts::tts_models::backends::DiscoveredBackend;
 use std::path::PathBuf;
 
-const KOKORO_SOURCE: &str = "github.com/jorge-menjivar/super-tts-kokoro";
+const KOKORO_SOURCE: &str = "github.com/super-libre/super-voice-kokoro";
 
 /// A discovered backend installed at `<backends_dir>/<dir>`, serving `source`.
 /// Only `dir` and `source` matter here: the adoption looks a backend up by

@@ -60,7 +60,7 @@ Authorization: Bearer …64hex…
 {
   "status": "success",
   "available_models": [
-    ["kokoro-82m", "github.com/super-libre/super-tts-kokoro"],
+    ["kokoro-82m", "github.com/super-libre/super-voice-kokoro"],
     ["qwen3-tts-1.7b-base", "github.com/super-libre/super-voice-qwen-tts"]
   ]
 }

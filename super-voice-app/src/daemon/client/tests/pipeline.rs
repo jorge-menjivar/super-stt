@@ -53,7 +53,7 @@ async fn text_to_speechs_stage_is_read_off_its_own_route() {
         "stage": {
             "stage": 1,
             "role": "synthesis",
-            "source": "github.com/super-libre/super-tts-kokoro",
+            "source": "github.com/super-libre/super-voice-kokoro",
             "name": "Kokoro",
             "enabled": true,
         },

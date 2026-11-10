@@ -13,7 +13,7 @@ Loading a model is the step that can fail that way, and a backend selection
 outlives every model that comes and goes under it.
 
 A backend is identified on the wire by its `source` (repo id, e.g.
-`github.com/super-libre/super-tts-kokoro`), as returned by
+`github.com/super-libre/super-voice-kokoro`), as returned by
 [`GET /backend/list`](../../backends.md). Internally the daemon persists the
 backend's install directory and re-reads its `backend.toml` for metadata, so
 the selection survives a reinstall.
@@ -46,7 +46,7 @@ Content-Type: application/json
   "stage": {
     "stage":   1,
     "role":    "synthesis",
-    "source":  "github.com/super-libre/super-tts-kokoro",
+    "source":  "github.com/super-libre/super-voice-kokoro",
     "name":    "Kokoro",
     "enabled": true
   }
@@ -88,7 +88,7 @@ Host: voice.local
 Authorization: Bearer …64hex…
 Content-Type: application/json
 
-{ "source": "github.com/super-libre/super-tts-kokoro" }
+{ "source": "github.com/super-libre/super-voice-kokoro" }
 ```
 
 | Field    | Type   | Required | Notes                                             |
@@ -106,7 +106,7 @@ Content-Type: application/json
   "stage": {
     "stage":   1,
     "role":    "synthesis",
-    "source":  "github.com/super-libre/super-tts-kokoro",
+    "source":  "github.com/super-libre/super-voice-kokoro",
     "name":    "Kokoro",
     "enabled": false
   }

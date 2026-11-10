@@ -10,7 +10,7 @@ use super_voice_registry_types::manifest::{Device, VoiceEntry, VoiceKind, VoiceM
 fn model(kinds: Vec<VoiceKind>, voices: &[&str]) -> ModelDefinition {
     ModelDefinition {
         name: "kokoro-82m".into(),
-        source: "github.com/jorge-menjivar/super-tts-kokoro".into(),
+        source: "github.com/super-libre/super-voice-kokoro".into(),
         is_multilingual: true,
         primary_language: "en".into(),
         supported_languages: vec!["en".into(), "ja".into()],
