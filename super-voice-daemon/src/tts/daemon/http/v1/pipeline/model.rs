@@ -91,7 +91,7 @@ pub(crate) struct SetModelBody {
     /// The backend serving it. Omitted resolves to the backend already selected
     /// for this stage.
     #[serde(default)]
-    #[schema(example = "github.com/jorge-menjivar/super-tts-kokoro")]
+    #[schema(example = "github.com/super-libre/super-tts-kokoro")]
     pub(crate) source: Option<String>,
 }
 

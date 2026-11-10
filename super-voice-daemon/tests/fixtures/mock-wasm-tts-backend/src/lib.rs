@@ -78,7 +78,7 @@ impl Guest for Component {
                 outparam,
                 200,
                 &[
-                    ("content-type", "application/vnd.super-tts.frames"),
+                    ("content-type", "application/vnd.super-voice.frames"),
                     ("x-tts-sample-rate", "24000"),
                     ("x-tts-channels", "1"),
                     ("x-tts-format", "s16le"),

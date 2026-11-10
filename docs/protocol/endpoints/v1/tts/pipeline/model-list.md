@@ -60,8 +60,8 @@ Authorization: Bearer …64hex…
 {
   "status": "success",
   "available_models": [
-    ["kokoro-82m", "github.com/jorge-menjivar/super-tts-kokoro"],
-    ["qwen3-tts-1.7b-base", "github.com/super-libre/super-tts-qwen"]
+    ["kokoro-82m", "github.com/super-libre/super-tts-kokoro"],
+    ["qwen3-tts-1.7b-base", "github.com/super-libre/super-voice-qwen-tts"]
   ]
 }
 ```

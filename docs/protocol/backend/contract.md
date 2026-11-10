@@ -668,7 +668,7 @@ distinguish "unset" without special-casing.
 
 ```http
 HTTP/1.1 200 OK
-Content-Type: application/vnd.super-tts.frames
+Content-Type: application/vnd.super-voice.frames
 x-tts-sample-rate: 24000
 x-tts-channels: 1
 x-tts-format: s16le
@@ -678,6 +678,10 @@ The three `x-tts-*` headers describe every audio frame in the body and are
 required. `x-tts-format` is `s16le` or `f32le`; `x-tts-channels` is `1` or `2`;
 `x-tts-sample-rate` is in Hz. The daemon resamples and channel-maps to whatever
 the output device wants, so emit whatever your model produces natively.
+
+The daemon reads the body by these headers, not by its content type. Backends
+built for Super TTS send `application/vnd.super-tts.frames`, and they keep
+working.
 
 Each frame is:
 

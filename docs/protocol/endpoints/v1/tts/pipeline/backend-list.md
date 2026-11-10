@@ -47,7 +47,7 @@ this stage:
   "status": "success",
   "backends": [
     {
-      "source":  "github.com/jorge-menjivar/super-tts-kokoro",
+      "source":  "github.com/super-libre/super-tts-kokoro",
       "name":    "Kokoro",
       "version": "1.2.0",
       "kind":    "subprocess",

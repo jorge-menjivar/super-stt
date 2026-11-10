@@ -114,7 +114,7 @@ Content-Type: application/json
 
 {
   "model":  "kokoro-82m",
-  "source": "github.com/jorge-menjivar/super-tts-kokoro"
+  "source": "github.com/super-libre/super-tts-kokoro"
 }
 ```
 
