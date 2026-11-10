@@ -25,3 +25,43 @@ jobs:
     with:
       indexer: super-voice-indexer
       registry-types: super-voice-registry-types
+
+  # Super STT installs read the index from github.io/super-stt/, which went
+  # away when the repo became super-voice: GitHub doesn't redirect a renamed
+  # repo's Pages site. The user site jorge-menjivar/jorge-menjivar.github.io
+  # serves copies there, and this job keeps them in step with the ones just
+  # published. Its deploy key is the SUPER_STT_PAGES_DEPLOY_KEY secret.
+  mirror:
+    needs: build
+    if: github.repository == 'jorge-menjivar/super-voice'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+          path: site
+          sparse-checkout: |
+            index.json
+            backend.schema.json
+            registry.schema.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/checkout@v7
+        with:
+          repository: jorge-menjivar/jorge-menjivar.github.io
+          ssh-key: ${{ secrets.SUPER_STT_PAGES_DEPLOY_KEY }}
+          path: mirror
+      - name: Copy the index and schemas to super-stt/
+        run: |
+          cp site/index.json site/backend.schema.json site/registry.schema.json mirror/super-stt/
+          cd mirror
+          git add super-stt
+          if git diff --cached --quiet; then
+            echo "The copies are current."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Copy Super Voice's index and schemas ($GITHUB_SHA)"
+          git push origin HEAD
