@@ -201,7 +201,7 @@ Content-Type: application/json
     {
       "stage":   1,
       "role":    "synthesis",
-      "source":  "github.com/jorge-menjivar/super-tts-kokoro",
+      "source":  "github.com/super-libre/super-tts-kokoro",
       "name":    "Kokoro",
       "enabled": true
     }

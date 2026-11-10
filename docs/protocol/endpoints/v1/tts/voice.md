@@ -92,7 +92,7 @@ Authorization: Bearer …64hex…
   ],
   "model": {
     "name":              "qwen3-tts-1.7b-base",
-    "source":            "github.com/super-libre/super-tts-qwen",
+    "source":            "github.com/super-libre/super-voice-qwen-tts",
     "clones":            true,
     "clone_ref_seconds": 30.0,
     "needs_transcript":  false

@@ -32,7 +32,7 @@ framework: installed again with that `accel`, its downloaded model files
 carried over, and then the model's [device](../pipeline/device.md) set to it.
 
 ```json
-{ "source": "github.com/super-libre/super-tts-qwen", "accel": "vulkan" }
+{ "source": "github.com/super-libre/super-voice-qwen-tts", "accel": "vulkan" }
 ```
 
 An `accel` this machine has no build for answers `422 incompatible`; one that
