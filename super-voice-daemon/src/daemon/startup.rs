@@ -247,22 +247,27 @@ impl SuperSTTDaemon {
     /// folder the user chose is theirs to fill. A failure is logged, never
     /// fatal: the daemon still starts, with whatever its own folders hold.
     async fn move_old_data(&self) {
-        let mut moves = Vec::new();
+        let mut moves: Vec<(&str, std::path::PathBuf, &str, crate::old_data::Usable)> = Vec::new();
         if self.config.read().await.backends_dir.is_none() {
             let into = backends::default_backends_dir();
             for product in crate::old_data::OLD_PRODUCTS {
-                moves.push((product, into.clone(), "backend"));
+                moves.push((
+                    product,
+                    into.clone(),
+                    "backend",
+                    crate::old_data::readable_backend,
+                ));
             }
         }
         let voices = crate::tts::voices::VoiceLibrary::default_dir();
         if self.tts.voices.dir() == voices {
-            moves.push(("super-tts", voices, "voice"));
+            moves.push(("super-tts", voices, "voice", |_| Ok(())));
         }
-        for (product, into, what) in moves {
+        for (product, into, what, usable) in moves {
             let Some(from) = crate::old_data::old_product_dir(&into, product) else {
                 continue;
             };
-            if let Err(e) = crate::old_data::move_folders(&from, &into, what) {
+            if let Err(e) = crate::old_data::move_folders(&from, &into, what, usable) {
                 warn!(
                     "Could not move {product}'s {what}s from {} into {}: {e}",
                     from.display(),
