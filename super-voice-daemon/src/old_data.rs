@@ -11,6 +11,10 @@
 //!
 //! A folder already in the new place is never replaced. The old copy is left
 //! where it was, and the log says so.
+//!
+//! A hidden folder is neither a backend nor a voice: it is the old product's
+//! scratch space, like the folder its installer staged downloads in. It is
+//! never moved. An empty one is removed, so the old folder can go too.
 
 use log::{info, warn};
 use std::path::Path;
@@ -56,6 +60,12 @@ pub fn move_folders(from: &Path, into: &Path, what: &str) -> std::io::Result<Mov
     names.sort();
     for name in names {
         let shown = name.to_string_lossy().into_owned();
+        if shown.starts_with('.') {
+            if std::fs::remove_dir(from.join(&name)).is_ok() {
+                info!("Removed the empty {shown} from {}", from.display());
+            }
+            continue;
+        }
         let target = into.join(&name);
         if target.exists() {
             warn!(
@@ -160,6 +170,46 @@ mod tests {
             from.join("app.super-stt.qwen").is_dir(),
             "the old copy stays"
         );
+    }
+
+    /// The installer's staging folder is no backend. Super Voice has its own,
+    /// so moving it was refused with a warning on every start, and the old
+    /// folder could never be removed.
+    #[test]
+    fn an_empty_staging_folder_is_removed_not_moved() {
+        let home = tempfile::tempdir().unwrap();
+        let from = home.path().join("super-tts/backends");
+        let into = home.path().join("super-voice/backends");
+        std::fs::create_dir_all(from.join(".staging")).unwrap();
+        std::fs::create_dir_all(into.join(".staging")).unwrap();
+        backend(&from, "app.super-tts.kokoro", "kokoro");
+
+        let report = move_folders(&from, &into, "backend").unwrap();
+
+        assert_eq!(
+            report,
+            Moved {
+                moved: vec!["app.super-tts.kokoro".into()],
+                left: vec![],
+            }
+        );
+        assert!(!from.exists(), "the emptied folder is removed");
+        assert!(into.join(".staging").is_dir(), "Super Voice's own is kept");
+    }
+
+    /// A hidden folder with something in it is left where it is, and is not
+    /// reported as a backend left behind.
+    #[test]
+    fn a_staging_folder_in_use_is_left_alone() {
+        let home = tempfile::tempdir().unwrap();
+        let from = home.path().join("super-tts/backends");
+        let into = home.path().join("super-voice/backends");
+        std::fs::create_dir_all(from.join(".staging/partial")).unwrap();
+
+        let report = move_folders(&from, &into, "backend").unwrap();
+
+        assert_eq!(report, Moved::default());
+        assert!(from.join(".staging/partial").is_dir());
     }
 
     #[test]
