@@ -17,9 +17,8 @@ pub use super_engine_spec::product::{Generation, Product};
 use super_engine_spec::product::{SchemaNames, generation_from_str};
 
 /// Where Super Voice's backend registry is published, for every daemon that
-/// reads it. This repo's Pages site, which keeps its name until the repo is
-/// renamed.
-pub const INDEX_URL: &str = "https://jorge-menjivar.github.io/super-stt/index.json";
+/// reads it: this repo's Pages site.
+pub const INDEX_URL: &str = "https://jorge-menjivar.github.io/super-voice/index.json";
 
 /// Super Voice's names: everything its daemon and its clients meet on, from
 /// the socket to the scopes a token can carry. See [`ProductSpec`].
@@ -35,8 +34,7 @@ pub static SUPER_VOICE: ProductSpec = ProductSpec {
     // their contract variables under those products' names.
     former_env_prefixes: &["SUPER_STT", "SUPER_TTS"],
     tcp_port: 7300,
-    // Releases are published from this repo until it is renamed.
-    repo: "github.com/jorge-menjivar/super-stt",
+    repo: "github.com/jorge-menjivar/super-voice",
     index_url: INDEX_URL,
     scopes: &[
         "transcribe",

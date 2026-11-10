@@ -166,7 +166,7 @@ async fn dry_run_resolves_downloads_verifies_and_stages_against_a_mocked_release
     let mut mocks = Vec::new();
     for (repo, path, tag, name, bytes, sums) in [
         (
-            "jorge-menjivar/super-stt",
+            "jorge-menjivar/super-voice",
             "product",
             FAKE_TAG,
             &tarball_name,

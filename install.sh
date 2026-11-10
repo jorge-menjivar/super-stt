@@ -4,8 +4,8 @@
 #
 # Documented entry point:
 #
-#   curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/install.sh | bash
-#   curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/install.sh | bash -s -- --beta
+#   curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-voice/main/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-voice/main/install.sh | bash -s -- --beta
 #
 # This script is deliberately tiny: it detects the architecture, resolves
 # the requested release, downloads the `super-voice-install` binary attached
@@ -35,7 +35,7 @@
 # without making a network call or running a real install. See the guard at
 # the bottom of the file for how that source-only mode is triggered.
 
-GITHUB_REPO="jorge-menjivar/super-stt"
+GITHUB_REPO="jorge-menjivar/super-voice"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -287,7 +287,7 @@ main() {
         case "$TRIPLE" in
             *-apple-darwin)
                 print_error "Pre-built macOS binaries are not published yet. Build from source instead:"
-                print_error "  git clone https://github.com/$GITHUB_REPO.git && cd super-stt && just install"
+                print_error "  git clone https://github.com/$GITHUB_REPO.git && cd super-voice && just install"
                 print_error "That installs Super Voice.app — the settings app, the daemon and the voice CLI — in"
                 print_error "/Applications. The COSMIC applet is Linux-only."
                 ;;

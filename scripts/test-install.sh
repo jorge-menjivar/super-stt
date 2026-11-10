@@ -107,7 +107,7 @@ fi
 
 echo "== stable tag resolution (resolve_stable_tag) =="
 FIXTURE_STABLE_LATEST='{
-  "url": "https://api.github.com/repos/jorge-menjivar/super-stt/releases/1",
+  "url": "https://api.github.com/repos/jorge-menjivar/super-voice/releases/1",
   "tag_name": "v0.2.3",
   "target_commitish": "main",
   "name": "v0.2.3",
@@ -257,7 +257,7 @@ assert_eq "this bootstrap is never handed back to itself" \
 assert_eq "a script that failed to download is not handed over to" \
     "no" "$(is_former_bootstrap "" && echo yes || echo no)"
 assert_eq "a release's own copy of the bootstrap is read from its tag" \
-    "https://raw.githubusercontent.com/jorge-menjivar/super-stt/v0.2.4/install.sh" \
+    "https://raw.githubusercontent.com/jorge-menjivar/super-voice/v0.2.4/install.sh" \
     "$(former_bootstrap_url v0.2.4)"
 
 echo

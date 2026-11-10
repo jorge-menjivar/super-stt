@@ -28,8 +28,8 @@ Thank you for your interest in contributing to Super Voice! This document provid
 ### Clone and build
 
 ```bash
-git clone https://github.com/jorge-menjivar/super-stt.git
-cd super-stt
+git clone https://github.com/jorge-menjivar/super-voice.git
+cd super-voice
 
 just install            # build and install everything, wired to systemd
 # …or one piece at a time:

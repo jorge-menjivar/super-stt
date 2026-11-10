@@ -60,7 +60,7 @@ curl --unix-socket \"${XDG_RUNTIME_DIR:-$TMPDIR}/voice/super-voice-http.sock\" \
      http://voice.local/v1/ping
 ```",
         license(name = "GPL-3.0-only", identifier = "GPL-3.0-only"),
-        contact(name = "Super Voice", url = "https://github.com/jorge-menjivar/super-stt"),
+        contact(name = "Super Voice", url = "https://github.com/jorge-menjivar/super-voice"),
     ),
     // The servers list is filled in by `LocalServers`, not here: the TCP
     // entry's URL embeds `config::DEFAULT_TCP_PORT`, and a macro attribute

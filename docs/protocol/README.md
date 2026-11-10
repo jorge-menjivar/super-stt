@@ -65,15 +65,15 @@ What the protocol gives you:
 
 Reference:
 
-- **[Browse the API reference](https://jorge-menjivar.github.io/super-stt/protocol/)**
+- **[Browse the API reference](https://jorge-menjivar.github.io/super-voice/protocol/)**
   — every endpoint, parameter and response shape, rendered from
-  [openapi.json](https://jorge-menjivar.github.io/super-stt/protocol/openapi.json).
+  [openapi.json](https://jorge-menjivar.github.io/super-voice/protocol/openapi.json).
   Point a client generator at that file to get a typed client in your
   language.
 
   Two renderings of the same document, each linking to the other:
-  [Swagger UI](https://jorge-menjivar.github.io/super-stt/protocol/) and
-  [Scalar](https://jorge-menjivar.github.io/super-stt/protocol/scalar.html).
+  [Swagger UI](https://jorge-menjivar.github.io/super-voice/protocol/) and
+  [Scalar](https://jorge-menjivar.github.io/super-voice/protocol/scalar.html).
   Locally, `just openapi-serve` opens the first and `just openapi-serve
   --scalar` the second. The Swagger view offers "Try it out", which reaches a
   running daemon over its TCP listener — a browser cannot dial the Unix

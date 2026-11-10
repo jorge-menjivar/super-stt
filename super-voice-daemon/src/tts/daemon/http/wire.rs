@@ -47,7 +47,7 @@ pub(crate) struct Ack {
 /// human and may be reworded at any time.
 ///
 /// [`transport.md`]:
-/// https://github.com/jorge-menjivar/super-tts/blob/main/docs/protocol/transport.md
+/// https://github.com/jorge-menjivar/super-voice/blob/main/docs/protocol/transport.md
 #[derive(Serialize, ToSchema)]
 pub(crate) struct ErrorEnvelope {
     /// Always `error`.

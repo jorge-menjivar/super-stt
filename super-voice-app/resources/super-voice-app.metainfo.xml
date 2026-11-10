@@ -23,25 +23,25 @@
   </developer>
   <icon type="stock">super-voice-app</icon>
   <launchable type="desktop-id">super-voice-app.desktop</launchable>
-  <url type="homepage">https://github.com/jorge-menjivar/super-stt</url>
-  <url type="bugtracker">https://github.com/jorge-menjivar/super-stt/issues</url>
-  <url type="vcs-browser">https://github.com/jorge-menjivar/super-stt</url>
+  <url type="homepage">https://github.com/jorge-menjivar/super-voice</url>
+  <url type="bugtracker">https://github.com/jorge-menjivar/super-voice/issues</url>
+  <url type="vcs-browser">https://github.com/jorge-menjivar/super-voice</url>
   <screenshots>
     <screenshot type="default">
       <caption>Pick a backend and load a speech model</caption>
-      <image>https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/.github/assets/screenshots/app-1.png</image>
+      <image>https://raw.githubusercontent.com/jorge-menjivar/super-voice/main/.github/assets/screenshots/app-1.png</image>
     </screenshot>
     <screenshot>
       <caption>Choose which model runs, and whether it runs on CPU or GPU</caption>
-      <image>https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/.github/assets/screenshots/app-4.png</image>
+      <image>https://raw.githubusercontent.com/jorge-menjivar/super-voice/main/.github/assets/screenshots/app-4.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse the catalog of available backends</caption>
-      <image>https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/.github/assets/screenshots/app-7.png</image>
+      <image>https://raw.githubusercontent.com/jorge-menjivar/super-voice/main/.github/assets/screenshots/app-7.png</image>
     </screenshot>
     <screenshot>
       <caption>Tune audio feedback and recording behavior</caption>
-      <image>https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/.github/assets/screenshots/app-8.png</image>
+      <image>https://raw.githubusercontent.com/jorge-menjivar/super-voice/main/.github/assets/screenshots/app-8.png</image>
     </screenshot>
   </screenshots>
   <provides>
@@ -72,13 +72,13 @@
        than being restated (and drifting) here. -->
   <releases>
     <release version="0.2.4" date="2026-09-08">
-      <url type="details">https://github.com/jorge-menjivar/super-stt/releases/tag/v0.2.4</url>
+      <url type="details">https://github.com/jorge-menjivar/super-voice/releases/tag/v0.2.4</url>
     </release>
     <release version="0.2.3" date="2026-08-27">
-      <url type="details">https://github.com/jorge-menjivar/super-stt/releases/tag/v0.2.3</url>
+      <url type="details">https://github.com/jorge-menjivar/super-voice/releases/tag/v0.2.3</url>
     </release>
     <release version="0.2.2" date="2026-08-26">
-      <url type="details">https://github.com/jorge-menjivar/super-stt/releases/tag/v0.2.2</url>
+      <url type="details">https://github.com/jorge-menjivar/super-voice/releases/tag/v0.2.2</url>
     </release>
   </releases>
 </component>

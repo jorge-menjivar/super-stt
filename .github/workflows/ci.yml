@@ -357,7 +357,7 @@ jobs:
       # the `gh-pages` branch (the registry index.json lives there), so only the
       # `protocol/` subtree is replaced and everything else on the branch is
       # left alone. Served at
-      # https://jorge-menjivar.github.io/super-stt/protocol/.
+      # https://jorge-menjivar.github.io/super-voice/protocol/.
       - name: Publish protocol docs to gh-pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
@@ -483,7 +483,7 @@ jobs:
       # that requires Pages Source = "GitHub Actions", which would break the
       # registry deploy. Instead we push the report into a `coverage/` subtree of
       # the same branch, leaving the registry files untouched.
-      # Served at https://jorge-menjivar.github.io/super-stt/coverage/.
+      # Served at https://jorge-menjivar.github.io/super-voice/coverage/.
       - name: Publish coverage to gh-pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:

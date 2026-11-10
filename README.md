@@ -8,7 +8,7 @@
 
 *One shortcut to dictate anywhere • Any model from a growing library • An open protocol any app can build on • Built in Rust*
 
-[![coverage](https://img.shields.io/endpoint?url=https://jorge-menjivar.github.io/super-stt/coverage/coverage.json)](https://jorge-menjivar.github.io/super-stt/coverage/)
+[![coverage](https://img.shields.io/endpoint?url=https://jorge-menjivar.github.io/super-voice/coverage/coverage.json)](https://jorge-menjivar.github.io/super-voice/coverage/)
 
 </div>
 
@@ -31,7 +31,7 @@ Under the hood it's two things:
 **Quick install** - detects your system and downloads pre-built binaries:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-voice/main/install.sh | bash
 ```
 
 Append `-s -- --beta` for the latest beta.
@@ -39,8 +39,8 @@ Append `-s -- --beta` for the latest beta.
 **Build from source** - for the very latest changes (needs the [build prerequisites](./CONTRIBUTING.md#prerequisites)):
 
 ```bash
-git clone https://github.com/jorge-menjivar/super-stt.git
-cd super-stt
+git clone https://github.com/jorge-menjivar/super-voice.git
+cd super-voice
 just install
 ```
 
@@ -118,7 +118,7 @@ Models come from a **library** of backends you install on demand. Open the app, 
 
 > **GPU acceleration** is a property of the model, not a separate build of the app. Install a GPU-capable backend (like Voxtral or Qwen3-ASR) and the daemon downloads the build matched to your NVIDIA GPU automatically. You just need an up-to-date driver.
 
-This is a snapshot. The app always shows the current catalog, published live at [`jorge-menjivar.github.io/super-stt/index.json`](https://jorge-menjivar.github.io/super-stt/index.json). Want a model that isn't there? Anyone can [publish one](./docs/protocol/README.md#add-your-own-model).
+This is a snapshot. The app always shows the current catalog, published live at [`jorge-menjivar.github.io/super-voice/index.json`](https://jorge-menjivar.github.io/super-voice/index.json). Want a model that isn't there? Anyone can [publish one](./docs/protocol/README.md#add-your-own-model).
 
 ## 🖼️ Screenshots
 
@@ -173,7 +173,7 @@ This is a snapshot. The app always shows the current catalog, published live at 
 
 Super Voice is built to be built on. The details live in developer-facing docs:
 
-- **Build a client** — get transcriptions, event streams, or recording control into your own app, in any language, over the documented HTTP protocol → **[docs/protocol/](./docs/protocol/)**, with every endpoint in the **[API reference](https://jorge-menjivar.github.io/super-stt/protocol/)**
+- **Build a client** — get transcriptions, event streams, or recording control into your own app, in any language, over the documented HTTP protocol → **[docs/protocol/](./docs/protocol/)**, with every endpoint in the **[API reference](https://jorge-menjivar.github.io/super-voice/protocol/)**
 - **Add your own model** — package a speech model as a backend the daemon can install and run, then publish it to the catalog → **[docs/protocol/](./docs/protocol/)** and **[registry/README.md](./registry/README.md)**
 - **Contribute** — build from source, workspace layout, and the PR workflow → **[CONTRIBUTING.md](./CONTRIBUTING.md)**
 

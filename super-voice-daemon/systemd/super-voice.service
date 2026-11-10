@@ -1,6 +1,6 @@
 [Unit]
 Description=Super Voice daemon - speech to text and text to speech
-Documentation=https://github.com/jorge-menjivar/super-stt
+Documentation=https://github.com/jorge-menjivar/super-voice
 After=pipewire.service pulseaudio.service graphical-session.target
 Requires=graphical-session.target
 # A panic aborts the daemon and it is started again a second later. Five

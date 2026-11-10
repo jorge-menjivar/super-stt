@@ -67,7 +67,7 @@ async fn overlapping_checks_notify_at_most_once() {
     let mock = s
         .mock(
             "GET",
-            "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+            "/repos/jorge-menjivar/super-voice/releases?per_page=100",
         )
         .with_status(200)
         .with_body(r#"[{"tag_name":"v55.0.0","prerelease":false,"assets":[]}]"#)
@@ -119,7 +119,7 @@ async fn every_daemon_run_announces_a_waiting_update_exactly_once() {
     let mut s = mockito::Server::new_async().await;
     s.mock(
         "GET",
-        "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+        "/repos/jorge-menjivar/super-voice/releases?per_page=100",
     )
     .with_status(200)
     .with_body(r#"[{"tag_name":"v91.0.0","prerelease":false,"assets":[]}]"#)
@@ -164,7 +164,7 @@ async fn update_available_event_published_only_when_the_candidate_is_new() {
     let mock = s
         .mock(
             "GET",
-            "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+            "/repos/jorge-menjivar/super-voice/releases?per_page=100",
         )
         .with_status(200)
         .with_body(r#"[{"tag_name":"v77.0.0","prerelease":false,"assets":[]}]"#)
@@ -212,7 +212,7 @@ async fn failed_check_publishes_no_event_and_notifies_nobody() {
     let mut s = mockito::Server::new_async().await;
     s.mock(
         "GET",
-        "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+        "/repos/jorge-menjivar/super-voice/releases?per_page=100",
     )
     .with_status(200)
     .with_body(r#"[{"tag_name":"v81.0.0","prerelease":false,"assets":[]}]"#)
@@ -264,7 +264,7 @@ async fn assert_method_notifies(method: NotificationMethod, tag: &str) {
     let mut s = mockito::Server::new_async().await;
     s.mock(
         "GET",
-        "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+        "/repos/jorge-menjivar/super-voice/releases?per_page=100",
     )
     .with_status(200)
     .with_body(format!(
@@ -313,7 +313,7 @@ async fn assert_method_does_not_notify_or_record(method: NotificationMethod, tag
     let mut s = mockito::Server::new_async().await;
     s.mock(
         "GET",
-        "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+        "/repos/jorge-menjivar/super-voice/releases?per_page=100",
     )
     .with_status(200)
     .with_body(format!(
