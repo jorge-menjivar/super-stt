@@ -54,6 +54,15 @@ fn main() -> cosmic::iced::Result {
             .min_height(180.0),
     );
 
+    // A scene opens at one size, so every shot of it frames the same window;
+    // see `core::app::scene`.
+    let scene = core::app::scene::requested();
+    let settings = if scene.is_some() {
+        settings.size(core::app::scene::WINDOW_SIZE)
+    } else {
+        settings
+    };
+
     // A Mac window keeps its native frame, traffic lights included; the app
     // draws its toolbar under the transparent title bar (see `core::app::macos`).
     // Left to libcosmic, the window is borderless and has no buttons at all.
@@ -71,13 +80,17 @@ fn main() -> cosmic::iced::Result {
     // Run as a single-instance D-Bus-activated app. A second launch (e.g.
     // from the update notification's "Open Super Voice" action) activates
     // and focuses the existing window instead of opening a duplicate.
+    //
+    // Not for a scene, which opens beside a window the user may already
+    // have rather than raising that one.
     #[cfg(target_os = "linux")]
-    return cosmic::app::run_single_instance::<core::AppModel>(settings, Flags);
+    if scene.is_none() {
+        return cosmic::app::run_single_instance::<core::AppModel>(settings, Flags);
+    }
 
-    // libcosmic builds single-instance activation on zbus, so the feature is
-    // off where there is no D-Bus (see this crate's Cargo.toml). Nothing
-    // replaces it: a second launch opens a second window rather than
-    // focusing the first.
-    #[cfg(not(target_os = "linux"))]
-    return cosmic::app::run::<core::AppModel>(settings, Flags);
+    // Elsewhere, a plain run. libcosmic builds single-instance activation on
+    // zbus, so the feature is off where there is no D-Bus (see this crate's
+    // Cargo.toml). Nothing replaces it: a second launch opens a second window
+    // rather than focusing the first.
+    cosmic::app::run::<core::AppModel>(settings, Flags)
 }

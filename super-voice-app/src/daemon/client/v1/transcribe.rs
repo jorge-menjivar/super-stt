@@ -3,7 +3,7 @@
 
 use crate::daemon::client::internal::response::require_unit;
 use crate::daemon::client::internal::session::{
-    APP_ID_NAME, APP_NAME, SETTINGS_SCOPES, socket_path, with_settings_token,
+    APP_NAME, SETTINGS_SCOPES, app_id, socket_path, with_settings_token,
 };
 use super_voice_shared::daemon::http_client;
 use super_voice_shared::daemon::http_client::HttpResult;
@@ -58,17 +58,17 @@ pub fn record_command_stream() -> impl futures_util::Stream<Item = RecordEvent> 
                 // InvalidSession, drop the cache and re-auth once.
                 let mut stream = {
                     let token =
-                        session::obtain(socket.clone(), APP_ID_NAME, APP_NAME, SETTINGS_SCOPES)
+                        session::obtain(socket.clone(), app_id(), APP_NAME, SETTINGS_SCOPES)
                             .await
                             .map_err(|e| e.to_string())?;
                     match http_client::transcribe_stream(socket.clone(), &token, opts.clone()).await
                     {
                         Ok(s) => Box::pin(s),
                         Err(HttpError::InvalidSession { .. }) => {
-                            let _ = session::forget(APP_ID_NAME);
+                            let _ = session::forget(app_id());
                             let token = session::obtain(
                                 socket.clone(),
-                                APP_ID_NAME,
+                                app_id(),
                                 APP_NAME,
                                 SETTINGS_SCOPES,
                             )

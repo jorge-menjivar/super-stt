@@ -3,6 +3,7 @@
 mod events;
 mod handlers;
 mod init;
+pub(crate) mod scene;
 mod small_state;
 mod subscription;
 mod update;
@@ -213,6 +214,9 @@ pub struct AppModel {
     /// on the owning page instead of hijacking the UI (Tier 1 #13) or being
     /// dropped to the log (Tier 1 #15). `None` when there is no pending error.
     pub action_error: Option<crate::state::ActionError>,
+    /// The view `just screenshots` asked for, until the app has opened it and
+    /// said so; see `scene`. `None` for a normal launch.
+    scene: Option<scene::Progress>,
     /// Where the native title bar put the traffic lights; see `macos`.
     #[cfg(target_os = "macos")]
     title_bar: macos::TitleBar,
@@ -423,6 +427,14 @@ impl cosmic::Application for AppModel {
             subs.push(
                 cosmic::iced::time::every(crate::ui::icons::SPINNER_FRAME)
                     .map(|_| Message::ModelsPage(ModelsPageMessage::AddPreviewSpin)),
+            );
+        }
+
+        // A scene looks for its widget until it has found it or given up.
+        if self.scene.is_some() {
+            subs.push(
+                cosmic::iced::time::every(scene::STEP)
+                    .map(|_| Message::Shell(ShellMessage::SceneStep)),
             );
         }
 

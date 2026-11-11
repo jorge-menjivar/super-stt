@@ -707,6 +707,36 @@ run-consent *scopes: linux-only-gui
         SUPER_VOICE_AUTH_EXE_PATH="/usr/bin/test-app" \
         cargo run --bin {{ consent_name }}
 
+# Screenshot the settings app for the README: every app-N.png in
+# .github/assets/screenshots, or only the ones named. It runs off screen, in a
+# nested COSMIC compositor on Xvfb, against the running daemon. See
+# scripts/screenshots.sh for how, and for the shots by name.
+#
+# The Models page shows a different card for each state speech to text is in,
+# so the run moves the daemon through them: no backend, a backend with no
+# model, then the model running. It shows the model you have loaded, and puts
+# speech to text back as it found it at the end, Ctrl-C included. Load the
+# model to show before running; dictation is out while it reloads.
+#
+# The daemon binds a token to the binary it was granted to, so the first run
+# after the app is rebuilt asks for consent on your desktop. Choose Allow.
+#
+# Needs Xvfb, xdotool, cosmic-comp, cosmic-bg, grim and ImageMagick.
+#
+# Usage: just screenshots [name...]
+#   just screenshots
+#   just screenshots app-3 app-4
+[doc("Screenshot the settings app for the README. Usage: just screenshots [name...]")]
+screenshots *names:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # A debug build: scenes are compiled out of release builds. Cargo
+    # reports where it put the binary, which follows `CARGO_TARGET_DIR`.
+    exe=$(cargo build {{ app_select }} --message-format=json-render-diagnostics \
+        | sed -n 's|.*"executable":"\([^"]*/{{ app_name }}\)".*|\1|p')
+    bash scripts/screenshots.sh "$exe" .github/assets/screenshots {{ names }}
+
 # Run security audit to check for vulnerabilities
 audit:
     cargo audit

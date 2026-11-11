@@ -5,6 +5,7 @@ use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, text};
 
 use crate::core::app::AppModel;
+use crate::core::app::scene::{self, Target};
 use crate::daemon::backends::BackendInfo;
 use crate::state::ContextPage;
 use crate::state::Stage;
@@ -22,14 +23,14 @@ pub(super) fn no_backend_empty_state<'a>(narrow: bool) -> Element<'a, Message> {
         narrow,
         crate::fl!("no-backend-selected"),
         crate::fl!("select-a-backend-to-start-transcribing"),
-        Some(
+        Some(scene::tag(
+            Target::SelectBackend,
             button::suggested(crate::fl!("select-transcription-backend"))
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
                 .on_press(Message::Shell(ShellMessage::ToggleContextPage(
                     ContextPage::SelectBackend,
-                )))
-                .into(),
-        ),
+                ))),
+        )),
     )
 }
 
