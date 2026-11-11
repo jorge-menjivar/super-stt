@@ -9,8 +9,8 @@ use super_voice_registry_types::Voice;
 /// Entries that predate the `id` requirement, and the migration backlog.
 ///
 /// `registry.schema.json` requires an `id` of *every* entry, so an editor
-/// already flags these two. They are tolerated here so the scheduled index
-/// build keeps publishing a catalog while they are fixed one at a time —
+/// already flags the one left. It is tolerated here so the scheduled index
+/// build keeps publishing a catalog until it is fixed —
 /// removing a name without fixing its backend would take every user's Browse
 /// listing down with it.
 ///
@@ -18,7 +18,7 @@ use super_voice_registry_types::Voice;
 /// pins the release to it, so the order is: add `[backend].id` to that
 /// backend's own `backend.toml`, cut a release, *then* add the same id here
 /// and delete the name below. Adding the id here first earns an `IdMismatch`.
-const GRANDFATHERED: &[&str] = &["deepgram", "voxtral"];
+const GRANDFATHERED: &[&str] = &["deepgram"];
 
 const INDEXER: Indexer = Indexer {
     name: "super-voice-indexer",
@@ -49,7 +49,7 @@ mod tests {
     /// The entries still being migrated keep publishing without an `id`.
     #[test]
     fn accepts_a_grandfathered_entry_without_an_id() {
-        let text = "[voxtral]\n    repo = \"github.com/jorge-menjivar/super-stt-voxtral\"\n    forge = \"github\"\n";
+        let text = "[deepgram]\n    repo = \"github.com/jorge-menjivar/super-stt-deepgram\"\n    forge = \"github\"\n";
         Registry::parse(text, GRANDFATHERED).expect("existing entries are exempt");
     }
 }

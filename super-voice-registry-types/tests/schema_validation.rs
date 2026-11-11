@@ -95,10 +95,10 @@ fn a_fixture_still_exercises_the_provider_key() {
     );
 }
 
-/// The schema requires an `id` of every entry. Two predate the requirement
+/// The schema requires an `id` of every entry. One predates the requirement
 /// and cannot be fixed from this file: an entry that declares an `id` pins the
-/// release to it, and neither of those two backends publishes a manifest
-/// declaring one — so adding it here would turn a missing id into an
+/// release to it, and that backend publishes no manifest declaring one — so
+/// adding it here would turn a missing id into an
 /// `IdMismatch` and drop the backend out of the catalog. Fixing one means
 /// adding `[backend].id` to that backend's own repo, cutting a release, and
 /// only then editing this file.
@@ -106,7 +106,7 @@ fn a_fixture_still_exercises_the_provider_key() {
 /// They are named here so the backlog is visible and shrinking: delete a name
 /// when its entry gains an `id`. Anything *else* the schema objects to — a new
 /// entry with no id, a malformed key — fails this test.
-const ENTRIES_STILL_WITHOUT_AN_ID: &[&str] = &["deepgram", "voxtral"];
+const ENTRIES_STILL_WITHOUT_AN_ID: &[&str] = &["deepgram"];
 
 #[test]
 fn accepts_registry_toml() {
