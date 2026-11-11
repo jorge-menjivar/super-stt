@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-11T22:29:16Z",
+  "generated_at": "2026-11-11T22:48:12Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -975,17 +975,17 @@
     },
     {
       "id": "whisper",
-      "backend_id": "app.super-stt.whisper",
+      "backend_id": "app.super-voice.whisper",
       "source": "github.com/jorge-menjivar/super-stt-whisper",
-      "version": "0.1.1",
-      "tag": "v0.1.1",
+      "version": "0.2.0",
+      "tag": "v0.2.0",
       "name": "Whisper",
       "description": "Local Whisper speech-to-text.",
       "license": "GPL-3.0-only",
       "kind": "subprocess",
       "contract": "v2",
       "min_client": "0.2.4-beta.1",
-      "entrypoint": "super-stt-backend-whisper",
+      "entrypoint": "super-voice-backend-whisper",
       "allowed_hosts": [],
       "online": false,
       "supports_gpu": true,
@@ -999,7 +999,7 @@
             "gpu"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "whisper-tiny.en",
@@ -1009,7 +1009,7 @@
             "gpu"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "whisper-base",
@@ -1019,7 +1019,7 @@
             "gpu"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "whisper-base.en",
@@ -1029,7 +1029,7 @@
             "gpu"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "whisper-small",
@@ -1039,7 +1039,7 @@
             "gpu"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "whisper-small.en",
@@ -1049,7 +1049,7 @@
             "gpu"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "whisper-medium",
@@ -1059,7 +1059,7 @@
             "gpu"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "whisper-medium.en",
@@ -1069,7 +1069,7 @@
             "gpu"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "whisper-large",
@@ -1079,7 +1079,7 @@
             "gpu"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         }
       ],
       "secrets": [],
@@ -1089,131 +1089,131 @@
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 3478946,
-            "sha256": "58f0cc275a6124d6ad69c83400508ce8a99aef6ca00121efa3a4e47de86ce336"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 3649829,
+            "sha256": "2b4e289df56a3886bfc0626a689e311a4794e64df91e7384d1f8e0a36894ca60"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 12,
             "cuda_sm": 75,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda12-sm75.tar.gz",
-            "size": 14632193,
-            "sha256": "6e058c2890066fb9b008131d044517ea4daf7636276cd853b6bf80ec68fe4a95"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda12-sm75.tar.gz",
+            "size": 14797344,
+            "sha256": "be780c4ce177884e5b6a0e393371662605ef57232485906859a8d3dde20bf510"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 12,
             "cuda_sm": 80,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda12-sm80.tar.gz",
-            "size": 14238000,
-            "sha256": "4c35e7738176f2aa01a271e5c62da9bd8eefcd261fc0fbe61d0b3ccd303f23bc"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda12-sm80.tar.gz",
+            "size": 14402745,
+            "sha256": "a84ce6679882205b5ba1871159bac13c469c9c1d9174b2abffb4fae5651aab31"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 12,
             "cuda_sm": 86,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda12-sm86.tar.gz",
-            "size": 13646222,
-            "sha256": "f5861a4dba579bf90aa7fa0a4fb5b9f2d960655451e623aae4fc8630c8523a9a"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda12-sm86.tar.gz",
+            "size": 13811487,
+            "sha256": "855ca08dff2e4abfce2f3a098e07b249a14f81b6a04b769e81ebb59fd9610b27"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 12,
             "cuda_sm": 89,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda12-sm89.tar.gz",
-            "size": 13628228,
-            "sha256": "7cc3a79dba1d3b2b2a604238129478e5500ca0f6d1cf2f89de0b362d9b3bab83"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda12-sm89.tar.gz",
+            "size": 13791402,
+            "sha256": "350a6e969d7b724e75d442b3fb2243248e61604142576254de458f7857f5ef67"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 12,
             "cuda_sm": 90,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda12-sm90.tar.gz",
-            "size": 14140766,
-            "sha256": "c1b45126d7e6735cba4fb97140b46de2020c36416e631a08886941dae6a07efa"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda12-sm90.tar.gz",
+            "size": 14310923,
+            "sha256": "208112268acbb2865cf4a9467824e6d6d722438aff61503dd7014d871aed253f"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 13,
             "cuda_sm": 75,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda13-sm75.tar.gz",
-            "size": 14753332,
-            "sha256": "7c9622760e0c1d0af93d99518492eab813aae3dcb8913410eeb66239778c93d5"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm75.tar.gz",
+            "size": 14918931,
+            "sha256": "8c5c9a0980874058ad3201d220939e2a76819af33053c0cc2a45ffbfbf8429b0"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 13,
             "cuda_sm": 80,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda13-sm80.tar.gz",
-            "size": 14360972,
-            "sha256": "63caf2ae6cb47a10516fcfc0ecf3b0c55fdb686078e7e797a0eb1cba3ae8047f"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm80.tar.gz",
+            "size": 14522396,
+            "sha256": "6dce1bce5ec34eeb4f4d4f34fdc32ba50251e68b41a35420d8b5c946f33c778a"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 13,
             "cuda_sm": 86,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda13-sm86.tar.gz",
-            "size": 13766107,
-            "sha256": "b5a44803e487fb5c8e8eba2256e84a9e7c735db0ca43e0dff28f2b937d10dc71"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm86.tar.gz",
+            "size": 13930333,
+            "sha256": "cb8c9a95fe0c8b6066029d07ba04f8154696c132db86b781403f7c80bf7eee8b"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 13,
             "cuda_sm": 89,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda13-sm89.tar.gz",
-            "size": 13743622,
-            "sha256": "f14ceca0eaacfbb4b7c69710fa848d71aa04f52cd26c9474066741bf832b27c3"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm89.tar.gz",
+            "size": 13910105,
+            "sha256": "52684e8c13c9536d5e7691590d10dbcf13e28091aa96b027dbe1aa45987142a2"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 13,
             "cuda_sm": 90,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda13-sm90.tar.gz",
-            "size": 14263503,
-            "sha256": "7e748af24ac9891429bf77d592caed1d0543f1dc452bf1f5be4ea618bbc1dbd6"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm90.tar.gz",
+            "size": 14428362,
+            "sha256": "75986f75264f7b753fc587558f5b1333f0a8f31f84bbe83c352a3cce4136d221"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 13,
             "cuda_sm": 100,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda13-sm100.tar.gz",
-            "size": 16026344,
-            "sha256": "a03b9c39298d4feecfafbf1115afa857d4841aa28b4a306969519f2dbfe25902"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm100.tar.gz",
+            "size": 16191343,
+            "sha256": "e18b548d4e976fbfebc5c28833cbc3edae45a46f7b49ab52fe40c644fe6debcb"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 13,
             "cuda_sm": 120,
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-x86_64-unknown-linux-gnu-cuda13-sm120.tar.gz",
-            "size": 15978660,
-            "sha256": "4f72c8a8c9ff1bae6ac8c9eb20dc701b5de5b3149bdde768b25093470b2c2107"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm120.tar.gz",
+            "size": 16145726,
+            "sha256": "04799924a91fd9818b5ade2e1975eaff3bad5a48e5d93244f1e6c8e49a35c410"
           },
           {
             "target": "aarch64-unknown-linux-gnu",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/whisper-aarch64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 2978654,
-            "sha256": "8228cdc582877f2d79920e239cb8810366b2bd68909560a4138e47d741fb785a"
+            "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/whisper-aarch64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 3164318,
+            "sha256": "8b7c44577fc3e5ac29022612d70d76fc39d7ab9c52d1dd5b2ad55d88b4c32401"
           }
         ]
       },
       "manifest": {
-        "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.1.1/backend.toml",
-        "size": 15401,
-        "sha256": "acdc6c4e816325b5b2957488b843b3c7af17d00933b37469584db13c9572e785"
+        "url": "https://github.com/super-libre/super-voice-whisper/releases/download/v0.2.0/backend.toml",
+        "size": 16019,
+        "sha256": "3da91ee6db2ec91784cdd13791a65115597073ca567def9f13354730aec20603"
       }
     }
   ]
