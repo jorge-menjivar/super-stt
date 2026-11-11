@@ -52,6 +52,7 @@ impl AppModel {
 
             ShellMessage::SceneStep => self.scene_step(),
             ShellMessage::SceneTarget(bounds) => self.scene_target(bounds),
+            ShellMessage::SceneStt(read) => self.scene_stt(read),
 
             #[cfg(target_os = "macos")]
             ShellMessage::WindowOpened(id) => self.window_opened(id),

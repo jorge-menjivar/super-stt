@@ -76,6 +76,9 @@ pub enum ShellMessage {
     SceneStep,
     /// Where the running scene's widget is drawn; `None` when it is not.
     SceneTarget(Option<cosmic::iced::Rectangle>),
+    /// The transcription stage as the daemon has it, read for the running
+    /// scene, which puts it in the state its shot needs.
+    SceneStt(Result<crate::daemon::client::StageState, String>),
     /// A window finished opening, so its `NSWindow` can be given the native
     /// frame. See `core::app::macos`.
     #[cfg(target_os = "macos")]

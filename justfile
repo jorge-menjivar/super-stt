@@ -709,10 +709,14 @@ run-consent *scopes: linux-only-gui
 
 # Screenshot the settings app for the README: every app-N.png in
 # .github/assets/screenshots, or only the ones named. It runs off screen, in a
-# nested COSMIC compositor on Xvfb, against the running daemon, and changes
-# nothing in the daemon. A shot the daemon's state rules out is skipped: the
-# model dropdown only shows while no model is loaded, for one. See
+# nested COSMIC compositor on Xvfb, against the running daemon. See
 # scripts/screenshots.sh for how, and for the shots by name.
+#
+# The Models page shows a different card for each state speech to text is in,
+# so the run moves the daemon through them: no backend, a backend with no
+# model, then the model running. It shows the model you have loaded, and puts
+# speech to text back as it found it at the end, Ctrl-C included. Load the
+# model to show before running; dictation is out while it reloads.
 #
 # The daemon binds a token to the binary it was granted to, so the first run
 # after the app is rebuilt asks for consent on your desktop. Choose Allow.

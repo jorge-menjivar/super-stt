@@ -9,12 +9,19 @@
 //! over a selected backend. So the app finds the widget, prints where it is,
 //! and the recipe clicks there. On stdout:
 //!
-//! - `scene: ready` once the daemon is connected, when there is nothing to click.
+//! - `scene: ready` once the page is up, when there is nothing to click.
 //! - `scene: click X Y` with the widget's center in window coordinates, once it
 //!   has held still for [`SETTLE`].
 //! - `scene: unavailable: <why>` when the widget has not appeared [`GIVE_UP`]
-//!   after connecting. The daemon's state decides what a page shows, and a
-//!   scene never changes that state.
+//!   after the page came up.
+//! - `scene: failed: <why>` when speech to text could not be put in the state
+//!   the scene needs.
+//! - `scene: stt` and the stage's state, backend, model and device, tab
+//!   separated, for the `stt` scene, which only reports.
+//!
+//! The daemon's state decides what the Models page shows, so a scene first puts
+//! speech to text in the state its shot needs; see [`stt`]. Everything else is
+//! shot as found.
 //!
 //! A scene opens at [`WINDOW_SIZE`], and skips single-instance activation, so
 //! it opens a window of its own beside one the user may already have.
@@ -28,9 +35,12 @@ use cosmic::iced::{Rectangle, Size};
 use cosmic::prelude::*;
 use cosmic::widget;
 
+mod stt;
+
 use super::AppModel;
 use crate::state::{DaemonStatus, ModelsTab, Page, Section};
 use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage};
+use stt::{Arranging, Stt};
 
 /// The size a scene's window opens at.
 pub(crate) const WINDOW_SIZE: Size = Size::new(1280.0, 800.0);
@@ -43,10 +53,9 @@ pub(super) const STEP: Duration = Duration::from_millis(250);
 /// the controls below it.
 const SETTLE: Duration = Duration::from_millis(1500);
 
-/// How long after connecting a scene waits for its widget. The daemon's
-/// answers land within a couple of seconds of connecting; past that, a widget
-/// that has not appeared is one the state rules out, and every skipped shot
-/// costs this much.
+/// How long after its page comes up a scene waits for its widget. The
+/// daemon's answers land within a couple of seconds; a widget missing past
+/// that is one the page does not draw.
 const GIVE_UP: Duration = Duration::from_secs(6);
 
 /// A view the app can open on.
@@ -56,66 +65,95 @@ pub(crate) struct Scene {
     /// The Library page's Browse tab rather than Installed.
     browse: bool,
     target: Option<Target>,
+    /// What speech to text has to be doing first; `None` takes it as found.
+    stt: Option<Stt>,
+    /// Print what speech to text is doing, and nothing else.
+    report: bool,
 }
 
 impl Scene {
-    const fn page(page: Page) -> Self {
+    /// `page`, with speech to text `stt`.
+    const fn page(page: Page, stt: Stt) -> Self {
         Self {
             page,
             browse: false,
             target: None,
+            stt: Some(stt),
+            report: false,
         }
     }
 
-    const fn click(page: Page, target: Target) -> Self {
+    /// `page` with `target` clicked, and speech to text `stt`.
+    const fn click(page: Page, target: Target, stt: Stt) -> Self {
         Self {
-            page,
-            browse: false,
             target: Some(target),
+            ..Self::page(page, stt)
         }
     }
 }
 
 /// The scenes, by the name `SUPER_VOICE_APP_SCENE` takes.
+///
+/// The Models page's follow its card from no backend to a model running; the
+/// rest are shot with the model running, as the app is used.
 const SCENES: &[(&str, Scene)] = &[
-    ("models", Scene::page(Page::Models)),
+    ("models", Scene::page(Page::Models, Stt::Empty)),
     (
         "models/select-backend",
-        Scene::click(Page::Models, Target::SelectBackend),
+        Scene::click(Page::Models, Target::SelectBackend, Stt::Empty),
     ),
     (
         "models/model-menu",
-        Scene::click(Page::Models, Target::ModelMenu),
+        Scene::click(Page::Models, Target::ModelMenu, Stt::Selected),
     ),
     (
         "models/device-menu",
-        Scene::click(Page::Models, Target::DeviceMenu),
+        Scene::click(Page::Models, Target::DeviceMenu, Stt::Running),
     ),
     (
         "models/language",
-        Scene::click(Page::Models, Target::Language),
+        Scene::click(Page::Models, Target::Language, Stt::Running),
     ),
-    ("library", Scene::page(Page::Library)),
+    ("library", Scene::page(Page::Library, Stt::Running)),
     (
         "library/browse",
         Scene {
-            page: Page::Library,
             browse: true,
-            target: None,
+            ..Scene::page(Page::Library, Stt::Running)
         },
     ),
-    ("recording", Scene::page(Page::Recording)),
-    ("input-simulation", Scene::page(Page::InputSimulation)),
-    ("contexts", Scene::page(Page::Contexts)),
+    ("recording", Scene::page(Page::Recording, Stt::Running)),
+    (
+        "input-simulation",
+        Scene::page(Page::InputSimulation, Stt::Running),
+    ),
+    ("contexts", Scene::page(Page::Contexts, Stt::Running)),
     (
         "contexts/edit",
-        Scene::click(Page::Contexts, Target::EditContext),
+        Scene::click(Page::Contexts, Target::EditContext, Stt::Running),
     ),
-    ("speech", Scene::page(Page::Speech)),
-    ("voices", Scene::page(Page::Voices)),
-    ("customization", Scene::page(Page::Customization)),
-    ("connection", Scene::page(Page::Connection)),
-    ("updates", Scene::page(Page::Updates)),
+    ("speech", Scene::page(Page::Speech, Stt::Running)),
+    ("voices", Scene::page(Page::Voices, Stt::Running)),
+    (
+        "customization",
+        Scene::page(Page::Customization, Stt::Running),
+    ),
+    ("connection", Scene::page(Page::Connection, Stt::Running)),
+    ("updates", Scene::page(Page::Updates, Stt::Running)),
+    // No shot: what `just screenshots` reads first, and how it puts speech to
+    // text back afterwards.
+    (
+        "stt",
+        Scene {
+            stt: None,
+            report: true,
+            ..Scene::page(Page::Models, Stt::Empty)
+        },
+    ),
+    ("stt/empty", Scene::page(Page::Models, Stt::Empty)),
+    ("stt/selected", Scene::page(Page::Models, Stt::Selected)),
+    ("stt/unloaded", Scene::page(Page::Models, Stt::Unloaded)),
+    ("stt/running", Scene::page(Page::Models, Stt::Running)),
 ];
 
 /// A widget a scene clicks.
@@ -156,8 +194,12 @@ impl Target {
             Self::DeviceMenu => {
                 "The device dropdown shows only for a model the daemon offers a device for."
             }
-            Self::Language => "The language button opens a picker only for a multilingual model.",
-            Self::EditContext => "The Edit button shows only once there is a context to edit.",
+            Self::Language => {
+                "The language button opens a picker only for a multilingual model. Load one."
+            }
+            Self::EditContext => {
+                "The Edit button shows only once there is a context to edit. Add one."
+            }
         }
     }
 }
@@ -244,17 +286,22 @@ fn bounds_of(id: widget::Id) -> Task<Option<Rectangle>> {
 /// has printed its line.
 pub(crate) struct Progress {
     scene: Scene,
-    /// When the daemon was first seen connected.
-    connected_at: Option<Instant>,
+    /// Speech to text on its way to what the scene needs; `None` once it is
+    /// there, or for a scene that takes it as found.
+    arranging: Option<Arranging>,
+    /// When the page came up: the daemon connected, with speech to text as the
+    /// scene needs it.
+    ready_at: Option<Instant>,
     /// Where the widget was last found, and since when it has been there.
     held: Option<(Rectangle, Instant)>,
 }
 
 impl Progress {
-    pub(super) const fn new(scene: Scene) -> Self {
+    pub(super) fn new(scene: Scene) -> Self {
         Self {
             scene,
-            connected_at: None,
+            arranging: (scene.stt.is_some() || scene.report).then(Arranging::new),
+            ready_at: None,
             held: None,
         }
     }
@@ -298,8 +345,9 @@ impl AppModel {
         Task::batch(tasks)
     }
 
-    /// One check on the running scene. Once the daemon is connected, report
-    /// ready, or look for the widget to click.
+    /// One check on the running scene. Once the daemon is connected, put
+    /// speech to text as the scene needs it, then report ready, or look for the
+    /// widget to click.
     pub(super) fn scene_step(&mut self) -> Task<cosmic::Action<Message>> {
         let connected = self.daemon_status == DaemonStatus::Connected;
         let Some(progress) = self.scene.as_mut() else {
@@ -308,13 +356,16 @@ impl AppModel {
         if !connected {
             return Task::none();
         }
-        let connected_at = *progress.connected_at.get_or_insert_with(Instant::now);
+        if progress.arranging.is_some() {
+            return self.read_stt();
+        }
+        let ready_at = *progress.ready_at.get_or_insert_with(Instant::now);
         let Some(target) = progress.scene.target else {
             println!("scene: ready");
             self.scene = None;
             return Task::none();
         };
-        if connected_at.elapsed() > GIVE_UP {
+        if ready_at.elapsed() > GIVE_UP {
             println!("scene: unavailable: {}", target.shown_when());
             self.scene = None;
             return Task::none();

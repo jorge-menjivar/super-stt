@@ -13,10 +13,16 @@
 # and a state directory of its own, so it never writes to the real one.
 #
 # Each shot is one launch of the app with SUPER_VOICE_APP_SCENE naming the view
-# (see super-voice-app/src/core/app/scene.rs). The app talks to the running
-# daemon and changes nothing in it. It prints when its view is up, or where
-# the widget to open is; xdotool clicks there through Xvfb. grim captures the
-# window once the picture stops changing.
+# (see super-voice-app/src/core/app/scene.rs). It prints when its view is up,
+# or where the widget to open is; xdotool clicks there through Xvfb. grim
+# captures the window once the picture stops changing.
+#
+# The Models page draws a different card for each state speech to text can be
+# in, so each shot first puts the running daemon's speech to text in the one
+# it needs: no backend, a backend with no model picked, or the model running
+# (super-voice-app/src/core/app/scene/stt.rs). The run reads what speech to
+# text is doing first, shows that backend and model, and puts it back at the
+# end, after Ctrl-C too. Dictation is out while the model reloads.
 #
 # The app runs on the real session bus, for its keyring token. The daemon
 # binds that token to the binary, so the first run after a rebuild asks for
@@ -114,14 +120,102 @@ xvfb_pid=""
 session_pid=""
 bg_pid=""
 app_pid=""
+# Speech to text as found: its state, backend, model and device. Put back at
+# the end once a shot may have moved it.
+stt_state=""
+stt_source=""
+stt_model=""
+stt_device=""
+moved=false
+first=true
+
+# Start the app on scene $1, with speech to text's backend, model and device
+# for the scene to put it on.
+launch() {
+    : >"$run/app.out"
+    env -u DISPLAY WAYLAND_DISPLAY="$socket" XDG_CONFIG_HOME="$run/config" \
+        SUPER_VOICE_APP_SCENE="$1" \
+        SUPER_VOICE_APP_SCENE_STT_SOURCE="$stt_source" \
+        SUPER_VOICE_APP_SCENE_STT_MODEL="$stt_model" \
+        SUPER_VOICE_APP_SCENE_STT_DEVICE="$stt_device" \
+        RUST_LOG=warn "$app" >"$run/app.out" 2>>"$log" &
+    app_pid=$!
+}
+
+stop_app() {
+    [ -n "$app_pid" ] || return 0
+    kill "$app_pid" 2>/dev/null || true
+    for _ in $(seq 50); do
+        kill -0 "$app_pid" 2>/dev/null || break
+        sleep 0.1
+    done
+    kill -KILL "$app_pid" 2>/dev/null || true
+    wait "$app_pid" 2>/dev/null || true
+    app_pid=""
+}
+
+# The app's first `scene:` line, or nothing if it exits or $1 seconds pass.
+# Only the first launch can be waiting on consent: the rest reuse its token.
+# A later one waits as long as speech to text takes to move: a model load.
+scene_line() {
+    local waited=0 line
+    while [ "$waited" -lt "$(($1 * 10))" ]; do
+        line=$(grep -m 1 '^scene: ' "$run/app.out" || true)
+        if [ -n "$line" ]; then
+            echo "${line#scene: }"
+            return 0
+        fi
+        kill -0 "$app_pid" 2>/dev/null || return 0
+        if [ "$waited" -eq 100 ]; then
+            if $first; then
+                echo "  waiting for the daemon; if a consent prompt is on your desktop, choose Allow" >&2
+            else
+                echo "  waiting for speech to text; a model may be loading" >&2
+            fi
+        fi
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+}
+
+# Speech to text as it was, in words.
+stt_described() {
+    case "$stt_state" in
+    empty) echo "no backend" ;;
+    selected) echo "$stt_source, no model" ;;
+    unloaded) echo "$stt_model from $stt_source, not loaded" ;;
+    running) echo "$stt_model from $stt_source, running on $stt_device" ;;
+    esac
+}
+
+# Put speech to text back as the run found it.
+restore_stt() {
+    echo "Putting speech to text back: $(stt_described)."
+    first=false
+    launch "stt/$stt_state"
+    local line
+    line=$(scene_line 300)
+    stop_app
+    if [ "$line" != ready ]; then
+        echo "error: could not put speech to text back (${line:-the app did not say why})." >&2
+        echo "It was: $(stt_described)." >&2
+        return 1
+    fi
+}
 
 teardown() {
     local status=$?
-    # Every step, whatever the one before did: on Ctrl-C the processes below
-    # are already gone, and under `set -e` the first kill that found nothing
-    # ended the teardown before it removed the run directory.
+    # Every step, whatever the one before did: under `set -e` the first kill
+    # that found nothing ended the teardown before it removed the run
+    # directory. And no second Ctrl-C: speech to text is put back first. Only
+    # INT: the app started to put it back inherits what is ignored here, and
+    # has to stop on the TERM `stop_app` sends.
     set +e
-    [ -n "$app_pid" ] && kill "$app_pid" 2>/dev/null
+    trap '' INT
+    stop_app
+    if $moved; then
+        restore_stt || status=1
+    fi
     [ -n "$bg_pid" ] && kill "$bg_pid" 2>/dev/null
     # cosmic-comp and the session bus are children of dbus-run-session.
     [ -n "$session_pid" ] && pkill -P "$session_pid" 2>/dev/null
@@ -140,11 +234,17 @@ teardown() {
         echo "Log: $kept_log" >&2
     fi
     rm -rf "$run"
+    exit "$status"
 }
 trap teardown EXIT
+# Through the EXIT trap, so an interrupted run still puts speech to text back.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-# Xvfb picks a free display and reports it on the fd.
-Xvfb -displayfd 3 -screen 0 "${OUTPUT_W}x${OUTPUT_H}x24" -nolisten tcp 3>"$run/display" 2>>"$log" &
+# Xvfb, the compositor and the wallpaper run in sessions of their own, out of
+# reach of the Ctrl-C that ends the run: the teardown still needs them, to put
+# speech to text back. Xvfb picks a free display and reports it on the fd.
+setsid Xvfb -displayfd 3 -screen 0 "${OUTPUT_W}x${OUTPUT_H}x24" -nolisten tcp 3>"$run/display" 2>>"$log" &
 xvfb_pid=$!
 for _ in $(seq 50); do
     [ -s "$run/display" ] && break
@@ -163,7 +263,7 @@ echo true >"$cosmic_config/com.system76.CosmicTheme.Mode/v1/is_dark"
 
 env -u WAYLAND_DISPLAY -u DISPLAY -u DBUS_SESSION_BUS_ADDRESS \
     XDG_RUNTIME_DIR="$run" XDG_CONFIG_HOME="$run/config" XDG_STATE_HOME="$run/state" \
-    dbus-run-session -- env DISPLAY="$display" cosmic-comp --no-xwayland >>"$log" 2>&1 &
+    setsid dbus-run-session -- env DISPLAY="$display" cosmic-comp --no-xwayland >>"$log" 2>&1 &
 session_pid=$!
 socket="$run/wayland-1"
 for _ in $(seq 100); do
@@ -188,7 +288,7 @@ done
 bus=$(tr '\0' '\n' <"/proc/$(pgrep -P "$session_pid" -x cosmic-comp)/environ" |
     sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p')
 env -u DISPLAY WAYLAND_DISPLAY="$socket" DBUS_SESSION_BUS_ADDRESS="$bus" \
-    XDG_CONFIG_HOME="$run/config" cosmic-bg >>"$log" 2>&1 &
+    XDG_CONFIG_HOME="$run/config" setsid cosmic-bg >>"$log" 2>&1 &
 bg_pid=$!
 sleep 1
 
@@ -230,40 +330,30 @@ settle() {
     magick "$previous" "$1"
 }
 
-# The app's first `scene:` line, or nothing if it exits or $1 seconds pass.
-# Only the first launch can be waiting on consent: the rest reuse its token.
-scene_line() {
-    local waited=0 line
-    while [ "$waited" -lt "$(($1 * 10))" ]; do
-        line=$(grep -m 1 '^scene: ' "$run/app.out" || true)
-        if [ -n "$line" ]; then
-            echo "${line#scene: }"
-            return 0
-        fi
-        kill -0 "$app_pid" 2>/dev/null || return 0
-        if $first && [ "$waited" -eq 100 ]; then
-            echo "  waiting for the daemon; if a consent prompt is on your desktop, choose Allow" >&2
-        fi
-        sleep 0.1
-        waited=$((waited + 1))
-    done
-}
+first=true
+launch stt
+line=$(scene_line 120)
+stop_app
+first=false
+case "$line" in
+stt$'\t'*) IFS=$'\t' read -r _ stt_state stt_source stt_model stt_device <<<"$line" ;;
+*) die "could not read what speech to text is doing (${line:-the app did not say})" ;;
+esac
+[ "$stt_device" = "-" ] && stt_device=""
+if [ "$stt_model" = "-" ]; then
+    die "speech to text has no model to show. Load the one the shots should show, then run again."
+fi
+echo "Speech to text: $(stt_described). Put back at the end."
 
 written=()
-skipped=()
 failed=()
-first=true
 for shot in "${selected[@]}"; do
     name=${shot%% *}
     scene=${shot#* }
     echo "$name: $scene"
-    : >"$run/app.out"
-    env -u DISPLAY WAYLAND_DISPLAY="$socket" XDG_CONFIG_HOME="$run/config" \
-        SUPER_VOICE_APP_SCENE="$scene" RUST_LOG=warn "$app" >"$run/app.out" 2>>"$log" &
-    app_pid=$!
-
-    if $first; then line=$(scene_line 120); else line=$(scene_line 60); fi
-    first=false
+    moved=true
+    launch "$scene"
+    line=$(scene_line 300)
     case "$line" in
     ready)
         settle "$out/$name.png"
@@ -284,27 +374,20 @@ for shot in "${selected[@]}"; do
             written+=("$name")
         fi
         ;;
-    unavailable:\ *)
-        echo "  skipped: ${line#unavailable: }"
-        skipped+=("$name: ${line#unavailable: }")
+    unavailable:\ * | failed:\ *)
+        echo "  ${line#*: }" >&2
+        failed+=("$name: ${line#*: }")
         ;;
     *)
         echo "  the app did not report its scene" >&2
         failed+=("$name: the app did not report its scene")
         ;;
     esac
-
-    kill "$app_pid" 2>/dev/null || true
-    wait "$app_pid" 2>/dev/null || true
-    app_pid=""
+    stop_app
 done
 
 echo
 [ ${#written[@]} -eq 0 ] || echo "Wrote ${written[*]} to $out."
-if [ ${#skipped[@]} -gt 0 ]; then
-    echo "Skipped, for the daemon's current state:"
-    printf '  %s\n' "${skipped[@]}"
-fi
 if [ ${#failed[@]} -gt 0 ]; then
     echo "Failed:" >&2
     printf '  %s\n' "${failed[@]}" >&2
