@@ -4,9 +4,20 @@
 //! loads it through the real `WasmBackend` host to exercise the load → ping →
 //! status → synthesize → teardown orchestration with no real backend, model,
 //! or network — the WASM analog of `src/bin/mock_backend.rs`.
+//!
+//! It also clones, the way a cloud backend whose API takes the reference clip
+//! with every request would: `POST /v1/voices` keeps the clip in the private
+//! `/tmp` the daemon gives a component that uses the filesystem, and a
+//! synthesis in that voice plays the clip back. Registration and synthesis are
+//! separate requests, each to a fresh instance, so the clip surviving from one
+//! to the other is the private `/tmp` working.
 
+use base64::Engine as _;
 use wasi::exports::http::incoming_handler::Guest;
-use wasi::http::types::{Fields, IncomingRequest, Method, OutgoingBody, OutgoingResponse, ResponseOutparam};
+use wasi::http::types::{
+    Fields, IncomingBody, IncomingRequest, Method, OutgoingBody, OutgoingResponse, ResponseOutparam,
+};
+use wasi::io::streams::StreamError;
 
 /// Sample rate the mock declares on `/v1/synthesize`.
 pub const MOCK_SAMPLE_RATE: u32 = 24000;
@@ -74,6 +85,19 @@ impl Guest for Component {
         // Synthesis answers with the framed binary body and its own headers,
         // so it does not go through the JSON `route`.
         if matches!(method, Method::Post) && path == "/v1/synthesize" {
+            let body = match cloned_voice(&request) {
+                Ok(None) => synthesize_body(),
+                Ok(Some(pcm)) => clip_body(&pcm),
+                Err(code) => {
+                    send_response(
+                        outparam,
+                        400,
+                        &[("content-type", "application/json")],
+                        &to_vec(&serde_json::json!({ "status": "error", "message": code })),
+                    );
+                    return;
+                }
+            };
             send_response(
                 outparam,
                 200,
@@ -83,7 +107,7 @@ impl Guest for Component {
                     ("x-voice-channels", "1"),
                     ("x-voice-format", "s16le"),
                 ],
-                &synthesize_body(),
+                &body,
             );
             return;
         }
@@ -118,11 +142,107 @@ fn route(request: &IncomingRequest) -> (u16, Vec<u8>) {
         (Method::Post, "/v1/cancel") => ok(&serde_json::json!({
             "status": "success", "message": "Cancelled"
         })),
+        (Method::Post, "/v1/voices") => register_voice(request),
+        (Method::Delete, p) if p.starts_with("/v1/voices/") => {
+            unregister_voice(&p["/v1/voices/".len()..])
+        }
         _ => (
             404,
             to_vec(&serde_json::json!({ "status": "error", "message": "not_found" })),
         ),
     }
+}
+
+/// Where a registered voice's clip is kept, or `None` for an id that is not a
+/// cloned voice's.
+fn clip_path(voice: &str) -> Option<String> {
+    let id = voice.strip_prefix("voice:")?;
+    (!id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        .then(|| format!("/tmp/voices/{id}.pcm"))
+}
+
+/// `POST /v1/voices`: keep the clip for later syntheses.
+fn register_voice(request: &IncomingRequest) -> (u16, Vec<u8>) {
+    let Some(body) = read_body(request) else {
+        return error(400, "no_body");
+    };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return error(400, "invalid_json");
+    };
+    let Some(path) = v["voice"].as_str().and_then(clip_path) else {
+        return error(400, "invalid_voice");
+    };
+    let Some(pcm) = v["audio"]
+        .as_str()
+        .and_then(|a| base64::engine::general_purpose::STANDARD.decode(a).ok())
+    else {
+        return error(400, "invalid_audio");
+    };
+    let kept = std::fs::create_dir_all("/tmp/voices").and_then(|()| std::fs::write(&path, pcm));
+    match kept {
+        Ok(()) => ok(&serde_json::json!({ "status": "success" })),
+        Err(e) => (
+            500,
+            to_vec(&serde_json::json!({
+                "status": "error", "message": "voice_store_failed", "detail": e.to_string()
+            })),
+        ),
+    }
+}
+
+/// `DELETE /v1/voices/{voice}`, the id percent-encoded.
+fn unregister_voice(encoded: &str) -> (u16, Vec<u8>) {
+    let voice = encoded.replace("%3A", ":").replace("%3a", ":");
+    let Some(path) = clip_path(&voice) else {
+        return error(400, "invalid_voice");
+    };
+    match std::fs::remove_file(path) {
+        Ok(()) => ok(&serde_json::json!({ "status": "success" })),
+        Err(_) => error(404, "unknown_voice"),
+    }
+}
+
+/// The clip of the cloned voice a synthesis names, `None` when it names no
+/// cloned voice, or the error code for one that was never registered.
+fn cloned_voice(request: &IncomingRequest) -> Result<Option<Vec<u8>>, &'static str> {
+    let body = read_body(request).unwrap_or_default();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+    let Some(path) = v["voice"].as_str().and_then(clip_path) else {
+        return Ok(None);
+    };
+    std::fs::read(path).map(Some).map_err(|_| "unknown_voice")
+}
+
+/// A clip played back as the synthesis: its PCM in one audio frame, then
+/// `done`.
+fn clip_body(pcm: &[u8]) -> Vec<u8> {
+    let mut out = frame(KIND_AUDIO, pcm);
+    out.extend(frame(KIND_DONE, b"{}"));
+    out
+}
+
+/// The whole request body.
+fn read_body(request: &IncomingRequest) -> Option<Vec<u8>> {
+    let body = request.consume().ok()?;
+    let stream = body.stream().ok()?;
+    let mut out = Vec::new();
+    loop {
+        match stream.blocking_read(65536) {
+            Ok(chunk) => out.extend_from_slice(&chunk),
+            Err(StreamError::Closed) => break,
+            Err(StreamError::LastOperationFailed(_)) => return None,
+        }
+    }
+    drop(stream);
+    let _ = IncomingBody::finish(body);
+    Some(out)
+}
+
+fn error(status: u16, message: &str) -> (u16, Vec<u8>) {
+    (
+        status,
+        to_vec(&serde_json::json!({ "status": "error", "message": message })),
+    )
 }
 
 fn ok(value: &serde_json::Value) -> (u16, Vec<u8>) {

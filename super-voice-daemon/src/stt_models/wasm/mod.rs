@@ -60,6 +60,7 @@ impl WasmBackend {
         realtime: bool,
     ) -> Result<Self> {
         let component = WasmComponent::load(
+            &super_voice_shared::SUPER_VOICE,
             component_path,
             allowed_hosts,
             user_allowed_hosts,

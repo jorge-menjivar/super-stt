@@ -737,7 +737,9 @@ embedding — or encoding reference codes — is real work, and the daemon issue
 one `/v1/synthesize` per sentence, so a per-request push would repeat it for
 every sentence of a paragraph. The backend derives what it needs once, keys it
 by `voice`, and holds it for the life of the loaded model. Nothing has to
-survive a restart: the daemon re-registers after every load.
+survive a restart: the daemon re-registers after every load. A WASM backend is
+instantiated afresh for every request, so it holds the voice in its
+[private `/tmp`](./wasm.md#private-tmp) rather than in memory.
 
 **Request:**
 

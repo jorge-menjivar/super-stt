@@ -57,6 +57,7 @@ impl WasmBackend {
         realtime: bool,
     ) -> Result<Self> {
         let component = WasmComponent::load(
+            &super_voice_shared::SUPER_VOICE,
             component_path,
             allowed_hosts,
             user_allowed_hosts,
@@ -80,6 +81,13 @@ impl WasmBackend {
     #[must_use]
     pub fn allowlist_hooks(&self) -> AllowlistHooks {
         self.component.allowlist_hooks()
+    }
+
+    /// Where the component's private `/tmp` is on the host, when it uses the
+    /// filesystem. See `super_engine_daemon::wasm::private_tmp`.
+    #[must_use]
+    pub fn private_tmp(&self) -> Option<&Path> {
+        self.component.private_tmp()
     }
 
     /// Permit this backend's egress to loopback addresses (`127.0.0.1`, `::1`).
