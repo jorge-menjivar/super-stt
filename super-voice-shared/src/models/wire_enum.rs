@@ -6,6 +6,7 @@
 
 use crate::models::notification_method::NotificationMethod;
 use crate::models::protocol::PreviewSource;
+use crate::models::read_method::ReadMethod;
 use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::write_method::WriteMethod;
 
@@ -65,6 +66,7 @@ fn every_wire_enum_agrees_with_its_table() {
     assert_wire_forms_agree!(WriteMethod);
     assert_wire_forms_agree!(NotificationMethod);
     assert_wire_forms_agree!(PreviewSource);
+    assert_wire_forms_agree!(ReadMethod);
 }
 
 /// An unrecognized token is refused rather than silently defaulted, so a
@@ -126,4 +128,5 @@ fn every_wire_enum_publishes_exactly_its_tokens() {
     assert_schema_matches_table!(WriteMethod);
     assert_schema_matches_table!(NotificationMethod);
     assert_schema_matches_table!(PreviewSource);
+    assert_schema_matches_table!(ReadMethod);
 }

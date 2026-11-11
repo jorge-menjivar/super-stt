@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::models::contexts::DictationContext;
+use crate::models::read_method::ReadMethod;
 use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::write_method::WriteMethod;
 
@@ -152,6 +153,12 @@ pub enum Command {
         method: WriteMethod,
     },
     GetWriteMethod,
+    /// Where the read-aloud shortcut takes its text from: the selection or
+    /// the clipboard. Contract: `docs/protocol/endpoints/v1/settings/read_method.md`.
+    SetReadMethod {
+        method: ReadMethod,
+    },
+    GetReadMethod,
     /// Type a fixed string with the configured write method so a settings UI
     /// can show whether keyboard simulation reaches the focused window.
     /// Contract: `docs/protocol/endpoints/v1/write_method/test.md`.

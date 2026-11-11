@@ -2,6 +2,7 @@
 use super::command::Command;
 use super::request::DaemonRequest;
 use crate::models::contexts::DictationContext;
+use crate::models::read_method::ReadMethod;
 use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::write_method::WriteMethod;
 use crate::validation::{self, Validate};
@@ -59,6 +60,8 @@ impl TryFrom<DaemonRequest> for Command {
             "set_write_method" => cmd_set_write_method(&request),
             "get_write_method" => Ok(Command::GetWriteMethod),
             "test_write_method" => Ok(Command::TestWriteMethod),
+            "set_read_method" => cmd_set_read_method(&request),
+            "get_read_method" => Ok(Command::GetReadMethod),
             "set_notification_method" => cmd_set_notification_method(&request),
             "get_notification_method" => Ok(Command::GetNotificationMethod),
             "set_update_check_enabled" => cmd_set_update_check_enabled(&request),
@@ -358,6 +361,21 @@ fn cmd_set_recording_stop_mode(request: &DaemonRequest) -> Result<Command, Strin
         .parse::<RecordingStopMode>()
         .map_err(|e| format!("Invalid recording stop mode: {e}"))?;
     Ok(Command::SetRecordingStopMode { mode })
+}
+
+fn cmd_set_read_method(request: &DaemonRequest) -> Result<Command, String> {
+    let method = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("method"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing method for set_read_method command")?;
+    // An unknown value is a bad request, and the stored setting is left as
+    // it was, like every other enum setting.
+    let method = method
+        .parse::<ReadMethod>()
+        .map_err(|e| format!("Invalid read method: {e}"))?;
+    Ok(Command::SetReadMethod { method })
 }
 
 fn cmd_set_write_method(request: &DaemonRequest) -> Result<Command, String> {

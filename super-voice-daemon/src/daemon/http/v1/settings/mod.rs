@@ -22,6 +22,7 @@ pub(crate) mod idle_unload;
 pub(crate) mod language;
 pub(crate) mod notification_method;
 pub(crate) mod preview_typing;
+pub(crate) mod read_method;
 pub(crate) mod recording_stop_mode;
 pub(crate) mod update_beta_optin;
 pub(crate) mod update_check_enabled;
@@ -56,6 +57,10 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
             write_method::set_write_method
         ))
         .routes(routes!(write_method::test_write_method))
+        .routes(routes!(
+            read_method::get_read_method,
+            read_method::set_read_method
+        ))
         .routes(routes!(
             notification_method::get_notification_method,
             notification_method::set_notification_method

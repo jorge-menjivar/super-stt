@@ -11,6 +11,7 @@
 pub mod audio;
 pub mod daemon;
 pub mod download_progress;
+pub mod input;
 pub mod output;
 pub mod text;
 pub mod tts_models;

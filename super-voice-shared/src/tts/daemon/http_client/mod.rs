@@ -11,7 +11,7 @@ mod speak;
 
 use std::path::PathBuf;
 
-pub use speak::{speak, speak_stop};
+pub use speak::{speak, speak_read, speak_stop};
 pub use super_engine_client::http_client::{
     AuthOk, AuthStatusInfo, HttpError, HttpResult, WidgetEvent, auth_request, auth_status,
     events_stream, ping,
