@@ -7,8 +7,8 @@
     "super-voice-daemon",
     "super-voice-indexer",
     "super-voice-install",
-    "super-voice-shared",
     "super-voice-registry-types",
+    "super-voice-shared",
   ]
   # The mock WASM backend fixtures build for wasm32-wasip2, not the host target
   # (the daemon's wasm_mock.rs / wasm_mock_realtime.rs load them) — keep them
@@ -16,8 +16,8 @@
   exclude         = [
     "super-voice-daemon/tests/fixtures/mock-wasm-backend",
     "super-voice-daemon/tests/fixtures/mock-wasm-realtime-backend",
-    "super-voice-daemon/tests/fixtures/mock-wasm-tts-backend",
     "super-voice-daemon/tests/fixtures/mock-wasm-realtime-tts-backend",
+    "super-voice-daemon/tests/fixtures/mock-wasm-tts-backend",
   ]
   # The indexer is a host binary, so it's a workspace member — `--workspace`
   # lints and tests it like everything else. But it's a CI-only tool with
@@ -29,12 +29,12 @@
     "super-voice-consent",
     "super-voice-daemon",
     "super-voice-install",
-    "super-voice-shared",
     "super-voice-registry-types",
+    "super-voice-shared",
   ]
 
   [workspace.package]
-    version = "0.3.0-beta.4"
+    version = "0.3.0-beta.5"
     authors = ["Jorge Menjivar <jorge@menjivar.ai>"]
     edition = "2024"
 
