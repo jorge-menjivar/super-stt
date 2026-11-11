@@ -13,7 +13,7 @@
   forge = "github"
 
 [mistral]
-  id    = "app.super-stt.mistral"
+  id    = "app.super-voice.mistral"
   repo  = "github.com/jorge-menjivar/super-stt-mistral"
   forge = "github"
 
