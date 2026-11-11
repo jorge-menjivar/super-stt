@@ -23,7 +23,7 @@
   forge = "github"
 
 [qwen]
-  id    = "app.super-stt.qwen"
+  id    = "app.super-voice.qwen-asr"
   repo  = "github.com/super-libre/super-stt-qwen"
   forge = "github"
 
