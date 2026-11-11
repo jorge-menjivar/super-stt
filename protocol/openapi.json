@@ -9746,6 +9746,10 @@
             "type": "string",
             "description": "The framework: `cuda`, `rocm`, `metal`, `vulkan` or `cpu`."
           },
+          "on_disk": {
+            "type": "boolean",
+            "description": "Whether the build is on this machine already: the one installed, or\none an earlier install of another framework's build replaced and the\ndaemon kept. Installing it downloads nothing."
+          },
           "size": {
             "type": "integer",
             "format": "int64",
