@@ -55,7 +55,8 @@ GET /registry/backend/list?include_incompatible=false&kind=wasm&online=true&q=op
       "supports_cpu": true,
       "models": [
         { "name": "voxtral-mini", "provider": "",
-          "supported_devices": ["cpu", "gpu"] }
+          "supported_devices": ["cpu", "gpu"],
+          "role": "transcription", "accepts_context": false }
       ],
       "secrets": [],
       "options": [],
@@ -100,6 +101,14 @@ identify a model by `(name, source)` instead. It will be removed.
 property of the *model*, not of this host — see
 [`GET /backend/list`](../backends.md) for narrowing it to the devices the
 installed build actually provides.
+
+`models[].role` is `transcription`, `post_processor` or `synthesis`, as the
+backend's manifest declares it. `models[].accepts_context` is `true` for a
+speech-to-text model of a backend declaring `[capabilities] context = true`:
+the daemon hands it the user's
+[dictation context](../../../backend/contract.md#request-headers). It is `false`
+for every other model, including a synthesis model of the same backend, and for
+every model of an index published before the field existed.
 
 Per-entry fields beyond what `index.json` carries:
 

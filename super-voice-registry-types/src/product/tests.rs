@@ -494,12 +494,47 @@ fn every_role_parses_and_reaches_the_index() {
     ] {
         let m = Manifest::parse(&model(spelled, "")).expect("parses");
         assert_eq!(m.models[0].product.role, role);
-        assert_eq!(Voice::index_model(&m.models[0]).role, spelled);
+        assert_eq!(
+            Voice::index_model(&m.capabilities.product, &m.models[0]).role,
+            spelled
+        );
     }
     let indexed: IndexModel =
         serde_json::from_str(r#"{"name":"m","supported_devices":["cpu"],"role":"synthesis"}"#)
             .expect("parses");
     assert_eq!(indexed.product.role, "synthesis");
+    assert!(
+        !indexed.product.accepts_context,
+        "an index from before the field reads as taking no context"
+    );
+}
+
+/// A backend declaring `[capabilities] context = true` marks its speech-to-text
+/// models in the index, and only those: text to speech is never handed a
+/// context.
+#[test]
+fn the_index_says_which_models_take_a_context() {
+    for (role, declared, takes) in [
+        ("transcription", true, true),
+        ("post_processor", true, true),
+        ("synthesis", true, false),
+        ("transcription", false, false),
+    ] {
+        let mut text = model(role, "");
+        if declared {
+            text = text.replacen(
+                "[[models]]",
+                "[capabilities]\ncontext = true\n[[models]]",
+                1,
+            );
+        }
+        let m = Manifest::parse(&text).expect("parses");
+        assert_eq!(
+            Voice::index_model(&m.capabilities.product, &m.models[0]).accepts_context,
+            takes,
+            "{role}, context = {declared}"
+        );
+    }
 }
 
 /// One backend can serve both features.
