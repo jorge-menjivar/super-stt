@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-11T18:06:32Z",
+  "generated_at": "2026-11-11T21:23:03Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -112,14 +112,14 @@
       "id": "mistral",
       "backend_id": "app.super-voice.mistral",
       "source": "github.com/jorge-menjivar/super-stt-mistral",
-      "version": "0.2.0",
-      "tag": "v0.2.0",
+      "version": "0.3.0",
+      "tag": "v0.3.0",
       "name": "Mistral",
-      "description": "Cloud speech-to-text via the Mistral (Voxtral) API.",
+      "description": "Cloud speech-to-text and text-to-speech via the Mistral (Voxtral) API.",
       "license": "GPL-3.0-only",
       "kind": "wasm",
-      "contract": "v2",
-      "min_client": "0.2.4-beta.1",
+      "contract": "v4",
+      "min_client": "0.3.0",
       "entrypoint": "mistral.wasm",
       "allowed_hosts": [
         "api.mistral.ai"
@@ -154,6 +154,15 @@
           ],
           "role": "transcription",
           "accepts_context": true
+        },
+        {
+          "name": "voxtral-mini-tts-3",
+          "provider": "",
+          "supported_devices": [
+            "none"
+          ],
+          "role": "synthesis",
+          "accepts_context": false
         }
       ],
       "secrets": [
@@ -166,15 +175,15 @@
       "options": [],
       "assets": {
         "wasm": {
-          "url": "https://github.com/super-libre/super-voice-mistral/releases/download/v0.2.0/mistral.wasm",
-          "size": 335559,
-          "sha256": "44e5b3804fdaf44616c4b9d2bd1366577e9ea70369bd9ccf7e2a258937107255"
+          "url": "https://github.com/super-libre/super-voice-mistral/releases/download/v0.3.0/mistral.wasm",
+          "size": 424055,
+          "sha256": "63eeccd7e1c06b93e5da2fc6e642f6c2ff68927c54c1956359152c64125a0162"
         }
       },
       "manifest": {
-        "url": "https://github.com/super-libre/super-voice-mistral/releases/download/v0.2.0/backend.toml",
-        "size": 2749,
-        "sha256": "ef896b39182e3af29187e8d587a1153113ef17fb744a6e2b96a5f2be63c70f9e"
+        "url": "https://github.com/super-libre/super-voice-mistral/releases/download/v0.3.0/backend.toml",
+        "size": 9991,
+        "sha256": "7b13fc0f55e3b8e92cdc026adde05efb71a3c74ba0577f57130b82173f269193"
       }
     },
     {
