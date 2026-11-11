@@ -43,8 +43,11 @@ pub(super) const STEP: Duration = Duration::from_millis(250);
 /// the controls below it.
 const SETTLE: Duration = Duration::from_millis(1500);
 
-/// How long after connecting a scene waits for its widget.
-const GIVE_UP: Duration = Duration::from_secs(15);
+/// How long after connecting a scene waits for its widget. The daemon's
+/// answers land within a couple of seconds of connecting; past that, a widget
+/// that has not appeared is one the state rules out, and every skipped shot
+/// costs this much.
+const GIVE_UP: Duration = Duration::from_secs(6);
 
 /// A view the app can open on.
 #[derive(Clone, Copy, Debug)]

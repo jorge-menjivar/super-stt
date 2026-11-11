@@ -124,9 +124,9 @@ teardown() {
     [ -n "$session_pid" ] && kill "$session_pid" 2>/dev/null
     [ -n "$xvfb_pid" ] && kill "$xvfb_pid" 2>/dev/null
     # Anything the private bus activated carries the runtime dir in its
-    # environment.
-    for environ in /proc/[0-9]*/environ; do
-        grep -qsF "$run" "$environ" 2>/dev/null || continue
+    # environment. One grep over them all: one per process took seconds.
+    local environ pid
+    for environ in $(grep -lsF "$run" /proc/[0-9]*/environ 2>/dev/null); do
         pid=${environ#/proc/}
         kill "${pid%/environ}" 2>/dev/null
     done
@@ -185,8 +185,11 @@ env -u DISPLAY WAYLAND_DISPLAY="$socket" DBUS_SESSION_BUS_ADDRESS="$bus" \
 bg_pid=$!
 sleep 1
 
+# A frame of the window, as an uncompressed PPM: frames are taken every
+# second until the picture holds still, and compressing each to PNG took
+# longer than the second between them.
 capture() {
-    WAYLAND_DISPLAY=$socket grim -l 9 -g "$WINDOW_X,$WINDOW_Y ${WINDOW_W}x${WINDOW_H}" "$1"
+    WAYLAND_DISPLAY=$socket grim -t ppm -g "$WINDOW_X,$WINDOW_Y ${WINDOW_W}x${WINDOW_H}" "$1"
 }
 
 # Whether two frames show the same picture.
@@ -196,11 +199,11 @@ same() {
     [ "${metric%% *}" -le "$SAME_PIXELS" ] 2>/dev/null
 }
 
-# Capture to $1 once the window has looked the same for three frames a
-# second apart: data keeps arriving after the view is up. Gives up after
+# Save the window to $1, a PNG, once it has looked the same for three frames
+# a second apart: data keeps arriving after the view is up. Gives up after
 # 30 seconds and keeps the last frame.
 settle() {
-    local previous="$run/previous.png" current="$run/current.png" still=0
+    local previous="$run/previous.ppm" current="$run/current.ppm" still=0
     capture "$previous"
     for _ in $(seq 30); do
         sleep 1
@@ -208,7 +211,7 @@ settle() {
         if same "$previous" "$current"; then
             still=$((still + 1))
             if [ "$still" -ge 2 ]; then
-                mv "$current" "$1"
+                magick "$current" "$1"
                 return 0
             fi
         else
@@ -217,7 +220,7 @@ settle() {
         mv "$current" "$previous"
     done
     echo "  never settled; keeping the last frame" >&2
-    mv "$previous" "$1"
+    magick "$previous" "$1"
 }
 
 # The app's first `scene:` line, or nothing if it exits or $1 seconds pass.
@@ -261,12 +264,13 @@ for shot in "${selected[@]}"; do
         ;;
     click\ *)
         read -r x y <<<"${line#click }"
-        settle "$run/before.png"
+        # One frame: the app reports the widget only once it has held still.
+        capture "$run/before.ppm"
         DISPLAY=$display xdotool mousemove $((WINDOW_X + x)) $((WINDOW_Y + y)) click 1
         # Off the window, so nothing in the shot shows a hover.
         DISPLAY=$display xdotool mousemove 0 0
         settle "$out/$name.png"
-        if same "$run/before.png" "$out/$name.png"; then
+        if same "$run/before.ppm" "$out/$name.png"; then
             echo "  the click opened nothing" >&2
             failed+=("$name: the click opened nothing")
         else
