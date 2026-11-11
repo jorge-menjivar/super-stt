@@ -31,7 +31,9 @@ wants both asks for both. Scopes never imply one another.
 
 Clips are stored under `$XDG_DATA_HOME/super-voice/voices`, owner-readable only
 (`0600`), and never leave the machine except to the loaded backend — which is
-local unless the user selected an online model.
+local unless the user selected an online model. A WASM backend may keep a copy
+in its [private `/tmp`](../backend/wasm.md#private-tmp), which is in memory and
+removed when the model unloads.
 
 ## Endpoint reference
 

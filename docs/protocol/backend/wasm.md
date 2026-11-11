@@ -90,15 +90,39 @@ upstream.
 Cloud WASM backends declare no model files. If a WASM backend does declare
 [`[[models.files]]`](./config.md#modelsfiles), the daemon provisions them
 and grants the component read-only access to the backend directory as a
-preopened filesystem; otherwise the component is given no filesystem access.
+preopened filesystem; otherwise it sees nothing of the backend directory.
+
+## Private `/tmp`
+
+A component is instantiated afresh for every request, so nothing it holds in
+memory survives to the next one. A backend that has to keep something from one
+request to another keeps it on disk instead. The reference clip of a
+[cloned voice](./contract.md#post-v1voices) is one such thing, for an API that
+takes the clip with every synthesis: the daemon hands it over once, and every
+synthesis in that voice needs it.
+
+A component that imports `wasi:filesystem` sees one directory, at `/tmp`:
+
+- It is empty when the model loads, and private: no other backend sees it, and
+  neither does another loaded model of the same backend.
+- It is removed when the model unloads. Nothing in it has to outlive that,
+  since the daemon hands a loaded model what it needs again after every load,
+  as it re-registers cloned voices.
+- It is under the daemon's runtime directory, which is memory-backed on Linux,
+  so what a backend keeps there never reaches the disk.
+
+It is the only directory the component sees. Importing `wasi:filesystem`
+grants nothing else, and a component that does not import it is given no
+directory at all. Use it as any directory, with `std::fs` in Rust.
 
 ## Packaging
 
 `entrypoint` names the component file relative to the backend directory
 (e.g. `openai.wasm`). The daemon loads and instantiates it with wasmtime,
 wiring only the imports the contract needs: the filtered
-`wasi:http/outgoing-handler` and — only when the configuration declares
-files — read-only access to the backend directory. Secrets and options
+`wasi:http/outgoing-handler`, the [private `/tmp`](#private-tmp) for a
+component that imports `wasi:filesystem`, and — only when the configuration
+declares files — read-only access to the backend directory. Secrets and options
 arrive as request headers, not as imports.
 
 ## Realtime (WebSocket)
@@ -221,6 +245,9 @@ resource. A guest must still call `recv` to take it.
   parse is the whole decode.
 - For a cloud backend, report `state: "ready"` from `GET /v1/status` as soon
   as the component is instantiated — there are no weights to load.
+- Keep what must outlive a request, such as a cloned voice's reference clip,
+  in the [private `/tmp`](#private-tmp). Nothing held in memory survives to the
+  next request.
 - For a realtime backend: declare `[capabilities] websocket = true` and
   `realtime = true` on each realtime model; implement the `realtime-backend`
   world (import `super-engine:realtime/ws`, export `super-engine:realtime/ws-server`);
