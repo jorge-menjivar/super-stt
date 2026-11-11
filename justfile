@@ -707,7 +707,7 @@ run-consent *scopes: linux-only-gui
         SUPER_VOICE_AUTH_EXE_PATH="/usr/bin/test-app" \
         cargo run --bin {{ consent_name }}
 
-# Screenshot the settings app for the README: every app-N.png in
+# Screenshot the settings app for the README: every shot in
 # .github/assets/screenshots, or only the ones named. It runs off screen, in a
 # nested COSMIC compositor on Xvfb, against the running daemon. See
 # scripts/screenshots.sh for how, and for the shots by name.
@@ -725,7 +725,7 @@ run-consent *scopes: linux-only-gui
 #
 # Usage: just screenshots [name...]
 #   just screenshots
-#   just screenshots app-3 app-4
+#   just screenshots models voices
 [doc("Screenshot the settings app for the README. Usage: just screenshots [name...]")]
 screenshots *names:
     #!/usr/bin/env bash

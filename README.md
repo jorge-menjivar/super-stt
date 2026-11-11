@@ -87,67 +87,16 @@ Want a model that isn't there? Anyone can [publish one](./docs/protocol/README.m
 
 ## 🖼️ Screenshots
 
-**Models.** Select a backend, pick a model, and choose where it runs.
-
 <table>
 <tr>
-<td align="center"><strong>Clean start</strong><br><img src=".github/assets/screenshots/app-1.png" width="270"></td>
-<td align="center"><strong>Select a backend</strong><br><img src=".github/assets/screenshots/app-2.png" width="270"></td>
-<td align="center"><strong>Pick a model</strong><br><img src=".github/assets/screenshots/app-3.png" width="270"></td>
+<td align="center"><strong>Models</strong><br>Pick a model for each feature, and where it runs.<br><img src=".github/assets/screenshots/models.png" width="400"></td>
+<td align="center"><strong>Library</strong><br>Install backends, local or cloud.<br><img src=".github/assets/screenshots/library.png" width="400"></td>
 </tr>
 <tr>
-<td align="center"><strong>Choose where it runs</strong><br><img src=".github/assets/screenshots/app-4.png" width="270"></td>
-<td align="center"><strong>Select a language</strong><br><img src=".github/assets/screenshots/app-5.png" width="270"></td>
-<td></td>
+<td align="center"><strong>Contexts</strong><br>Teach it the words you use.<br><img src=".github/assets/screenshots/contexts.png" width="400"></td>
+<td align="center"><strong>Voices</strong><br>Clone a voice from a short recording.<br><img src=".github/assets/screenshots/voices.png" width="400"></td>
 </tr>
 </table>
-
-**Library.** Browse the catalog and manage what's installed.
-
-<table>
-<tr>
-<td align="center"><strong>Installed backends</strong><br><img src=".github/assets/screenshots/app-6.png" width="400"></td>
-<td align="center"><strong>Browse the catalog</strong><br><img src=".github/assets/screenshots/app-7.png" width="400"></td>
-</tr>
-</table>
-
-**Speech to text.** Set how recording stops, how text is typed, and what you are dictating.
-
-<table>
-<tr>
-<td align="center"><strong>Recording</strong><br><img src=".github/assets/screenshots/app-8.png" width="400"></td>
-<td align="center"><strong>Input simulation</strong><br><img src=".github/assets/screenshots/app-9.png" width="400"></td>
-</tr>
-<tr>
-<td align="center"><strong>Contexts</strong><br><img src=".github/assets/screenshots/app-10.png" width="400"></td>
-<td align="center"><strong>Edit a context</strong><br><img src=".github/assets/screenshots/app-11.png" width="400"></td>
-</tr>
-</table>
-
-**Text to speech.** Hear a test line, and make voices from your own recordings.
-
-<table>
-<tr>
-<td align="center"><strong>Speech</strong><br><img src=".github/assets/screenshots/app-12.png" width="400"></td>
-<td align="center"><strong>Voices</strong><br><img src=".github/assets/screenshots/app-13.png" width="400"></td>
-</tr>
-</table>
-
-**Settings.** Tune audio feedback, check the connection, and stay up to date.
-
-<table>
-<tr>
-<td align="center"><strong>Customization</strong><br><img src=".github/assets/screenshots/app-14.png" width="270"></td>
-<td align="center"><strong>Connection</strong><br><img src=".github/assets/screenshots/app-15.png" width="270"></td>
-<td align="center"><strong>Updates</strong><br><img src=".github/assets/screenshots/app-16.png" width="270"></td>
-</tr>
-</table>
-
-**Panel visualizer.** The COSMIC applet shows your mic input live in the panel, in three styles.
-
-<p align="center"><strong>Waveforms</strong><br><img src=".github/assets/screenshots/visualization-waveforms.png" width="100%"></p>
-<p align="center"><strong>Equalizer</strong><br><img src=".github/assets/screenshots/visualization-equalizer.png" width="100%"></p>
-<p align="center"><strong>Centered bars</strong><br><img src=".github/assets/screenshots/visualization-centered-bars.png" width="100%"></p>
 
 ## 🩺 Troubleshooting
 
