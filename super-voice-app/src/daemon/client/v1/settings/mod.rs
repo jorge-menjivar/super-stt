@@ -14,6 +14,7 @@ pub(crate) mod idle_unload;
 pub(crate) mod language;
 pub(crate) mod notification_method;
 pub(crate) mod preview_typing;
+pub(crate) mod read_method;
 pub(crate) mod recording_stop_mode;
 pub(crate) mod update_beta_optin;
 pub(crate) mod update_check_enabled;

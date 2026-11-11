@@ -160,6 +160,10 @@ pub struct AppModel {
     // Recording stop mode
     pub recording_stop_mode: super_voice_shared::models::recording_stop_mode::RecordingStopMode,
 
+    /// Where the read-aloud shortcut reads from: the selected text or the
+    /// clipboard.
+    pub read_method: super_voice_shared::models::read_method::ReadMethod,
+
     // Write method
     pub write_method: super_voice_shared::models::write_method::WriteMethod,
     /// Text in the Input Simulation test field — where `POST /write_method/test`

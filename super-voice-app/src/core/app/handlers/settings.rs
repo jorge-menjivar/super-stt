@@ -1,15 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::AppModel;
+use crate::daemon::client::v1::speak::speak_read_command;
 use crate::daemon::client::{
-    set_idle_unload, set_notification_method, set_preview_typing, set_recording_stop_mode,
+    set_idle_unload, set_notification_method, set_preview_typing, set_read_method,
+    set_recording_stop_mode,
     set_write_method, test_write_method,
 };
 use crate::ui::messages::{
-    IdleUnloadMessage, Message, NotificationMethodMessage, PreviewTypingMessage,
+    IdleUnloadMessage, Message, NotificationMethodMessage, PreviewTypingMessage, ReadMethodMessage,
     RecordingStopModeMessage, WriteMethodMessage,
 };
 use cosmic::prelude::*;
+use super_voice_shared::models::read_method::ReadMethod;
+
+/// What the Read aloud tab says when its test is refused. The two refusals
+/// a user can fix in a moment get a sentence saying how; anything else is
+/// the daemon's own words.
+fn read_failure_message(method: ReadMethod, error: &str) -> String {
+    if error.contains("nothing_to_read") {
+        match method {
+            ReadMethod::Selection => crate::fl!("read-nothing-selection"),
+            ReadMethod::Clipboard => crate::fl!("read-nothing-clipboard"),
+        }
+    } else if error.contains("text_too_long") {
+        crate::fl!("read-too-much")
+    } else {
+        crate::fl!("read-failed", error = error.to_string())
+    }
+}
 
 impl AppModel {
     /// Handle preview typing messages
@@ -49,6 +68,53 @@ impl AppModel {
                     crate::state::ErrorScope::Recording,
                     format!("Couldn't save preview typing: {err}"),
                 );
+                Task::none()
+            }
+        }
+    }
+
+    /// The Read aloud tab: where the shortcut reads from, saved
+    /// confirm-then-apply like the stop mode below, and its test.
+    pub(in crate::core::app) fn handle_read_method_messages(
+        &mut self,
+        message: ReadMethodMessage,
+    ) -> Task<cosmic::Action<Message>> {
+        match message {
+            ReadMethodMessage::Changed(method) => {
+                Task::perform(set_read_method(method.to_string()), move |result| {
+                    cosmic::Action::App(Message::ReadMethod(match result {
+                        Ok(()) => ReadMethodMessage::Loaded(method),
+                        Err(e) => ReadMethodMessage::Error(e.to_string()),
+                    }))
+                })
+            }
+            ReadMethodMessage::Loaded(method) => {
+                self.read_method = method;
+                self.clear_action_error(crate::state::ErrorScope::ReadAloud);
+                Task::none()
+            }
+            ReadMethodMessage::Error(err) => {
+                log::warn!("Read method error: {err}");
+                self.set_action_error(
+                    crate::state::ErrorScope::ReadAloud,
+                    format!("Couldn't save what the shortcut reads: {err}"),
+                );
+                Task::none()
+            }
+            // The speaking status follows the daemon's events, as on the
+            // Speech tab, so only a refusal needs handling here.
+            ReadMethodMessage::Test => {
+                self.clear_action_error(crate::state::ErrorScope::ReadAloud);
+                Task::perform(speak_read_command(), |result| match result {
+                    Ok(_) => cosmic::Action::None,
+                    Err(e) => cosmic::Action::App(Message::ReadMethod(
+                        ReadMethodMessage::TestFailed(e.to_string()),
+                    )),
+                })
+            }
+            ReadMethodMessage::TestFailed(error) => {
+                let message = read_failure_message(self.read_method, &error);
+                self.set_action_error(crate::state::ErrorScope::ReadAloud, message);
                 Task::none()
             }
         }
@@ -327,7 +393,8 @@ fn countdown_tick_task() -> Task<cosmic::Action<Message>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TEST_COUNTDOWN_SECS, Tick, advance_countdown};
+    use super::{TEST_COUNTDOWN_SECS, Tick, advance_countdown, read_failure_message};
+    use super_voice_shared::models::read_method::ReadMethod;
 
     /// The full run from button press to typing: one tick per second, firing
     /// on the last. Getting this wrong types either a second early or never.
@@ -367,5 +434,19 @@ mod tests {
     fn zero_fires_rather_than_underflowing() {
         assert_eq!(advance_countdown(Some(0)), Tick::Fire);
         assert_eq!(advance_countdown(Some(1)), Tick::Fire);
+    }
+
+    /// Nothing to read says how to fix it for the source in use. Anything
+    /// else keeps the daemon's words.
+    #[test]
+    fn a_refused_read_test_says_what_to_do() {
+        let nothing = "nothing_to_read (HTTP 409)";
+        assert!(read_failure_message(ReadMethod::Selection, nothing).contains("Highlight"));
+        assert!(read_failure_message(ReadMethod::Clipboard, nothing).contains("Copy"));
+        assert!(read_failure_message(ReadMethod::Selection, "text_too_long").contains("Too much"));
+        assert!(
+            read_failure_message(ReadMethod::Clipboard, "model_not_loaded (HTTP 409)")
+                .contains("model_not_loaded")
+        );
     }
 }
