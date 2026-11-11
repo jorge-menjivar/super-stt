@@ -117,6 +117,10 @@ app_pid=""
 
 teardown() {
     local status=$?
+    # Every step, whatever the one before did: on Ctrl-C the processes below
+    # are already gone, and under `set -e` the first kill that found nothing
+    # ended the teardown before it removed the run directory.
+    set +e
     [ -n "$app_pid" ] && kill "$app_pid" 2>/dev/null
     [ -n "$bg_pid" ] && kill "$bg_pid" 2>/dev/null
     # cosmic-comp and the session bus are children of dbus-run-session.
@@ -168,8 +172,11 @@ for _ in $(seq 100); do
 done
 [ -S "$socket" ] || die "cosmic-comp did not start"
 
-# The compositor's window is the output; resize it to the size wanted.
-window=$(DISPLAY=$display xdotool search --sync --onlyvisible --name '.' | head -n 1)
+# The compositor's window is the output; resize it to the size wanted. Bounded:
+# a compositor that died after making its socket never opens one.
+window=$(DISPLAY=$display timeout 10 xdotool search --sync --onlyvisible --name '.' | head -n 1) ||
+    true
+[ -n "$window" ] || die "cosmic-comp did not open its window"
 DISPLAY=$display xdotool windowsize "$window" "$OUTPUT_W" "$OUTPUT_H"
 for _ in $(seq 50); do
     WAYLAND_DISPLAY=$socket grim "$run/output.png" 2>>"$log" || true
