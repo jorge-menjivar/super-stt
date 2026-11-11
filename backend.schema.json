@@ -541,7 +541,7 @@
       "properties": {
         "context": {
           "default": false,
-          "description": "Opt into being handed the user's dictation context: an `x-stt-prompt`\nheader and an `x-stt-vocabulary` header, on every `/v1` request to a\nspeech-to-text model. Default `false`, which means neither header is\nsent.\n\nUnlike `websocket` this is not transport-restricted, and the deviation\nis deliberate: both headers ride the ordinary request every backend\nalready receives, so a `subprocess` backend can use them exactly as a\n`wasm` one does. The flag exists to keep the headers off backends that\nwould not know what to do with them, not to gate a transport.\n\nDeclared per backend rather than per model, because it describes what\nthe code reading the request does, and that code is the backend's.",
+          "description": "Opt into being handed the user's dictation context: an `x-voice-prompt`\nheader and an `x-voice-vocabulary` header, on every `/v1` request to a\nspeech-to-text model. Default `false`, which means neither header is\nsent.\n\nUnlike `websocket` this is not transport-restricted, and the deviation\nis deliberate: both headers ride the ordinary request every backend\nalready receives, so a `subprocess` backend can use them exactly as a\n`wasm` one does. The flag exists to keep the headers off backends that\nwould not know what to do with them, not to gate a transport.\n\nDeclared per backend rather than per model, because it describes what\nthe code reading the request does, and that code is the backend's.",
           "type": "boolean"
         },
         "streaming_input": {
@@ -857,7 +857,7 @@
         },
         "output_sample_rate": {
           "default": null,
-          "description": "Text to speech: native output sample rate in Hz, e.g. `24000`.\n\nAdvisory. The authoritative rate is the `x-tts-sample-rate` response\nheader on each synthesis, which is what the daemon resamples from — a\nmanifest cannot know what a cloud provider will actually return. This\nvalue exists so the settings UI can show an output rate and the daemon\ncan pre-size buffers before the first response arrives.",
+          "description": "Text to speech: native output sample rate in Hz, e.g. `24000`.\n\nAdvisory. The authoritative rate is the `x-voice-sample-rate` response\nheader on each synthesis, which is what the daemon resamples from — a\nmanifest cannot know what a cloud provider will actually return. This\nvalue exists so the settings UI can show an output rate and the daemon\ncan pre-size buffers before the first response arrives.",
           "format": "uint32",
           "minimum": 0,
           "type": [
