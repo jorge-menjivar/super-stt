@@ -6,19 +6,14 @@
 use super_engine_indexer::Indexer;
 use super_voice_registry_types::Voice;
 
-/// Entries that predate the `id` requirement, and the migration backlog.
+/// Entries exempt from the `id` requirement: none.
 ///
-/// `registry.schema.json` requires an `id` of *every* entry, so an editor
-/// already flags the one left. It is tolerated here so the scheduled index
-/// build keeps publishing a catalog until it is fixed —
-/// removing a name without fixing its backend would take every user's Browse
-/// listing down with it.
-///
-/// Fixing one is not a `registry.toml` edit. An entry that declares an `id`
-/// pins the release to it, so the order is: add `[backend].id` to that
-/// backend's own `backend.toml`, cut a release, *then* add the same id here
-/// and delete the name below. Adding the id here first earns an `IdMismatch`.
-const GRANDFATHERED: &[&str] = &["deepgram"];
+/// The requirement came after the registry's first backends, and the entries
+/// that predated it were tolerated without an `id` until each backend's own
+/// release declared one. Deepgram was the last. Every entry declares an `id`
+/// now, so the indexer refuses one without, as `registry.schema.json` already
+/// told an editor.
+const GRANDFATHERED: &[&str] = &[];
 
 const INDEXER: Indexer = Indexer {
     name: "super-voice-indexer",
@@ -46,10 +41,12 @@ mod tests {
         Registry::parse(&text, GRANDFATHERED).expect("registry.toml parses");
     }
 
-    /// The entries still being migrated keep publishing without an `id`.
+    /// No entry is exempt any more: one without an `id` is refused, the last
+    /// formerly exempt name included.
     #[test]
-    fn accepts_a_grandfathered_entry_without_an_id() {
+    fn refuses_an_entry_without_an_id() {
         let text = "[deepgram]\n    repo = \"github.com/jorge-menjivar/super-stt-deepgram\"\n    forge = \"github\"\n";
-        Registry::parse(text, GRANDFATHERED).expect("existing entries are exempt");
+        let parsed = Registry::parse(text, GRANDFATHERED);
+        assert!(parsed.is_err(), "an entry without an id must be refused");
     }
 }

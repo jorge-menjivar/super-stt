@@ -41,11 +41,9 @@ End users do not interact with this directory.
    at the top of `registry.toml`).
 
    `id` is **required**. The schema linked from `registry.toml` flags an entry
-   without one, and the indexer refuses it. Six entries predate the rule and
-   still lack an `id`; they are tolerated so the catalog keeps building, and
-   each is fixed by adding `[backend].id` to that backend's own repo and
-   cutting a release *before* the id is added here — an entry that declares an
-   `id` pins the release to it, so the file must be edited last.
+   without one, and the indexer refuses it. An entry's `id` pins the releases
+   it accepts, so a backend that changes its `[backend].id` cuts that release
+   *before* the id is changed here — the file is edited last.
 
 3. Reviewers check: the id isn't already claimed by an existing or
    `removed = true` entry; your repo's license is acceptable; you control
@@ -73,9 +71,6 @@ you control, e.g. `com.example.voxtral`. See
 - It must be identical to the `[backend].id` in the `backend.toml` published
   by the release the entry points at. A release whose manifest declares a
   different id, or none, is rejected.
-
-Entries that predate this requirement are accepted without an `id`. They stop
-being exempt as soon as they declare one.
 
 ## Removing or yanking
 
