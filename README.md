@@ -14,18 +14,6 @@
 
 https://github.com/user-attachments/assets/bbbe20c3-6802-4797-afc8-aa81d1b48415
 
-
-## What is Super Voice?
-
-Super Voice is speech to text and text to speech for Linux, with any model you want. Speak, and your words are typed into whatever app you're in. Give it text, and the model you pick reads it aloud.
-
-It makes speech-to-text with automatic text input **trivial on Linux, for everyone**. Bind a shortcut (Super+Space by convention), speak, and your words are typed straight into whatever app is focused, e.g. your editor, browser, chat, terminal. No copy-paste, no fiddling.
-
-Under the hood it's two things:
-
-- **A model-agnostic engine.** A background daemon installs speech models from a **library** of backends (local or cloud), loads one, and keeps it warm for instant transcription. You pick the model that fits your hardware and swap it whenever you like.
-- **An open protocol.** The daemon speaks a documented HTTP protocol over a local socket, so *any* app, in any language, can request transcriptions, stream live audio visualizations, or drive recording, with per-app consent. Super Voice's own desktop apps, CLI, and COSMIC applet are just the first clients. See [Developers](#-developers).
-
 ## 🚀 Installation
 
 **Quick install** - detects your system and downloads pre-built binaries:
@@ -36,25 +24,24 @@ curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-voice/main/inst
 
 Append `-s -- --beta` for the latest beta.
 
-**Build from source** - for the very latest changes (needs the [build prerequisites](./CONTRIBUTING.md#prerequisites)):
+## What is Super Voice?
+Super Voice is speech-to-text and text-to-speech for Linux, with any model you want. Dictate into any app, hear text read aloud, and swap models anytime, local or cloud, on CPU or GPU.
 
-```bash
-git clone https://github.com/jorge-menjivar/super-voice.git
-cd super-voice
-just install
-```
+Under the hood it's two things:
 
-Either way you get the daemon, the `voice` CLI, a consent helper, the desktop app, and (on COSMIC) the panel applet, wired up as a `systemctl --user` service. Everything installs system-wide (root-owned, so the installer asks for sudo), while the daemon itself runs unprivileged in your user session. On COSMIC the installer offers to bind Super+Space → `voice record --write` for you. GPU acceleration comes from the model you run (see [Models](#-models)).
+- **A model-agnostic engine.** A background daemon installs speech models from a **library** of backends (local or cloud), loads one, and keeps it warm for instant transcription. You pick the model that fits your hardware and swap it whenever you like.
+- **An open protocol.** The daemon speaks a documented HTTP protocol over a local socket, so *any* app, in any language, can request transcriptions, stream live audio visualizations, or drive recording, with per-app consent. Super Voice's own desktop apps, CLI, and COSMIC applet are just the first clients. See [Developers](#-developers).
 
-### Upgrading from Super STT
+## Features?
+- Speech-to-Text support.
+- Text-to-Speech support.
+- High performance. Built in Rust. Supports GPU acceleration for both STT and TTS.
+- Native support for Linux.
+- Bind a shortcut (Super+Space by convention), speak, and your words are typed straight into whatever app is focused, e.g. your editor, browser, chat, terminal. No copy-paste, no fiddling.
+- It allows you to speak text (synthesize) high quality audio using state-of-the-art models without any extra setup.
+- Clone your own voice and use it to speak text.
+- You can choose the model to use from a growing library of backends. You can [create and use your own backend](./docs/protocol/README.md#add-your-own-model) too.
 
-Run the quick install above once. Super STT's app can't update itself to Super Voice. The installer stops and removes Super STT's daemon, its `super-stt.service` unit and its `stt` command. On COSMIC it moves any shortcut that ran `stt` to `voice`.
-
-Super Voice starts fresh:
-
-1. Settings and API keys aren't carried over. Set them again in the app.
-2. Installed backends, downloaded models and cloned voices are kept.
-3. A shortcut you bound to `stt …` on another desktop stops working. Bind it to `voice …` instead: `stt record` is `voice record`, and `stt stop` is `voice record stop`.
 
 ## ⌨️ Using it
 
@@ -76,49 +63,13 @@ systemctl --user start super-voice      # or: enable / status / restart
 journalctl --user -u super-voice -f     # follow logs
 ```
 
-### Recording modes
-
-Two settings shape a session. Both live in the desktop app under **Settings** (or the daemon config); stop mode can also be set per-recording on the CLI.
-
-**Stop mode** - how a recording ends:
-
-| Mode                           | Behavior                                              |
-|--------------------------------|-------------------------------------------------------|
-| **Silence + Manual** (default) | Stops on silence detection or a second shortcut press |
-| **Silence Only**               | Stops only when silence is detected                   |
-| **Manual Only**                | Stops only on a second shortcut press                 |
-
-```bash
-voice record --write --stop-mode manual_only
-```
-
-**Write method** - how text is injected: **Auto** (default) picks the first method the session supports: the built-in Wayland virtual keyboard, then the XDG Desktop Portal, then ydotool. Force a specific one in Settings if auto-detection picks wrong.
-
 ## 🤖 Models
 
-Models come from a **library** of backends you install on demand. Open the app, go to **Library → Browse**, install a backend, and it appears in the model selector. Some run **locally** (your audio never leaves your machine); others are **online** providers you reach with your own API key, which the daemon keeps in a file only you can read.
+Models come from a **library** of backends you install on demand. Open the app, go to **Library → Browse**, install a backend, and it appears in the model selector. Some run **locally** (your audio never leaves your machine); others are **online** providers you reach with your own API key.
 
-### Recommended models
+> **GPU acceleration** is a property of the model, not a separate build of the app. Install a GPU-capable backend (like Voxtral or Qwen3-ASR) and the daemon downloads the build matched to your GPU automatically. You just need an up-to-date driver.
 
-**Local** - everything stays on your device.
-
-| Model              | Best for                                              |
-|--------------------|-------------------------------------------------------|
-| **Voxtral** (mini / small) | High accuracy; needs an **NVIDIA GPU** (CUDA). |
-| **Qwen3-ASR** (0.6b / 1.7b) | Fast, multilingual; runs on **CPU or an NVIDIA GPU** (CUDA). |
-| **Whisper** (tiny → large) | Versatile and battle-tested; `tiny`/`base` are great **CPU** defaults. |
-
-**Online** - bring your own API key.
-
-| Provider   | Notable models                                       |
-|------------|------------------------------------------------------|
-| **Mistral**  | `voxtral-mini-latest`, plus a realtime Voxtral model |
-| **OpenAI**   | `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` |
-| **Deepgram** | `nova-3`                                              |
-
-> **GPU acceleration** is a property of the model, not a separate build of the app. Install a GPU-capable backend (like Voxtral or Qwen3-ASR) and the daemon downloads the build matched to your NVIDIA GPU automatically. You just need an up-to-date driver.
-
-This is a snapshot. The app always shows the current catalog, published live at [`jorge-menjivar.github.io/super-voice/index.json`](https://jorge-menjivar.github.io/super-voice/index.json). Want a model that isn't there? Anyone can [publish one](./docs/protocol/README.md#add-your-own-model).
+Want a model that isn't there? Anyone can [publish one](./docs/protocol/README.md#add-your-own-model).
 
 ## 🖼️ Screenshots
 
