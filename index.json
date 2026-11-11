@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-11T03:12:56Z",
+  "generated_at": "2026-11-11T03:54:24Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -266,17 +266,17 @@
     },
     {
       "id": "qwen",
-      "backend_id": "app.super-stt.qwen",
+      "backend_id": "app.super-voice.qwen-asr",
       "source": "github.com/super-libre/super-stt-qwen",
-      "version": "0.1.0",
-      "tag": "v0.1.0",
-      "name": "Qwen",
+      "version": "0.1.1",
+      "tag": "v0.1.1",
+      "name": "Qwen ASR",
       "description": "Local Qwen3-ASR speech-to-text with streamed previews.",
       "license": "GPL-3.0-only",
       "kind": "subprocess",
       "contract": "v4",
       "min_client": "0.3.0",
-      "entrypoint": "super-stt-backend-qwen",
+      "entrypoint": "super-voice-backend-qwen-asr",
       "allowed_hosts": [],
       "online": false,
       "supports_gpu": true,
@@ -308,25 +308,25 @@
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 15496680,
-            "sha256": "a70995b44ae64437abced1f7440919f6baa5fc612f2ad02eb883e4e5571afc96"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 15501580,
+            "sha256": "7a0a63b0d41bc89c7ceee8bbae9fae45c713169b9a5dcaedb40ca380c5dbbe44"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 12,
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cuda12.tar.gz",
-            "size": 56561529,
-            "sha256": "bfc392941471c03c150f831d253598657ec72a063ea44f0c581f855c4b47617c"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-cuda12.tar.gz",
+            "size": 56559786,
+            "sha256": "e390adc9c7131b83aaf604624104520baeeb0540c13033e56fe3656f710b8e22"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 13,
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz",
-            "size": 56558484,
-            "sha256": "b4c84bce16fbb241cb65f669869ec36c031d442251c8967950d27d1ecad1c6b3"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz",
+            "size": 56566872,
+            "sha256": "26d34b412bad2f1b31b075263558694134b932d354f948ecffbfef8770cc066f"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -346,67 +346,67 @@
               "gfx1200",
               "gfx1201"
             ],
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-rocm.tar.gz",
-            "size": 64774601,
-            "sha256": "6ea1f7bfa0e0e77b836d8918314477fe892beafd1c7231f2dec7b91f71b062b7"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-rocm.tar.gz",
+            "size": 64782520,
+            "sha256": "0340916eeb2aec61dead7db9abc722542e35104632e7597b38775f1883f4ef61"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "vulkan",
             "vulkan_api": "1.2",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-vulkan.tar.gz",
-            "size": 33268649,
-            "sha256": "4a368633a16b3e2c82615693c2f23b03585cf18af4e15924ae6a13efefa717e3"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-vulkan.tar.gz",
+            "size": 33272847,
+            "sha256": "83e07f4ba02019cd5e5e58f5e9f292f3ecb4ebbf773a020ee3b04492a276f5c6"
           },
           {
             "target": "aarch64-unknown-linux-gnu",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-aarch64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 15512927,
-            "sha256": "8af053581b405b5134be023aaf73f9c91f8357c1f8a5bbdb38ca009f6cb7fc1e"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-aarch64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 15503973,
+            "sha256": "047110cdd7e1ac4d4dc429eaaaed98d6e40c54243e7c4dac2e936c42bff6c2a1"
           },
           {
             "target": "aarch64-unknown-linux-gnu",
             "accel": "vulkan",
             "vulkan_api": "1.2",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-aarch64-unknown-linux-gnu-vulkan.tar.gz",
-            "size": 37651219,
-            "sha256": "00f4c5ae50b7244fd4363d12f7ad9b395cea406ff9710547b000df76a6cf37c4"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-aarch64-unknown-linux-gnu-vulkan.tar.gz",
+            "size": 37651333,
+            "sha256": "14c943ca15b87cbebbe7e1cae3368f5bf7b5496d91c9e225a7a4fe4be2333c2f"
           },
           {
             "target": "aarch64-apple-darwin",
             "accel": "metal",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-aarch64-apple-darwin-metal.tar.gz",
-            "size": 27977490,
-            "sha256": "0b0db99337b53f355d483092544f489782c7114c47aff7d9ba3cf24a3488fbd6"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-aarch64-apple-darwin-metal.tar.gz",
+            "size": 27977959,
+            "sha256": "abf27c787c41eb006a43fcbe15c63be21a2f61d7ea2f2de53da05f614379c0f6"
           },
           {
             "target": "aarch64-apple-darwin",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-aarch64-apple-darwin-cpu.tar.gz",
-            "size": 13405844,
-            "sha256": "c4f1ceb5f18f0f6d9c964cca5cc0a2a1e5015206b95521744e0507587d45a24f"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-aarch64-apple-darwin-cpu.tar.gz",
+            "size": 13413090,
+            "sha256": "83ab252d4b52c59eefc09d21b16620b1f26ff7dade596cea081227cac8e0d6b0"
           },
           {
             "target": "x86_64-apple-darwin",
             "accel": "metal",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-apple-darwin-metal.tar.gz",
-            "size": 29053578,
-            "sha256": "c033d7a58df32bf51d31e8d579bcf3b1ffb1be6512a2c8dab2cf0da3c69f6ee5"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-apple-darwin-metal.tar.gz",
+            "size": 29053045,
+            "sha256": "8c732033334e946852825b267600e15aeea0062ff7a7c1e85e6889decc7f0cfa"
           },
           {
             "target": "x86_64-apple-darwin",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-apple-darwin-cpu.tar.gz",
-            "size": 14398445,
-            "sha256": "1a3194a0ce891399ceaaeaad2ec78a5006c237f5f85998ed15f228a5c7a7646f"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-apple-darwin-cpu.tar.gz",
+            "size": 14406725,
+            "sha256": "62ff6f7ddfd8afbc28e943ec27d7b2d2f67a966f0867bf1fda9958d0d1548713"
           }
         ]
       },
       "manifest": {
-        "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.0/backend.toml",
-        "size": 9038,
-        "sha256": "5c9807fe80e8badf9022ece8a963acd5123259adb19f5a08abae22c7258bfdb9"
+        "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/backend.toml",
+        "size": 9535,
+        "sha256": "4548d451b9f04b98d2f47778250d3fe08b6ca9792b8593992e0999b27245c3a5"
       }
     },
     {
