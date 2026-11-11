@@ -38,7 +38,7 @@
   forge = "github"
 
 [s1_mini]
-  id    = "app.super-stt.s1-mini"
+  id    = "app.super-voice.s1-mini"
   repo  = "github.com/jorge-menjivar/super-stt-s1-mini"
   forge = "github"
 
