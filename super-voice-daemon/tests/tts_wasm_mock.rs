@@ -221,7 +221,11 @@ async fn a_cloned_voice_is_kept_in_a_private_tmp_while_the_model_is_loaded() {
         .expect("a component using the filesystem gets a private /tmp")
         .to_path_buf();
     assert!(tmp.is_dir());
-    assert_eq!(std::fs::read_dir(&tmp).unwrap().count(), 0, "it starts empty");
+    assert_eq!(
+        std::fs::read_dir(&tmp).unwrap().count(),
+        0,
+        "it starts empty"
+    );
 
     let voice = "voice:2f8a2d0e-9c31-4e77-b0aa-1c6b2f0a51d4";
     register(&backend, voice).await;

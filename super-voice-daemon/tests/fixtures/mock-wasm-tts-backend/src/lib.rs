@@ -15,8 +15,7 @@
 use base64::Engine as _;
 use wasi::exports::http::incoming_handler::Guest;
 use wasi::http::types::{
-    Fields, IncomingBody, IncomingRequest, Method, OutgoingBody, OutgoingResponse,
-    ResponseOutparam,
+    Fields, IncomingBody, IncomingRequest, Method, OutgoingBody, OutgoingResponse, ResponseOutparam,
 };
 use wasi::io::streams::StreamError;
 
