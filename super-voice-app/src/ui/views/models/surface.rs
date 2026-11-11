@@ -264,38 +264,6 @@ pub(super) fn muted_text_color() -> cosmic::iced::Color {
     c
 }
 
-/// One caption per kind of model a backend serves, each naming the kind and
-/// then its models joined by " · " (e.g.
-/// `"Speech to text: whisper-large-v3 · whisper-medium"`). De-emphasized so it
-/// reads as a secondary detail under the card's description. `None` when the
-/// backend serves no models.
-///
-/// Browse describes a backend the user has not installed, so which kinds it
-/// ships is exactly what decides whether they want it.
-pub(super) fn models_line<'a>(groups: &[super::chips::RoleGroup]) -> Option<Element<'a, Message>> {
-    if groups.is_empty() {
-        return None;
-    }
-    let muted = muted_text_color();
-    let lines: Vec<Element<'a, Message>> = groups
-        .iter()
-        .map(|group| {
-            text::caption(format!(
-                "{}: {}",
-                group.label,
-                group.names.join(" \u{00b7} ")
-            ))
-            .class(cosmic::theme::Text::Color(muted))
-            .into()
-        })
-        .collect();
-    Some(
-        cosmic::iced::widget::column(lines)
-            .spacing(cosmic::theme::spacing().space_xxxs)
-            .into(),
-    )
-}
-
 /// A small icon button that opens a backend's source repository in the
 /// browser, replacing the raw repo-id caption the cards used to show. `source`
 /// is a bare repo id (e.g. `github.com/owner/name`), so the scheme is

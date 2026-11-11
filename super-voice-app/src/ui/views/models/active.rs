@@ -43,34 +43,6 @@ pub(super) fn backend_glyph_tile<'a>() -> Element<'a, Message> {
         .into()
 }
 
-/// Assemble a backend card's header: the leading glyph tile, a two-line name +
-/// source block that takes the remaining width, and the card's action buttons
-/// grouped on the right.
-pub(super) fn backend_header(
-    name: String,
-    source: String,
-    actions: Vec<Element<'_, Message>>,
-) -> Element<'_, Message> {
-    let spacing = cosmic::theme::spacing();
-    let muted = super::surface::muted_text_color();
-    let title_block = column![
-        // title4's default line box is Absolute(30) around 20px text, so ~5px of
-        // leading sits above the glyph and reads as extra padding at the top of
-        // the card. Hug the glyph with line-height 1.0 — same fix as the chips.
-        text::title4(name).line_height(1.0),
-        text::caption(source).class(cosmic::theme::Text::Color(muted)),
-    ]
-    .spacing(spacing.space_xxxs)
-    .width(Length::Fill);
-    let actions_row = row(actions)
-        .spacing(spacing.space_xs)
-        .align_y(Alignment::Center);
-    row![backend_glyph_tile(), title_block, actions_row]
-        .spacing(spacing.space_s)
-        .align_y(Alignment::Center)
-        .into()
-}
-
 /// The selected backend, shown above the tabs: its model picker + Select, an
 /// in-card status line (loading / download progress / error), Configure, and
 /// Deselect. `width` is the card's: under [`super::surface::NARROW_CARD`] its

@@ -9,9 +9,9 @@ use crate::state::ContextPage;
 use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage};
 
-use super::active::backend_header;
-use super::chips::{CloudEgress, capability_chips, result_count, role_groups};
-use super::surface::{card_divider, card_surface, models_line, muted_text_color};
+use super::active::backend_glyph_tile;
+use super::chips::{CloudEgress, capability_chips, models_inventory, result_count, role_groups};
+use super::surface::{card_divider, card_surface, card_title_block, muted_text_color, repo_button};
 
 /// Browse tab split into its two regions: the fixed search + filter toolbar
 /// (with the live result count) and the scrollable list of backend cards.
@@ -282,14 +282,21 @@ pub(super) fn download_card<'a>(
     // (Tier 1 #15). The Install button stays enabled for a retry.
     let start_error = app.registry.install_errors.get(&entry.source);
 
-    // Header carries no action — Install lives in the footer below.
-    let mut card = widget::column::with_capacity(6)
+    // Laid out as an Installed card is, so a backend reads the same before and
+    // after it is installed: the name with the version that would install and
+    // the description, then its models opposite its capability chips. The
+    // repository is a button, as there. Install lives in the footer below.
+    let description = entry.description.clone().filter(|d| !d.is_empty());
+    let header = row![
+        backend_glyph_tile(),
+        card_title_block(entry.name.clone(), &entry.version, description),
+        repo_button(&entry.source),
+    ]
+    .spacing(spacing.space_s)
+    .align_y(Alignment::Center);
+    let mut card = widget::column::with_capacity(5)
         .spacing(spacing.space_s)
-        .push(backend_header(
-            entry.name.clone(),
-            entry.source.clone(),
-            vec![],
-        ));
+        .push(header);
 
     // Browse describes a backend that is not installed, so nothing of the
     // user's is configured for it yet.
@@ -299,24 +306,26 @@ pub(super) fn download_card<'a>(
     });
     // No Contexts chip: the registry index does not carry whether a backend
     // can use a dictation context, only an installed manifest does.
-    if let Some(chips) =
-        capability_chips(entry.supports_gpu, entry.supports_cpu, egress, false, true)
-    {
-        card = card.push(chips);
-    }
-
-    if let Some(desc) = entry.description.as_deref().filter(|d| !d.is_empty()) {
-        card = card.push(text::body(desc.to_string()).class(cosmic::theme::Text::Color(muted)));
-    }
-
+    let caps = capability_chips(entry.supports_gpu, entry.supports_cpu, egress, false, true);
     let groups = role_groups(
         entry
             .models
             .iter()
             .map(|m| (m.name.as_str(), m.product.role.as_str())),
     );
-    if let Some(line) = models_line(&groups) {
-        card = card.push(line);
+    let inventory = models_inventory(&groups);
+    if inventory.is_some() || caps.is_some() {
+        let mut meta = widget::row::with_capacity(2)
+            .spacing(spacing.space_s)
+            .align_y(Alignment::Center)
+            .width(Length::Fill);
+        if let Some(inv) = inventory {
+            meta = meta.push(widget::container(inv).width(Length::Fill));
+        }
+        if let Some(c) = caps {
+            meta = meta.push(c);
+        }
+        card = card.push(card_divider()).push(meta);
     }
 
     // Footer: contextual note on the left, Install button on the right.
