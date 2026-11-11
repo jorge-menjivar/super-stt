@@ -18,7 +18,7 @@
   forge = "github"
 
 [openai]
-  id    = "app.super-stt.openai"
+  id    = "app.super-voice.openai"
   repo  = "github.com/jorge-menjivar/super-stt-openai"
   forge = "github"
 
