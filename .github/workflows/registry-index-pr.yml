@@ -25,6 +25,6 @@ concurrency:
 
 jobs:
   preview:
-    uses: super-libre/super-engine/.github/workflows/registry-index-pr.yml@ee102a3696b6c7e77ec13cc6812ff42b9a9bbbad
+    uses: super-libre/super-engine/.github/workflows/registry-index-pr.yml@8915ca6a0669599bc5dc40c2fe5df2ae3d27f9e1
     with:
       indexer: super-voice-indexer
