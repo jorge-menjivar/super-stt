@@ -205,11 +205,10 @@ however it got onto disk.
 `product` keeps other products' backends out. Super Voice reads a manifest
 naming `super-voice` or `super-stt` as its own, since it continues Super STT
 and every backend published before the rename names it. It refuses any other
-product under every contract, Super TTS's included, whose `v1` was a contract
-line of its own:
+product under every contract:
 
 ```
-this backend is built for super-tts, not super-voice
+this backend is built for <product>, not super-voice
 ```
 
 Every backend published before the field existed is a speech-to-text backend
@@ -328,8 +327,7 @@ contract and not only a hint: `POST /backend/{id}/option/{name}` answers
 switch over the two values its type names — and the `default`, when there is
 one, has to be on the list. Both are refused at publication.
 
-An option value is delivered as an `x-stt-option-<name>` request header (or
-`x-tts-option-<name>` for a synthesis model), which
+An option value is delivered as an `x-voice-option-<name>` request header, which
 sets the shape a value may take: at most 4000 characters, and no control
 characters. The daemon refuses a user's write of anything else with
 `400 invalid_value`, and a `default` that breaks the same rule is refused at
@@ -447,7 +445,7 @@ way still loads, with the option intact and the declared value dropped and
 logged — an author's mistake costs the user a setting, not the backend. Either
 way the value never takes effect, so a backend that needs a working endpoint out
 of the box carries it in the component and treats the option as an override.
-That is what the missing `x-stt-option-base_url` header means when the user has
+That is what the missing `x-voice-option-base_url` header means when the user has
 set nothing.
 
 The value the backend receives is **canonical**. The daemon parses it and
@@ -667,7 +665,7 @@ context   = true
 | Field       | Type | Required | Notes                                                                              |
 |-------------|------|----------|------------------------------------------------------------------------------------|
 | `websocket` | bool | no       | Opt into the `super-engine:realtime/ws` import and the `super-engine:realtime/ws-server` export (see [wasm.md — Realtime](./wasm.md#realtime-websocket)). When `true`, the daemon wires those interfaces into the WASM component for every session on a realtime model. **wasm-only** — a `subprocess` backend declaring `websocket = true` is rejected at discovery. Default `false`. |
-| `context`   | bool | no       | Speech to text. Opt into being handed the user's [dictation context](../endpoints/v1/context.md): an `x-stt-prompt` and an `x-stt-vocabulary` header on every `/v1` request (see [contract.md — Request headers](./contract.md#request-headers)). Unlike `websocket` this is **not** transport-restricted — both headers ride the ordinary request, so a `subprocess` backend reads them exactly as a `wasm` one does. Declare it only if the backend actually reads them: a settings UI uses the flag to tell the user which backends will hear a vocabulary they typed. Default `false`, which means neither header is sent. |
+| `context`   | bool | no       | Speech to text. Opt into being handed the user's [dictation context](../endpoints/v1/context.md): an `x-voice-prompt` and an `x-voice-vocabulary` header on every `/v1` request (see [contract.md — Request headers](./contract.md#request-headers)). Unlike `websocket` this is **not** transport-restricted — both headers ride the ordinary request, so a `subprocess` backend reads them exactly as a `wasm` one does. Declare it only if the backend actually reads them: a settings UI uses the flag to tell the user which backends will hear a vocabulary they typed. Default `false`, which means neither header is sent. |
 | `streaming_input` | bool | no | Text to speech. **Reserved**: it would opt a backend into an incremental-text path, holding a provider's prosodic context across deltas. The daemon implements no such path yet, so a manifest setting it to `true` is refused rather than silently ignored. Default `false`. |
 
 ## `[[models]]`
@@ -701,7 +699,7 @@ processing_interval_ms = 1000
 | `realtime`               | bool            | no       | When `true`, the model is driven over the consumer-facing WebSocket endpoint (`GET /v1/stt/transcribe/realtime`) rather than batch `POST /v1/transcribe`. Requires `[capabilities] websocket = true`. Default `false`. For a synthesis model it is **reserved**: the transport works, but no session payload is defined yet. |
 | `force_preview_support`  | bool            | no       | **Speech to text only.** A `v2` field. Force live previews onto a model that has none of its own: while its microphone is open, the daemon re-transcribes a sliding window of the capture every `processing_interval_ms` and shows the result. Each pass is a full transcription the final pass repeats, and for an online model a billed request whose output is discarded, so it is off unless the manifest turns it on. Default `false`. Not consulted for a `realtime` model, which streams its own previews. See [previews](../endpoints/v1/transcribe.md#previews). |
 | `max_input_chars`        | integer         | no       | **Text to speech only.** Longest `text` the model accepts in one `POST /v1/synthesize`. Absent means unbounded: the daemon sends whole utterances and never splits for length. When set, the daemon chunks on sentence boundaries to stay under it. Must be non-zero. |
-| `output_sample_rate`      | integer         | no       | **Text to speech only.** Native output rate in Hz, e.g. `24000`. **Advisory** — the authoritative rate is the `x-tts-sample-rate` response header on each synthesis, since a manifest cannot know what a cloud provider will actually return. It lets the settings UI show a rate and the daemon pre-size buffers before the first response. Must be 8000–192000. |
+| `output_sample_rate`      | integer         | no       | **Text to speech only.** Native output rate in Hz, e.g. `24000`. **Advisory** — the authoritative rate is the `x-voice-sample-rate` response header on each synthesis, since a manifest cannot know what a cloud provider will actually return. It lets the settings UI show a rate and the daemon pre-size buffers before the first response. Must be 8000–192000. |
 | `default_voice`          | string          | no       | **Text to speech only.** Voice used when a request omits `voice`. **Required** when `voices` is non-empty, and must name one of them. |
 | `voice_kinds`            | array of string | no       | **Text to speech only.** Which `voice` id shapes this model accepts, from `["preset", "cloned", "described"]`. Default `["preset"]`. Non-empty. The daemon refuses a shape the model did not opt into, so a backend never sees an id it cannot resolve. |
 | `clone_ref_seconds`      | number          | no       | **Text to speech only.** Longest reference audio accepted for a cloned voice, in seconds. **Required** when `voice_kinds` contains `cloned`, forbidden otherwise. Must be positive. The daemon trims a longer recording to this before registering it, so the value is a budget rather than a filter. |

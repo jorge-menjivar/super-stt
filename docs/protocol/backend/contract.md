@@ -130,18 +130,21 @@ On every `/v1` request the daemon injects context as request headers; a
 backend reads what it needs and ignores the rest. The daemon owns these
 headers — external clients cannot set them.
 
-The prefix follows the feature of the model the request is for: `x-stt-` for a
-`transcription` or `post_processor` model, `x-tts-` for a `synthesis` model.
+| Header                  | Carries                                                                       |
+|-------------------------|-------------------------------------------------------------------------------|
+| `x-voice-model`         | The active model name, e.g. `whisper-1` or `kokoro-82m`.                      |
+| `x-voice-secret-<name>` | One declared secret, e.g. `x-voice-secret-OPENAI_API_KEY`.                    |
+| `x-voice-option-<name>` | One declared option, e.g. `x-voice-option-base_url`.                          |
+| `x-voice-prompt`        | Speech to text only. The user's dictation prompt, as a JSON string.           |
+| `x-voice-vocabulary`    | Speech to text only. The user's vocabulary terms, as a JSON array of strings. |
 
-| Header                                        | Carries                                                  |
-|-----------------------------------------------|----------------------------------------------------------|
-| `x-stt-model` / `x-tts-model`                 | The active model name, e.g. `whisper-1` or `kokoro-82m`. |
-| `x-stt-secret-<name>` / `x-tts-secret-<name>` | One declared secret, e.g. `x-stt-secret-OPENAI_API_KEY`. |
-| `x-stt-option-<name>` / `x-tts-option-<name>` | One declared option, e.g. `x-stt-option-base_url`.       |
-| `x-stt-prompt`                                | Speech to text only. The user's dictation prompt, as a JSON string. |
-| `x-stt-vocabulary`                            | Speech to text only. The user's vocabulary terms, as a JSON array of strings. |
+Backends built before these names read the same headers under the prefix of
+the model's feature: `x-stt-` for a `transcription` or `post_processor` model,
+`x-tts-` for a `synthesis` model. The daemon sends every header under both
+names, so `x-stt-model` and `x-voice-model` carry the same value. Read the
+`x-voice-*` names.
 
-- `x-stt-model` and `x-tts-model` name the model to transcribe or synthesize
+- `x-voice-model` names the model to transcribe or synthesize
   with. The daemon also calls [`POST /v1/load`](#post-v1load) with the model
   before routing, but a stateless backend (re-instantiated per request — see
   [wasm.md](./wasm.md)) reads the model header on each request instead of
@@ -155,8 +158,8 @@ The prefix follows the feature of the model the request is for: `x-stt-` for a
   an option header gets a single line, always, and the daemon has already said
   no to the user rather than handing the backend something its transport will
   reject.
-- The `base_url` option header (`x-stt-option-base_url` or
-  `x-tts-option-base_url`) is the one the daemon normalizes. It carries a
+- The `base_url` option header (`x-voice-option-base_url`) is the one the
+  daemon normalizes. It carries a
   canonical `scheme://host[:port][/path]`:
   lowercase scheme, no userinfo, no trailing slash, no query or fragment, and a
   port only when the user set one. A backend can split it at the first `/`
@@ -165,17 +168,16 @@ The prefix follows the feature of the model the request is for: `x-stt-` for a
   [config.md — `base_url` and egress](./config.md#base_url-and-egress).
 - **Secret values are sensitive.** The daemon stores them in a file only the
   user can read (see [Security model](#security-model)) and redacts the
-  `x-stt-secret-*` and `x-tts-secret-*` headers from logs. A backend uses a
+  `x-voice-secret-*` headers from logs. A backend uses a
   secret only to authenticate its own outbound calls — it must never echo one
   in a response or forward the injected header upstream. An OpenAI backend
-  reads `x-stt-secret-OPENAI_API_KEY` (or `x-tts-secret-OPENAI_API_KEY` for a
-  speech model) and sets its own `Authorization: Bearer` header on the request
+  reads `x-voice-secret-OPENAI_API_KEY` and sets its own `Authorization: Bearer` header on the request
   to `api.openai.com`.
 - Option values are not sensitive and are stored as plaintext.
 
 The dictation context is speech to text's alone:
 
-- `x-stt-prompt` and `x-stt-vocabulary` carry the
+- `x-voice-prompt` and `x-voice-vocabulary` carry the
   [dictation context](../endpoints/v1/context.md) the user has in force for this
   backend: what they are dictating, so the model can hear it. They are sent
   **only** to a backend declaring `[capabilities] context = true`, and each is
@@ -186,7 +188,7 @@ The dictation context is speech to text's alone:
 - Both are **JSON**, and both are escaped to pure ASCII. A prompt holds line
   breaks and a vocabulary is a list, and a header value can carry neither as
   itself. Decode with the JSON parser you already have:
-  `x-stt-prompt` is a string, `x-stt-vocabulary` an array of strings. Non-ASCII
+  `x-voice-prompt` is a string, `x-voice-vocabulary` an array of strings. Non-ASCII
   characters arrive as `\uXXXX` escapes and come back out of that parser as
   themselves, so nothing extra is needed to read a prompt written in Spanish.
 - The vocabulary is an **array** because every model wants it differently —
@@ -669,19 +671,19 @@ distinguish "unset" without special-casing.
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/vnd.super-voice.frames
-x-tts-sample-rate: 24000
-x-tts-channels: 1
-x-tts-format: s16le
+x-voice-sample-rate: 24000
+x-voice-channels: 1
+x-voice-format: s16le
 ```
 
-The three `x-tts-*` headers describe every audio frame in the body and are
-required. `x-tts-format` is `s16le` or `f32le`; `x-tts-channels` is `1` or `2`;
-`x-tts-sample-rate` is in Hz. The daemon resamples and channel-maps to whatever
+The three `x-voice-*` headers describe every audio frame in the body and are
+required. `x-voice-format` is `s16le` or `f32le`; `x-voice-channels` is `1` or
+`2`; `x-voice-sample-rate` is in Hz. The daemon resamples and channel-maps to whatever
 the output device wants, so emit whatever your model produces natively.
 
-The daemon reads the body by these headers, not by its content type. Backends
-built for Super TTS send `application/vnd.super-tts.frames`, and they keep
-working.
+The daemon reads the body by these headers, not by its content type. A backend
+built before these names sends `x-tts-sample-rate`, `x-tts-channels` and
+`x-tts-format`, which the daemon reads the same.
 
 Each frame is:
 
@@ -756,7 +758,7 @@ survive a restart: the daemon re-registers after every load.
 | `transcript`  | string | no       | What the clip says. Present when the voice was stored with one; **guaranteed** present when the model declares `clone_needs_transcript`, because the daemon refuses to register a transcript-less clip against such a model. |
 | `sample_rate` | number | yes      | Always `24000` today; read it rather than assuming.                                        |
 | `channels`    | number | yes      | Always `1` today.                                                                          |
-| `format`      | string | yes      | Sample format in the `x-tts-format` vocabulary; always `s16le` today.                      |
+| `format`      | string | yes      | Sample format in the `x-voice-format` vocabulary; always `s16le` today.                    |
 | `audio`       | string | yes      | Base64 of the raw PCM, already downmixed, resampled, and trimmed to the model's `clone_ref_seconds`. |
 
 The audio is base64 inside JSON rather than a raw body so this route parses

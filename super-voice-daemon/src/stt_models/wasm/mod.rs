@@ -4,7 +4,8 @@
 //!
 //! A [`WasmBackend`] is a `super_engine_daemon::wasm::WasmComponent`, presented
 //! through the daemon's [`Transcribe`] trait. Secrets and options are injected
-//! as `x-stt-secret-*` / `x-stt-option-*` request headers; outbound egress is
+//! as `x-voice-secret-*` / `x-voice-option-*` request headers, each under its
+//! former `x-stt-*` name too; outbound egress is
 //! confined to the backend's `allowed_hosts` plus the endpoint the user
 //! authorized through its `base_url` option (see [`host::AllowlistHooks`]).
 
@@ -18,6 +19,7 @@ use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use super_engine_daemon::wasm::WasmComponent;
 
+use crate::backend_headers::{self, Feature};
 use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
 use host::AllowlistHooks;
 
@@ -39,7 +41,7 @@ pub struct WasmBackend {
 
 impl WasmBackend {
     /// Load a component for a discovered model. The transcribe headers are the
-    /// already-formed `x-stt-secret-*` / `x-stt-option-*` pairs to inject.
+    /// already-formed `x-voice-secret-*` / `x-voice-option-*` pairs to inject.
     ///
     /// `allowed_hosts` are the backend's manifest-pinned `[network].allowed_hosts`
     /// (SSRF-guarded); `user_allowed_hosts` is what the user authorized via a
@@ -159,14 +161,19 @@ impl WasmBackend {
     }
 
     /// The headers every model-bound `/v1` request carries: the configured
-    /// `x-stt-*` set plus the active model and a JSON content type. Built per
-    /// call because `x-stt-model` is appended to a copy of the stored set —
+    /// `x-voice-*` set plus the active model and a JSON content type. Built per
+    /// call because `x-voice-model` is appended to a copy of the stored set —
     /// and because the stored set can change under it (see
     /// [`Transcribe::reconfigure`]).
     fn v1_headers(&self) -> Vec<(String, String)> {
         let mut headers = self.component.request_headers();
         headers.push(("content-type".to_string(), "application/json".to_string()));
-        headers.push(("x-stt-model".to_string(), self.model_id.clone()));
+        backend_headers::push(
+            &mut headers,
+            Feature::SpeechToText,
+            "model",
+            self.model_id.clone(),
+        );
         headers
     }
 
@@ -335,23 +342,24 @@ impl Transcribe for WasmBackend {
     }
 
     /// Run one consumer realtime session: the backend's `ws-server.handle`,
-    /// with the same `x-stt-*` headers a batch call gets plus the model id.
+    /// with the same `x-voice-*` headers a batch call gets plus the model id.
     ///
     /// # Errors
     /// Returns an error if the backend is not realtime-capable, instantiation
     /// fails, or the guest's handler returns a `ws-error`.
     #[cfg(feature = "wasm-backends")]
     async fn realtime_session(&self, transport: ws_host::ConsumerStreamTransport) -> Result<()> {
-        let mut headers: Vec<(String, Vec<u8>)> = self
-            .component
-            .request_headers()
+        let mut pairs = self.component.request_headers();
+        backend_headers::push(
+            &mut pairs,
+            Feature::SpeechToText,
+            "model",
+            self.model_id.clone(),
+        );
+        let headers = pairs
             .into_iter()
             .map(|(k, v)| (k, v.into_bytes()))
             .collect();
-        headers.push((
-            "x-stt-model".to_string(),
-            self.model_id.clone().into_bytes(),
-        ));
         self.component.realtime_session(headers, transport).await
     }
 }

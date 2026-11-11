@@ -5,8 +5,7 @@ Store, check, and clear a backend's **secrets** — the sensitive values
 [`backend.toml`](../../../backend/config.md). The daemon owns secret storage
 end to end: a client sets a secret here, the daemon persists it in its secrets
 file, and the daemon reads it back **only** at model-load time to inject it
-as an `x-stt-secret-<name>` request header, or `x-tts-secret-<name>` for a
-synthesis model (see
+as an `x-voice-secret-<name>` request header (see
 [contract.md](../../../backend/contract.md#request-headers)).
 
 `{backend_id}` is the backend's id — its `source` as `GET /backend/list` reports it (e.g. `github.com/super-stt/openai`),

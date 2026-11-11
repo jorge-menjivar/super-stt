@@ -82,7 +82,7 @@ pub struct RegisterVoiceRequest<'a> {
     pub sample_rate: u32,
     /// Channel count of `pcm`. Always 1 today.
     pub channels: u16,
-    /// Sample format of `pcm`, in the `x-tts-format` vocabulary.
+    /// Sample format of `pcm`, in the `x-voice-format` vocabulary.
     pub format: &'a str,
     /// The reference audio, already downmixed, resampled, and trimmed to the
     /// model's `clone_ref_seconds`.

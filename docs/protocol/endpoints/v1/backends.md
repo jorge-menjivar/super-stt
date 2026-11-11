@@ -20,7 +20,7 @@ directly.
 - **Secrets** (`[[secrets]]`) — sensitive values such as API keys, managed
   under [`/backend/{backend_id}/secret/list`](./backends/secrets.md) (the `secrets`
   scope). The daemon stores them in its **secrets file** and reads them only
-  at model-load time, injecting each as an `x-stt-secret-<name>` request header
+  at model-load time, injecting each as an `x-voice-secret-<name>` request header
   (see [contract.md](../../backend/contract.md#request-headers)). Values are
   **write-only**: a client sets or clears a secret and can check whether one is
   configured, but no endpoint ever returns a value.
@@ -67,7 +67,7 @@ Authorization: Bearer …64hex…
       "kind":   "wasm",                 // "wasm" | "subprocess"
       "allowed_hosts": ["api.openai.com"],  // hosts the manifest declares; [] for subprocess/local
       "installed_accel": [],            // accel of the installed asset; [] for a wasm/cloud backend
-      "accepts_context": true,          // reads x-stt-prompt / x-stt-vocabulary
+      "accepts_context": true,          // reads x-voice-prompt / x-voice-vocabulary
       "models": [
         {
           "name":                 "whisper-1",
@@ -117,7 +117,7 @@ Authorization: Bearer …64hex…
 | `…[].models`      | array            | Models served, as `{ name, multilingual, primary_language, supported_languages, supported_devices, estimated_vram_bytes }`. `multilingual` is `true` when the model accepts a language tag. `primary_language` is the model's default BCP-47 tag (the fallback when no override or global setting applies). `supported_languages` is the non-empty array of BCP-47 tags the model accepts; these feed the per-model language picker and the [`/backend/{backend_id}/models/{model}/settings/language`](./pipeline/language.md) resolution. `supported_devices` is a non-empty array drawn from `["cpu", "gpu", "none"]`; `"none"` marks a remote/online model with no local compute. `estimated_vram_bytes` is a conservative GPU memory estimate (weights + KV cache + overhead); `0` when unknown or not GPU-resident. See [`GET /gpu_info`](./gpu_info.md) for the detected GPU memory it's weighed against. |
 | `…[].secrets`     | array            | Declared secrets: `{ name, label, description, required }`. `label` falls back to `name` when absent. Secret **values** are never returned. |
 | `…[].options`     | array            | Declared options: `{ name, label, description, type, default, required, value }`. `label` falls back to `name` when absent; `value` is the effective value (config override if set, else `default`). |
-| `…[].accepts_context` | bool         | Whether the backend declared [`[capabilities] context = true`](../../backend/config.md#capabilities) and is therefore handed the user's [dictation context](./context.md) as `x-stt-prompt` / `x-stt-vocabulary`. `false` for a backend that did not, and from a daemon older than the field — which is the same thing in effect, since such a daemon sends the headers to nobody. A settings UI needs this to say which installed backends will actually use a context: one that ignores the headers has no way to say so at runtime, so without it the user cannot tell a context that did nothing from one that is not working. |
+| `…[].accepts_context` | bool         | Whether the backend declared [`[capabilities] context = true`](../../backend/config.md#capabilities) and is therefore handed the user's [dictation context](./context.md) as `x-voice-prompt` / `x-voice-vocabulary`. `false` for a backend that did not, and from a daemon older than the field — which is the same thing in effect, since such a daemon sends the headers to nobody. A settings UI needs this to say which installed backends will actually use a context: one that ignores the headers has no way to say so at runtime, so without it the user cannot tell a context that did nothing from one that is not working. |
 
 `models[].role` says what a model is for, and so which feature it serves:
 `"transcription"` and `"post_processor"` are speech to text's, `"synthesis"`

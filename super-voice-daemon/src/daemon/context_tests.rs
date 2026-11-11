@@ -388,7 +388,7 @@ fn last_prompt(seen: &SeenContexts) -> Option<String> {
     context
         .headers
         .iter()
-        .find(|(k, _)| k == "x-stt-prompt")
+        .find(|(k, _)| k == "x-voice-prompt")
         .map(|(_, v)| v.clone())
 }
 

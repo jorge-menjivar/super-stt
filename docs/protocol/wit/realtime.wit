@@ -60,7 +60,7 @@ interface ws-server {
     use ws.{ws-error, consumer-stream};
 
     /// The daemon invokes this once per consumer realtime session. `headers`
-    /// carries the daemon-injected `x-stt-*` context (model, secrets,
+    /// carries the daemon-injected `x-voice-*` context (model, secrets,
     /// options); `consumer` is the host-owned consumer WebSocket. The guest
     /// pumps frames between `consumer` and any upstream it opens, returning
     /// when the session ends.

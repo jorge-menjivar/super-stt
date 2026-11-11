@@ -227,7 +227,7 @@ async fn transcribe(State(s): State<Arc<AppState>>, _body: String) -> (StatusCod
 
 /// `POST /v1/process` — echoes the submitted text back prefixed, behind the
 /// same `loaded` gate as `transcribe`, so a test can assert both that the route
-/// is reached and that the text round-tripped. Any `x-stt-option-*` headers
+/// is reached and that the text round-tripped. Any `x-voice-option-*` headers
 /// on the request are echoed too, sorted, as ` [name=value …]`, so a test can
 /// assert the daemon injected them.
 async fn process(
@@ -254,7 +254,7 @@ async fn process(
     let mut options: Vec<String> = headers
         .iter()
         .filter_map(|(k, v)| {
-            let name = k.as_str().strip_prefix("x-stt-option-")?;
+            let name = k.as_str().strip_prefix("x-voice-option-")?;
             Some(format!("{name}={}", v.to_str().unwrap_or("?")))
         })
         .collect();

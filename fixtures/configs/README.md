@@ -9,8 +9,8 @@ written by older releases — it must load, migrate, or reset, never crash.
 version wrote. Do not reformat existing files — they represent real on-disk
 user configs.
 
-Super Voice started fresh: it reads none of the files Super STT and Super TTS
-wrote, so their fixtures are gone. The first Super Voice release adds the first
+Super Voice started fresh: it reads none of the files written before it, so
+their fixtures are gone. The first Super Voice release adds the first
 directory here.
 
 The COSMIC applet's configs moved with the applet to

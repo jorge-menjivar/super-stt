@@ -188,7 +188,7 @@ Streamed on `GET /events`:
   "source": "github.com/…",
   "phase": "installing",
   "error": "manifest_invalid",
-  "reason": "this backend is built for super-tts, not super-voice"
+  "reason": "model `kokoro-82m` declares voices but no `default_voice`"
 }
 ```
 

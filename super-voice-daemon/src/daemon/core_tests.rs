@@ -1223,7 +1223,7 @@ async fn an_option_write_reconfigures_the_running_model() {
     assert!(
         headers
             .iter()
-            .any(|(k, v)| k == "x-stt-option-remove_fillers" && v == "false"),
+            .any(|(k, v)| k == "x-voice-option-remove_fillers" && v == "false"),
         "the new value must be in the headers the instance now injects: {headers:?}"
     );
 
@@ -1235,7 +1235,7 @@ async fn an_option_write_reconfigures_the_running_model() {
 
 /// A value the transports cannot carry is refused, and not stored.
 ///
-/// An option value is injected as an `x-stt-option-*` request header, and a
+/// An option value is injected as an `x-voice-option-*` request header, and a
 /// header holds no control character. Storing one and reporting success is the
 /// worst outcome available: the settings UI then shows a value the backend is
 /// not using, and every request the backend makes dies inside the transport
@@ -2450,7 +2450,7 @@ async fn changing_an_option_reconfigures_the_post_processor_too() {
     assert!(
         headers
             .iter()
-            .any(|(k, v)| k == "x-stt-option-style" && v == "terse"),
+            .any(|(k, v)| k == "x-voice-option-style" && v == "terse"),
         "stage 2 must now inject the new value: {headers:?}"
     );
     assert!(

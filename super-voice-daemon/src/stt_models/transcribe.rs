@@ -102,8 +102,9 @@ pub trait ModelState: ModelInfo {
 /// [`Transcribe::reconfigure`] possible at all.
 #[derive(Clone, Default)]
 pub struct BackendContext {
-    /// `x-stt-secret-*` / `x-stt-option-*` pairs injected on every `/v1`
-    /// request, per the contract's request-header section.
+    /// `x-voice-secret-*` / `x-voice-option-*` pairs injected on every `/v1`
+    /// request, each under its former name too, per the contract's
+    /// request-header section.
     pub headers: Vec<(String, String)>,
     /// Hosts the *user* authorized through a `base_url` option, which the SSRF
     /// guard is relaxed for. Empty for a backend declaring no such option, and
