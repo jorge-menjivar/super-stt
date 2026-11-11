@@ -168,10 +168,11 @@ impl SuperSTTDaemon {
     /// loading of the startup model (if one is configured).
     async fn post_init(&self) {
         self.move_old_data().await;
-        // Discover installed backends.
+        // Discover installed backends, for both features: the folder is read
+        // once.
         self.refresh_backends().await;
-        // Text to speech discovers its own models in the same folder and
-        // loads its startup model in the background, beside this one's.
+        // Text to speech loads its startup model in the background, beside
+        // this one's.
         self.tts.post_init().await;
 
         // Load the configured startup model — if any — in the **background** so

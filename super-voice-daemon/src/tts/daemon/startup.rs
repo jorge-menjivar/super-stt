@@ -52,13 +52,11 @@ impl SuperTTSDaemon {
         }
     }
 
-    /// Perform post-construction startup: discover backends, apply any
-    /// temporary session-level device override, then kick off background
-    /// loading of the startup model (if one is configured).
+    /// Perform post-construction startup, once the daemon's refresh has read
+    /// this feature's backends: apply any temporary session-level device
+    /// override, then kick off background loading of the startup model (if
+    /// one is configured).
     pub async fn post_init(&self) {
-        // Discover installed backends.
-        self.refresh_backends().await;
-
         // Load the configured startup model — if any — in the **background** so
         // the HTTP listener can come up immediately. A model load may download
         // gigabytes and bind a GPU; blocking startup on it would leave clients

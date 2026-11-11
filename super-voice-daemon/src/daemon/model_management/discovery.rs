@@ -22,10 +22,15 @@ impl SuperSTTDaemon {
     pub async fn refresh_backends(&self) {
         let dir = self.backends_dir().await;
         let (winners, losers) = backends::discover_all(&dir);
+        let speech_to_text = backends::speech_to_text(&winners);
+        let text_to_speech = crate::tts::tts_models::backends::synthesis(&winners);
         info!(
-            "Backend registry: {} backend(s) from {}",
+            "Backend registry: {} backend(s) from {}, {} for speech to text and {} for \
+             text to speech",
             winners.len(),
-            dir.display()
+            dir.display(),
+            speech_to_text.len(),
+            text_to_speech.len()
         );
 
         // Skipped while a session holds the switch guard or an utterance is in
@@ -45,8 +50,8 @@ impl SuperSTTDaemon {
             }
         }
 
-        *self.backends.write().await = backends::speech_to_text(&winners);
-        *self.tts.backends.write().await = crate::tts::tts_models::backends::synthesis(&winners);
+        *self.backends.write().await = speech_to_text;
+        *self.tts.backends.write().await = text_to_speech;
         *self.all_backends.write().await = winners;
     }
 
