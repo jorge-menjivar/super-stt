@@ -11,6 +11,7 @@ pub mod limits;
 pub mod old_data;
 pub mod output;
 pub mod registry;
+pub mod secret_headers;
 pub use super_engine_daemon::resource_management;
 pub mod self_update;
 pub mod services;
