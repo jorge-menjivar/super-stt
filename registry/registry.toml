@@ -44,7 +44,7 @@
   forge = "github"
 
 [tidy]
-  id    = "app.super-stt.tidy"
+  id    = "app.super-voice.tidy"
   repo  = "github.com/jorge-menjivar/super-stt-tidy"
   forge = "github"
 
