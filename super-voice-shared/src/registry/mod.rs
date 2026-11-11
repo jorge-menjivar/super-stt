@@ -9,8 +9,8 @@
 use serde::{Deserialize, Serialize};
 
 pub use super_engine_spec::registry::{
-    Compatibility, IndexStale, InstallAccepted, InstallRequest, RefreshResponse, RegistryOption,
-    RegistrySecret, SelectedAsset, UpdateRequest, UpdateResponse, events,
+    Build, Compatibility, IndexStale, InstallAccepted, InstallRequest, RefreshResponse,
+    RegistryOption, RegistrySecret, SelectedAsset, UpdateRequest, UpdateResponse, events,
 };
 pub use super_voice_registry_types::index::IndexModel as RegistryModel;
 

@@ -4,10 +4,11 @@
 //! the build, then switch.
 //!
 //! The daemon offers every framework a published build would run on here and
-//! refuses a switch to one whose build is not on disk. A backend has one build
-//! installed at a time, so getting another means installing over it, which
-//! keeps the downloaded models. That is a download, so it is asked about every
-//! time.
+//! refuses a switch to one whose build is not installed. A backend has one
+//! build installed at a time, so getting another means installing over it,
+//! which keeps the downloaded models. That is a download, so it is asked about
+//! every time. The daemon keeps the build an install replaced, so switching
+//! back installs it from disk, and that is not asked about.
 
 use crate::core::app::AppModel;
 use crate::state::Stage;
@@ -18,7 +19,8 @@ use cosmic::prelude::*;
 
 impl AppModel {
     /// A framework picked in `stage`'s Runs on row. One whose build is
-    /// installed is chosen at once; one whose build is not asks first.
+    /// installed is chosen at once, and one whose build is on disk is
+    /// installed at once; one whose build would be downloaded asks first.
     pub(in crate::core::app) fn pick_device(
         &mut self,
         stage: Stage,
@@ -38,12 +40,19 @@ impl AppModel {
         if build_installed(&device, installed) {
             return self.choose_device(stage, device);
         }
+        let on_disk = self
+            .registry
+            .build(&source, &device)
+            .is_some_and(|build| build.on_disk);
         self.models_page.pending_build = Some(PendingBuild {
             stage,
             source,
             framework: device,
             downloading: false,
         });
+        if on_disk {
+            return self.confirm_build();
+        }
         Task::none()
     }
 
@@ -55,7 +64,8 @@ impl AppModel {
             .is_some_and(|p| p.downloading && p.stage == stage)
     }
 
-    /// The user agreed: install the build for the framework they picked.
+    /// The user agreed, or there is nothing to download: install the build
+    /// for the framework they picked.
     pub(in crate::core::app) fn confirm_build(&mut self) -> Task<cosmic::Action<Message>> {
         let Some(pending) = self
             .models_page

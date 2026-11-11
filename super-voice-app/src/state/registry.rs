@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 
-use super_voice_shared::registry::RegistryBackend;
 use super_voice_shared::registry::events::{InstallError, InstallPhase};
+use super_voice_shared::registry::{Build, RegistryBackend};
 
 #[derive(Debug, Clone, Default)]
 pub struct RegistryState {
@@ -246,6 +246,64 @@ impl RegistryState {
             .iter()
             .map(|b| (b.source.as_str(), b))
             .collect()
+    }
+
+    /// `source`'s build for `framework`, when the catalog lists one this
+    /// machine can run: its download size, and whether it is on disk already.
+    pub fn build(&self, source: &str, framework: &str) -> Option<&Build> {
+        self.backends
+            .iter()
+            .find(|b| b.source == source)?
+            .builds
+            .iter()
+            .find(|build| build.accel == framework)
+    }
+}
+
+#[cfg(test)]
+mod build_tests {
+    use super::RegistryState;
+
+    /// A build is found by its backend's source and its framework, and says
+    /// whether it is on disk. One the catalog does not list is `None`.
+    #[test]
+    fn a_build_is_found_by_source_and_framework() {
+        let backend = serde_json::from_value(serde_json::json!({
+            "id": "qwen",
+            "source": "github.com/x/qwen",
+            "version": "0.1.2",
+            "name": "Qwen",
+            "license": "MIT",
+            "kind": "subprocess",
+            "contract": "v4",
+            "online": false,
+            "supports_gpu": true,
+            "supports_cpu": false,
+            "models": [],
+            "secrets": [],
+            "options": [],
+            "compatibility": { "compatible": true },
+            "builds": [
+                { "accel": "cuda", "size": 57, "on_disk": true },
+                { "accel": "vulkan", "size": 33 }
+            ],
+            "update_available": false
+        }))
+        .expect("a listing entry");
+        let state = RegistryState {
+            backends: vec![backend],
+            ..RegistryState::default()
+        };
+        assert!(
+            state
+                .build("github.com/x/qwen", "cuda")
+                .is_some_and(|b| b.on_disk)
+        );
+        let vulkan = state.build("github.com/x/qwen", "vulkan").expect("listed");
+        assert_eq!(vulkan.size, 33);
+        assert!(!vulkan.on_disk, "absent reads as not on disk");
+        assert!(state.build("github.com/x/qwen", "cpu").is_none());
+        assert!(state.build("github.com/x/other", "cuda").is_none());
     }
 }
 

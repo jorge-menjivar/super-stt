@@ -1127,7 +1127,10 @@ async fn uninstalling_a_backend_empties_every_stage_it_filled() {
 /// from the selection's source), so each is checked true and false.
 #[tokio::test]
 async fn uninstalling_a_backend_names_every_stage_it_filled() {
-    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    let (daemon, sock, token) = start_daemon(&["settings"]).await;
+    // A build an earlier switch of framework replaced, kept for a switch back.
+    let kept = common::backends_dir(&daemon.home().data).join(".builds/fixture-openai");
+    std::fs::create_dir_all(kept.join("cuda")).expect("create kept build");
 
     for stage in ["/stt/pipeline/1", PP_STAGE] {
         let (status, body) = post_req(
@@ -1146,6 +1149,7 @@ async fn uninstalling_a_backend_names_every_stage_it_filled() {
     assert_eq!(body["uninstalled"], true);
     assert_eq!(body["was_active"], true, "it was stage 1's: {body}");
     assert_eq!(body["was_post_processor"], true, "and stage 2's: {body}");
+    assert!(!kept.exists(), "its kept builds go with it");
 
     for stage in ["/stt/pipeline/1", PP_STAGE] {
         let (status, body) = get(&sock, stage, &token).await;
