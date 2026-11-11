@@ -44,14 +44,7 @@ fn build_question(app: &AppModel, pending: &PendingBuild) -> (String, String) {
     // The size of that build for this machine, when the registry lists it.
     let size = app
         .registry
-        .backends
-        .iter()
-        .find(|b| b.source == pending.source)
-        .and_then(|b| {
-            b.builds
-                .iter()
-                .find(|build| build.accel == pending.framework)
-        })
+        .build(&pending.source, &pending.framework)
         .map(|build| build.size)
         .filter(|size| *size > 0);
     let running = loaded_here(app, pending);
