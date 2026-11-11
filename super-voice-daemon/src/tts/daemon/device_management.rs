@@ -72,19 +72,25 @@ impl InstallContext {
 }
 
 impl SuperTTSDaemon {
-    /// Move a loaded model onto `device`: announce, unload, load, and on
-    /// failure put it back on `previous`. The model's choice is recorded once
-    /// the load succeeded, so a failed switch leaves it as it was.
+    /// Move a loaded model from `from`, the framework it is running on, onto
+    /// `device`: announce, unload, load, and on failure load it again on
+    /// `fallback`, the framework its setting loads it on. The model's choice
+    /// is recorded once the load succeeded, so a failed switch leaves it as
+    /// it was.
+    ///
+    /// The two differ when the model is still running on a build that an
+    /// install has since replaced: it cannot be loaded on that framework again.
     async fn reload_onto_device(
         &self,
         model: &str,
         source: &str,
         device: &str,
-        previous: &str,
+        from: &str,
+        fallback: &str,
         mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
     ) -> DaemonResponse {
         // Broadcast device switching status and unload current model
-        self.prepare_device_switch(previous, device, model).await;
+        self.prepare_device_switch(from, device, model).await;
 
         // Try to reload model with the requested device, but cancel if shutdown occurs
         let load_result = tokio::select! {
@@ -99,11 +105,11 @@ impl SuperTTSDaemon {
 
         match load_result {
             Ok(model_instance) => {
-                self.handle_device_switch_success(model_instance, device, model, source, previous)
+                self.handle_device_switch_success(model_instance, device, model, source, from)
                     .await
             }
             Err(e) => {
-                self.handle_device_switch_failure(e, device, model, source, previous)
+                self.handle_device_switch_failure(e, device, model, source, fallback)
                     .await
             }
         }
@@ -144,7 +150,7 @@ impl SuperTTSDaemon {
         device: &str,
         model_to_reload: &str,
         source: &str,
-        previous_device: &str,
+        from: &str,
     ) -> DaemonResponse {
         // Store the reloaded model. The backend serving it can be uninstalled
         // concurrently with the switch, so `resolve_definition` may now return
@@ -170,7 +176,7 @@ impl SuperTTSDaemon {
 
         let success_message = device_switch_message(device, &actual_device);
 
-        info!("Device switch completed: {previous_device} -> {device} (actual: {actual_device})");
+        info!("Device switch completed: {from} -> {device} (actual: {actual_device})");
 
         // Broadcast ready status with new device
         self.events
@@ -185,14 +191,15 @@ impl SuperTTSDaemon {
             .await
     }
 
-    /// Handle failed device switch with recovery attempt
+    /// Handle failed device switch with recovery attempt: load the model
+    /// again on `fallback`, the framework its setting loads it on.
     async fn handle_device_switch_failure(
         &self,
         error: anyhow::Error,
         device: &str,
         model_to_reload: &str,
         source: &str,
-        previous_device: &str,
+        fallback: &str,
     ) -> DaemonResponse {
         error!("Failed to reload model on new device: {error}");
 
@@ -213,11 +220,11 @@ impl SuperTTSDaemon {
             ));
         }
 
-        // Try to recover by reverting to previous device
-        warn!("Attempting to recover by reverting to previous device: {previous_device}");
+        // Try to recover on the framework the model's setting loads it on
+        warn!("Attempting to recover by reloading {model_to_reload} on {fallback}, its setting");
 
         match self
-            .load_model_with_target_device(model_to_reload, source, previous_device)
+            .load_model_with_target_device(model_to_reload, source, fallback)
             .await
         {
             Ok(model_instance) => {
@@ -239,7 +246,7 @@ impl SuperTTSDaemon {
                     self.finalize_loaded_model(definition, model_instance).await;
 
                 warn!(
-                    "Recovery successful - reverted to previous device: {previous_device} (actual: {recovery_actual_device})"
+                    "Recovery successful - reloaded on {fallback} (actual: {recovery_actual_device})"
                 );
 
                 // Broadcast ready status after successful recovery
@@ -248,7 +255,7 @@ impl SuperTTSDaemon {
                         model_loaded: true,
                         model_name: Some(model_to_reload.to_string()),
                         actual_device: Some(recovery_actual_device.clone()),
-                        preferred_device: Some(previous_device.to_string()),
+                        preferred_device: Some(fallback.to_string()),
                     });
 
                 DaemonResponse::error(&format!(
@@ -530,8 +537,8 @@ impl SuperTTSDaemon {
         // as switching models mid-utterance: the utterance stops.
         self.stop_speech_for("switch devices").await;
 
-        info!("Starting device switch for {name} from {current} to {device}");
-        self.reload_onto_device(&name, &source, &device, &current, shutdown_rx)
+        info!("Starting device switch for {name} from {actual} to {device}");
+        self.reload_onto_device(&name, &source, &device, &actual, &current, shutdown_rx)
             .await
     }
 
