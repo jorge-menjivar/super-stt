@@ -27,12 +27,8 @@
           "description": "The forge (git host) that publishes this backend's releases. See\n[`Forge`] for accepted values and the required/explicit policy."
         },
         "id": {
-          "default": null,
-          "description": "Reverse-DNS identifier for the backend, e.g. `com.example.backend`.\nMust equal the `[backend].id` of the release manifest this entry points\nat. Required — the generated `registry.schema.json` says so, and the\nindexer refuses an entry without one.\n\n`Option` only because some entries predate the requirement and their\npublished manifests declare no `[backend].id` to match against. A\nproduct's indexer tolerates exactly those so its catalog keeps\nbuilding; the schema flags them, which is the backlog.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "Reverse-DNS identifier for the backend, e.g. `com.example.backend`.\nMust equal the `[backend].id` of the release manifest this entry points\nat, which names the directory the backend installs into. Required of\nevery entry: the indexer pins each release to it.",
+          "type": "string"
         },
         "max_version": {
           "default": null,
@@ -77,9 +73,9 @@
         }
       },
       "required": [
+        "id",
         "repo",
-        "forge",
-        "id"
+        "forge"
       ],
       "type": "object"
     }
