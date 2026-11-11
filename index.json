@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-11T02:58:16Z",
+  "generated_at": "2026-11-11T03:12:56Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -615,17 +615,17 @@
     },
     {
       "id": "s1_mini",
-      "backend_id": "app.super-stt.s1-mini",
+      "backend_id": "app.super-voice.s1-mini",
       "source": "github.com/jorge-menjivar/super-stt-s1-mini",
-      "version": "0.1.0",
-      "tag": "v0.1.0",
+      "version": "0.2.0",
+      "tag": "v0.2.0",
       "name": "S1-mini",
       "description": "S1-mini by Superwhisper, a small local model that cleans up dictated text. Removes fillers, resolves corrections, fixes punctuation and casing, and writes out numbers and dates. English only.",
       "license": "GPL-3.0-only",
       "kind": "subprocess",
-      "contract": "v2",
-      "min_client": "0.2.4-beta.1",
-      "entrypoint": "super-stt-backend-s1-mini",
+      "contract": "v4",
+      "min_client": "0.3.0",
+      "entrypoint": "super-voice-backend-s1-mini",
       "allowed_hosts": [],
       "online": false,
       "supports_gpu": true,
@@ -667,131 +667,83 @@
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 3737420,
-            "sha256": "f2e9959f18aaf313843689f7a79c028eeeefb94f02120b790579a3e116367d6e"
+            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.2.0/s1-mini-x86_64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 14647701,
+            "sha256": "37fa9b19d05ff8306db58d78fc8148f2374d64cf6bc1f9f186d645c82ed14ce4"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 12,
-            "cuda_sm": 75,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda12-sm75.tar.gz",
-            "size": 16128066,
-            "sha256": "e336b9a26257b31aba90824a0f09b2ee47d5ab551613e09edd4ba805ff03621a"
-          },
-          {
-            "target": "x86_64-unknown-linux-gnu",
-            "accel": "cuda",
-            "cuda_major": 12,
-            "cuda_sm": 80,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda12-sm80.tar.gz",
-            "size": 15875968,
-            "sha256": "00f920647de88ffa7f57c4ceba3a4eb557fbf759adbea1c4831437e525bc6c43"
-          },
-          {
-            "target": "x86_64-unknown-linux-gnu",
-            "accel": "cuda",
-            "cuda_major": 12,
-            "cuda_sm": 86,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda12-sm86.tar.gz",
-            "size": 15287429,
-            "sha256": "6c20710e04ce019574864af9300f91ad00de7e9166559280dd11a3c3f346a2b1"
-          },
-          {
-            "target": "x86_64-unknown-linux-gnu",
-            "accel": "cuda",
-            "cuda_major": 12,
-            "cuda_sm": 89,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda12-sm89.tar.gz",
-            "size": 15224998,
-            "sha256": "1965ef0f5fa8a2dc37218119a9c4792dc7f7bce0dd41eab4af11273894a675e7"
-          },
-          {
-            "target": "x86_64-unknown-linux-gnu",
-            "accel": "cuda",
-            "cuda_major": 12,
-            "cuda_sm": 90,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda12-sm90.tar.gz",
-            "size": 15736453,
-            "sha256": "628934d51d7955e1f91952427ffc5fbc862de47129471d606511d33eab6ee670"
+            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.2.0/s1-mini-x86_64-unknown-linux-gnu-cuda12.tar.gz",
+            "size": 54611070,
+            "sha256": "2ea4fa5fea255507ed21bdefe87ef72d8e00e5458c42594cd55ccb9ba474b746"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 13,
-            "cuda_sm": 75,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda13-sm75.tar.gz",
-            "size": 16250253,
-            "sha256": "68a31d4b62d8afbed9951b599a7193ed7967bd7d184a175710b44c3f9855685c"
+            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.2.0/s1-mini-x86_64-unknown-linux-gnu-cuda13.tar.gz",
+            "size": 54610431,
+            "sha256": "f6c7dbab24d5b7fdeb92fbe5046c529b55b1fd69ed9d36004fd65aef09aa4d16"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
-            "accel": "cuda",
-            "cuda_major": 13,
-            "cuda_sm": 80,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda13-sm80.tar.gz",
-            "size": 15998152,
-            "sha256": "a0b647e9a995e5273db085cb637b5908bdff79b52b9f14ba058d139131ccf4c1"
+            "accel": "rocm",
+            "gfx": [
+              "gfx908",
+              "gfx90a",
+              "gfx942",
+              "gfx1013",
+              "gfx1030",
+              "gfx1100",
+              "gfx1101",
+              "gfx1102",
+              "gfx1150",
+              "gfx1151",
+              "gfx1152",
+              "gfx1200",
+              "gfx1201"
+            ],
+            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.2.0/s1-mini-x86_64-unknown-linux-gnu-rocm.tar.gz",
+            "size": 62831536,
+            "sha256": "731fe2d752fc5460483bda49ed5f8ee82343de518fe585e9ae2e9a83f4f2fc19"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
-            "accel": "cuda",
-            "cuda_major": 13,
-            "cuda_sm": 86,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda13-sm86.tar.gz",
-            "size": 15403690,
-            "sha256": "96754c27cb82df6ad44f45c870db689304de5f6be028cd19b66d8ee2b8838e02"
-          },
-          {
-            "target": "x86_64-unknown-linux-gnu",
-            "accel": "cuda",
-            "cuda_major": 13,
-            "cuda_sm": 89,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda13-sm89.tar.gz",
-            "size": 15343844,
-            "sha256": "0e2305f464cd60318f32b1b30bd6525889f7bca26985a678c189612696863e92"
-          },
-          {
-            "target": "x86_64-unknown-linux-gnu",
-            "accel": "cuda",
-            "cuda_major": 13,
-            "cuda_sm": 90,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda13-sm90.tar.gz",
-            "size": 15852038,
-            "sha256": "ffede099387d3c17b008c9dd64525f58fd756e0c5181a3239806b538b1cf7554"
-          },
-          {
-            "target": "x86_64-unknown-linux-gnu",
-            "accel": "cuda",
-            "cuda_major": 13,
-            "cuda_sm": 100,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda13-sm100.tar.gz",
-            "size": 18535714,
-            "sha256": "5ade35e205bca73b9c14a77981f59c9b47ea525388e3aefc590811047b71cf29"
-          },
-          {
-            "target": "x86_64-unknown-linux-gnu",
-            "accel": "cuda",
-            "cuda_major": 13,
-            "cuda_sm": 120,
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cuda13-sm120.tar.gz",
-            "size": 18490975,
-            "sha256": "3de9be01c0f93c3e79f48f5d0a9cd70a393661e89de740937cb7ed29b0e423c6"
+            "accel": "vulkan",
+            "vulkan_api": "1.2",
+            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.2.0/s1-mini-x86_64-unknown-linux-gnu-vulkan.tar.gz",
+            "size": 31304532,
+            "sha256": "5a00acfd9709f91368d759930bb11aa7fe37d91e587b1b4fd8d79c5837e6b783"
           },
           {
             "target": "aarch64-unknown-linux-gnu",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/s1-mini-aarch64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 3273550,
-            "sha256": "7a89fefa61a12b8a01ebc0e0045aa60032040a70d858eaf20b6ac23e44bcad61"
+            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.2.0/s1-mini-aarch64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 14796413,
+            "sha256": "e3156d4e7ab38f68626fa17abcd53be90dae9ac85781ac2db55d9f6a08a900bf"
+          },
+          {
+            "target": "aarch64-apple-darwin",
+            "accel": "metal",
+            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.2.0/s1-mini-aarch64-apple-darwin-metal.tar.gz",
+            "size": 26149256,
+            "sha256": "deb08383fdf2d6833f940ef50acae262f517416095a3125d6e782691df4e97bd"
+          },
+          {
+            "target": "aarch64-apple-darwin",
+            "accel": "cpu",
+            "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.2.0/s1-mini-aarch64-apple-darwin-cpu.tar.gz",
+            "size": 12784796,
+            "sha256": "ea4cf411078dabcd95d9f7eea770504a1854e7e064a3b3e275d3a8ec65d505a6"
           }
         ]
       },
       "manifest": {
-        "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.1.0/backend.toml",
-        "size": 7025,
-        "sha256": "fadeb89aefb348938174afde2492f991b497536db9b483110d5d8efff7d33125"
+        "url": "https://github.com/super-libre/super-voice-s1-mini/releases/download/v0.2.0/backend.toml",
+        "size": 8061,
+        "sha256": "08805e0137f0113d7fff3f134e0ed2c1a48cde419f6377b5557007b3f8328e70"
       }
     },
     {
