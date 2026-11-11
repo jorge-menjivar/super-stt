@@ -11,6 +11,7 @@ use cosmic::Element;
 use cosmic::widget;
 
 use crate::core::app::AppModel;
+use crate::core::app::scene::{self, Target};
 use crate::daemon::backends::BackendInfo;
 use crate::state::Stage;
 use crate::ui::languages::friendly_name;
@@ -75,11 +76,16 @@ pub(super) fn language_button<'a>(
         },
     );
 
-    Some(
-        widget::button::standard(label)
-            .on_press(Message::Language(LanguageMessage::OpenLanguagePicker {
-                model: Some((stage, source.clone(), selected_model.to_string())),
-            }))
-            .into(),
-    )
+    let button = widget::button::standard(label).on_press(Message::Language(
+        LanguageMessage::OpenLanguagePicker {
+            model: Some((stage, source.clone(), selected_model.to_string())),
+        },
+    ));
+    // The transcription card's is the one `just screenshots` opens. Not the
+    // fixed-language button above, which opens nothing.
+    Some(if stage == Stage::Transcription {
+        scene::tag(Target::Language, button)
+    } else {
+        button.into()
+    })
 }

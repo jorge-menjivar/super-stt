@@ -50,6 +50,9 @@ impl AppModel {
                 self.page_shown(page)
             }
 
+            ShellMessage::SceneStep => self.scene_step(),
+            ShellMessage::SceneTarget(bounds) => self.scene_target(bounds),
+
             #[cfg(target_os = "macos")]
             ShellMessage::WindowOpened(id) => self.window_opened(id),
             #[cfg(target_os = "macos")]

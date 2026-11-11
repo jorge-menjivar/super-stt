@@ -31,6 +31,22 @@ pub(crate) const SETTINGS_SCOPES: &[&str] = &[
 pub(crate) const APP_NAME: &str = "Super Voice Settings App";
 pub(crate) const APP_ID_NAME: AppId = session::app_id("super-voice-app");
 
+/// Where a `just screenshots` run keeps its token instead. The daemon binds a
+/// token to the binary it was granted to, so a debug build storing its own
+/// under [`APP_ID_NAME`] would replace the installed app's token with one the
+/// installed app cannot use, and its next launch would ask for consent again.
+const SCENE_APP_ID: AppId = session::app_id("super-voice-app-scene");
+
+/// The keyring entry this run's token lives in: [`APP_ID_NAME`], or
+/// [`SCENE_APP_ID`] while a scene is running (see `core::app::scene`).
+pub(crate) fn app_id() -> AppId {
+    if crate::core::app::scene::requested().is_some() {
+        SCENE_APP_ID
+    } else {
+        APP_ID_NAME
+    }
+}
+
 /// The socket every app→daemon call connects on.
 ///
 /// One resolver rather than a `get_http_socket_path()` per call site: the
@@ -74,12 +90,8 @@ where
 {
     let socket = socket_path();
     let socket_for_op = socket.clone();
-    session::with_token(
-        socket,
-        APP_ID_NAME,
-        APP_NAME,
-        SETTINGS_SCOPES,
-        move |token| op(socket_for_op.clone(), token),
-    )
+    session::with_token(socket, app_id(), APP_NAME, SETTINGS_SCOPES, move |token| {
+        op(socket_for_op.clone(), token)
+    })
     .await
 }

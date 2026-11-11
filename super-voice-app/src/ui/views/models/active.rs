@@ -5,6 +5,7 @@ use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, text};
 use super_voice_shared::models::protocol::{DownloadProgress, LoadProgress, load_progress};
 
+use crate::core::app::scene::{self, Target};
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::backends::BackendInfo;
 use crate::state::Stage;
@@ -194,16 +195,19 @@ pub(super) fn device_dropdown<'a>(
         .and_then(|d| devices.iter().position(|x| x == d));
     let labels: Vec<String> = devices.iter().map(|d| super::fmt::accel_name(d)).collect();
     let pick = devices.clone();
-    Some(
-        widget::dropdown(labels, selected, move |index| {
-            Message::Stage(StageMessage::StageDevice {
-                stage,
-                device: pick[index].clone(),
-            })
+    let dropdown = widget::dropdown(labels, selected, move |index| {
+        Message::Stage(StageMessage::StageDevice {
+            stage,
+            device: pick[index].clone(),
         })
-        .placeholder(crate::fl!("select"))
-        .into(),
-    )
+    })
+    .placeholder(crate::fl!("select"));
+    // The transcription card's is the one `just screenshots` opens.
+    Some(if stage == Stage::Transcription {
+        scene::tag(Target::DeviceMenu, dropdown)
+    } else {
+        dropdown.into()
+    })
 }
 
 /// The accelerator `stage`'s model from `source` runs on, when it runs.
@@ -363,8 +367,11 @@ pub(super) fn staged_model_picker<'a>(
     })
     .placeholder(crate::fl!("select-model"));
 
-    let mut rows: Vec<super::surface::ControlRow<'a>> =
-        vec![(crate::fl!("model"), None, model_dropdown.into())];
+    let mut rows: Vec<super::surface::ControlRow<'a>> = vec![(
+        crate::fl!("model"),
+        None,
+        scene::tag(Target::ModelMenu, model_dropdown),
+    )];
     let mut buttons = Vec::new();
 
     // Device dropdown — only once the daemon has answered what the staged

@@ -179,6 +179,8 @@ impl AppModel {
             // No pending scoped action error at startup.
             action_error: None,
 
+            scene: super::scene::requested().map(super::scene::Progress::new),
+
             // Measured once the window opens.
             #[cfg(target_os = "macos")]
             title_bar: super::macos::TitleBar::default(),
@@ -215,6 +217,10 @@ impl AppModel {
 
         // Create startup commands
         let title_command = app.update_title();
-        (app, initial_load_tasks(title_command))
+        let open_scene = app.open_scene();
+        (
+            app,
+            Task::batch([initial_load_tasks(title_command), open_scene]),
+        )
     }
 }

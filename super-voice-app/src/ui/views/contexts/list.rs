@@ -8,6 +8,7 @@ use cosmic::widget::{self, button, space::horizontal as horizontal_space, text};
 use super_voice_shared::models::contexts::DictationContext;
 
 use crate::core::app::AppModel;
+use crate::core::app::scene::{self, Target};
 use crate::ui::icons;
 use crate::ui::messages::{ContextsMessage, Message};
 use crate::ui::views::common;
@@ -124,10 +125,15 @@ fn context_card<'a>(context: &'a DictationContext, app: &'a AppModel) -> Element
             Message::Contexts(ContextsMessage::Activate(Some(context.id.clone()))),
         ));
     }
-    title_row = title_row.push(
-        button::standard(crate::fl!("edit"))
-            .on_press(Message::Contexts(ContextsMessage::Edit(context.id.clone()))),
-    );
+    let edit = button::standard(crate::fl!("edit"))
+        .on_press(Message::Contexts(ContextsMessage::Edit(context.id.clone())));
+    // The first card's is the one `just screenshots` opens.
+    let first = state.items.first().is_some_and(|c| c.id == context.id);
+    title_row = title_row.push(if first {
+        scene::tag(Target::EditContext, edit)
+    } else {
+        edit.into()
+    });
     title_row = title_row.push(delete_control(context, confirming));
 
     let mut body = widget::column::with_capacity(4)

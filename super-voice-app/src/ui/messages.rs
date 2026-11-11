@@ -71,6 +71,11 @@ pub enum ShellMessage {
     /// they act on the user's session, not on the app — so handing over the
     /// exact command is the most it can usefully do.
     CopyText(String),
+    /// Time for the running scene to look for its widget again. See
+    /// `core::app::scene`.
+    SceneStep,
+    /// Where the running scene's widget is drawn; `None` when it is not.
+    SceneTarget(Option<cosmic::iced::Rectangle>),
     /// A window finished opening, so its `NSWindow` can be given the native
     /// frame. See `core::app::macos`.
     #[cfg(target_os = "macos")]

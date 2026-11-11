@@ -15,8 +15,6 @@ pub(super) struct UdpSubscriptionId(pub(super) u64);
 /// audio meter and recording-state indicator. Reuses the token already
 /// cached for normal config calls — [`SETTINGS_SCOPES`] grants the
 /// recording / visualization / daemon-status topics below.
-pub(super) const SETTINGS_APP_ID: super_voice_shared::daemon::session::AppId =
-    super_voice_shared::daemon::session::app_id("super-voice-app");
 const SETTINGS_APP_NAME: &str = "Super Voice Settings App";
 /// Topics the settings app subscribes to over `GET /events`.
 ///
@@ -52,7 +50,7 @@ pub(super) fn audio_events_subscription(
 
     Box::pin(cosmic::iced::stream::channel(100, async |mut channel| {
         let config = WidgetSubscriptionConfig::new(
-            SETTINGS_APP_ID,
+            crate::daemon::client::internal::session::app_id(),
             SETTINGS_APP_NAME,
             SETTINGS_SCOPES,
             SETTINGS_TOPICS,
