@@ -294,6 +294,107 @@ impl Default for SpeechEngine {
     }
 }
 
+/// Make sure a `voice:<uuid>` id has been registered with the loaded backend,
+/// pushing its reference clip the first time it is used: the engine's
+/// [`SpeechEngine::ensure_cloned_voice`], and a session's again when a backend
+/// has lost a voice.
+async fn ensure_registered(
+    voices: Option<&Arc<crate::tts::voices::VoiceLibrary>>,
+    events: Option<&Arc<crate::tts::daemon::events::EventBus>>,
+    loaded: &crate::tts::daemon::types::LoadedModel,
+    voice: &str,
+) -> Result<(), SpeakError> {
+    let Some(id) = crate::tts::voices::strip_prefix(voice) else {
+        return Ok(());
+    };
+    if loaded.cloned_voices.lock().contains(voice) {
+        return Ok(());
+    }
+    let Some(library) = voices.cloned() else {
+        return Err(SpeakError::UnknownVoice(
+            "this daemon has no voice library".into(),
+        ));
+    };
+
+    let record = library
+        .get(id)
+        .map_err(|e| SpeakError::UnknownVoice(format!("voice '{voice}': {e}")))?;
+    // Checked here rather than at synthesis so the user is told which
+    // half is missing, once, instead of watching every request fail.
+    if loaded.definition.product.clone_needs_transcript && record.transcript.is_none() {
+        return Err(SpeakError::UnknownVoice(format!(
+            "model '{}' clones from a reference transcript, and voice '{}' was stored without one",
+            loaded.definition.name, record.label
+        )));
+    }
+
+    // Decoding and trimming the clip is CPU work on a file; it does not
+    // belong on the runtime thread that is about to pump audio.
+    let clip = {
+        let library = Arc::clone(&library);
+        let id = id.to_string();
+        let budget = loaded.definition.product.clone_ref_seconds;
+        tokio::task::spawn_blocking(move || library.clip_pcm(&id, budget))
+            .await
+            .map_err(|e| SpeakError::Synthesis(format!("reading the reference clip: {e}")))?
+            .map_err(|e| SpeakError::UnknownVoice(format!("voice '{voice}': {e}")))?
+    };
+
+    info!(
+        "registering cloned voice {voice} ({:.1}s) with {}",
+        clip.seconds, loaded.definition.name
+    );
+    // Announced on `/events` around the call, not just logged: the backend
+    // has to derive an embedding — and, for a clip with a transcript, the
+    // codec codes of an in-context example — from a clip length it may
+    // never have encoded, which is GPU work measured in seconds. Every
+    // client that can speak in a cloned voice can be left waiting on it,
+    // and a pause nobody announced is indistinguishable from a hang.
+    publish_voice_status(
+        events,
+        DaemonStatusEvent::PreparingVoice {
+            voice: voice.to_string(),
+            model: loaded.definition.name.clone(),
+        },
+    );
+    let registered = loaded
+        .instance
+        .register_voice(&crate::tts::tts_models::v1::RegisterVoiceRequest {
+            voice,
+            transcript: record.transcript.as_deref(),
+            sample_rate: crate::tts::voices::CLIP_SAMPLE_RATE,
+            channels: crate::tts::voices::CLIP_CHANNELS,
+            format: crate::tts::voices::CLIP_FORMAT,
+            pcm: &clip.pcm,
+        })
+        .await
+        .map_err(|e| SpeakError::Synthesis(format!("registering voice '{voice}': {e}")));
+    publish_voice_status(
+        events,
+        DaemonStatusEvent::VoicePrepared {
+            voice: voice.to_string(),
+            model: loaded.definition.name.clone(),
+            error: registered.as_ref().err().map(ToString::to_string),
+        },
+    );
+    registered?;
+    loaded.cloned_voices.lock().insert(voice.to_string());
+    Ok(())
+}
+
+/// Put one voice-preparation event on the bus, when there is one.
+///
+/// A detached engine — the one the tests build — has no bus, and preparing a
+/// voice must work the same without it.
+fn publish_voice_status(
+    events: Option<&Arc<crate::tts::daemon::events::EventBus>>,
+    event: DaemonStatusEvent,
+) {
+    if let Some(events) = events {
+        events.publish_synthesis_status(event);
+    }
+}
+
 /// Releases a [`SpeechEngine::claim_for_test`] claim on drop, so a test cannot
 /// leave the engine looking busy for whatever runs next in the same process.
 #[cfg(test)]
@@ -495,86 +596,7 @@ impl SpeechEngine {
         loaded: &crate::tts::daemon::types::LoadedModel,
         voice: &str,
     ) -> Result<(), SpeakError> {
-        let Some(id) = crate::tts::voices::strip_prefix(voice) else {
-            return Ok(());
-        };
-        if loaded.cloned_voices.lock().contains(voice) {
-            return Ok(());
-        }
-        let Some(library) = self.voices.clone() else {
-            return Err(SpeakError::UnknownVoice(
-                "this daemon has no voice library".into(),
-            ));
-        };
-
-        let record = library
-            .get(id)
-            .map_err(|e| SpeakError::UnknownVoice(format!("voice '{voice}': {e}")))?;
-        // Checked here rather than at synthesis so the user is told which
-        // half is missing, once, instead of watching every request fail.
-        if loaded.definition.product.clone_needs_transcript && record.transcript.is_none() {
-            return Err(SpeakError::UnknownVoice(format!(
-                "model '{}' clones from a reference transcript, and voice '{}' was stored without one",
-                loaded.definition.name, record.label
-            )));
-        }
-
-        // Decoding and trimming the clip is CPU work on a file; it does not
-        // belong on the runtime thread that is about to pump audio.
-        let clip = {
-            let library = Arc::clone(&library);
-            let id = id.to_string();
-            let budget = loaded.definition.product.clone_ref_seconds;
-            tokio::task::spawn_blocking(move || library.clip_pcm(&id, budget))
-                .await
-                .map_err(|e| SpeakError::Synthesis(format!("reading the reference clip: {e}")))?
-                .map_err(|e| SpeakError::UnknownVoice(format!("voice '{voice}': {e}")))?
-        };
-
-        info!(
-            "registering cloned voice {voice} ({:.1}s) with {}",
-            clip.seconds, loaded.definition.name
-        );
-        // Announced on `/events` around the call, not just logged: the backend
-        // has to derive an embedding — and, for a clip with a transcript, the
-        // codec codes of an in-context example — from a clip length it may
-        // never have encoded, which is GPU work measured in seconds. Every
-        // client that can speak in a cloned voice can be left waiting on it,
-        // and a pause nobody announced is indistinguishable from a hang.
-        self.publish_voice_status(DaemonStatusEvent::PreparingVoice {
-            voice: voice.to_string(),
-            model: loaded.definition.name.clone(),
-        });
-        let registered = loaded
-            .instance
-            .register_voice(&crate::tts::tts_models::v1::RegisterVoiceRequest {
-                voice,
-                transcript: record.transcript.as_deref(),
-                sample_rate: crate::tts::voices::CLIP_SAMPLE_RATE,
-                channels: crate::tts::voices::CLIP_CHANNELS,
-                format: crate::tts::voices::CLIP_FORMAT,
-                pcm: &clip.pcm,
-            })
-            .await
-            .map_err(|e| SpeakError::Synthesis(format!("registering voice '{voice}': {e}")));
-        self.publish_voice_status(DaemonStatusEvent::VoicePrepared {
-            voice: voice.to_string(),
-            model: loaded.definition.name.clone(),
-            error: registered.as_ref().err().map(ToString::to_string),
-        });
-        registered?;
-        loaded.cloned_voices.lock().insert(voice.to_string());
-        Ok(())
-    }
-
-    /// Put one voice-preparation event on the bus, if this engine has one.
-    ///
-    /// A detached engine — the one the tests build — has no bus, and preparing
-    /// a voice must work the same without it.
-    fn publish_voice_status(&self, event: DaemonStatusEvent) {
-        if let Some(events) = self.events.as_ref() {
-            events.publish_synthesis_status(event);
-        }
+        ensure_registered(self.voices.as_ref(), self.events.as_ref(), loaded, voice).await
     }
 
     /// Begin a streaming utterance.
@@ -696,6 +718,7 @@ impl SpeechEngine {
         Ok(SpeakSession {
             slot: Arc::clone(&self.current),
             bus: self.events.clone(),
+            voices: self.voices.clone(),
             id,
             model: Arc::clone(model),
             options: options.into_owned(),
@@ -775,6 +798,9 @@ impl SpeechEngine {
 pub struct SpeakSession {
     slot: CurrentSlot,
     bus: Option<Arc<crate::tts::daemon::events::EventBus>>,
+    /// The reference clips, for giving the backend a cloned voice again if it
+    /// loses one mid-utterance.
+    voices: Option<Arc<crate::tts::voices::VoiceLibrary>>,
     id: String,
     model: SharedLoadedModel,
     options: OwnedSpeakOptions,
@@ -1032,7 +1058,30 @@ impl SpeakSession {
             let Some(loaded) = guard.as_ref() else {
                 return Err(SpeakError::NotLoaded);
             };
-            loaded.instance.synthesize(&request, sink).await
+            let mut result = loaded.instance.synthesize(&request, sink).await;
+            // A backend can lose a cloned voice the daemon gave it: a
+            // subprocess backend that was started again, a WASM backend whose
+            // private `/tmp` went away. It says so before any audio, so the
+            // chunk is tried again, once, after giving it the voice again.
+            // Only for a voice this instance was given: one it never had is
+            // the ordinary `unknown_voice`.
+            if let (Err(e), Some(voice)) = (&result, request.voice)
+                && crate::tts::tts_models::v1::is_unknown_voice(e)
+                && loaded.cloned_voices.lock().remove(voice)
+            {
+                info!(
+                    "{} no longer has voice {voice}; registering it again",
+                    loaded.definition.name
+                );
+                result =
+                    match ensure_registered(self.voices.as_ref(), self.bus.as_ref(), loaded, voice)
+                        .await
+                    {
+                        Ok(()) => loaded.instance.synthesize(&request, sink).await,
+                        Err(e) => Err(anyhow::Error::new(e)),
+                    };
+            }
+            result
         };
         self.marks = sink.marks;
 

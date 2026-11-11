@@ -249,18 +249,65 @@ fn error_frame_message(payload: &[u8]) -> String {
         .unwrap_or_else(|| "synthesis failed".to_string())
 }
 
-/// Turn a non-`200` synthesize response into an error, preferring the
-/// backend's own `detail`/`message` (it reaches the user) over the raw body.
+/// A backend's refusal of a synthesis, answered before any audio.
+///
+/// Kept whole, rather than flattened into a message, so the speak path can
+/// tell what kind of refusal it was: `unknown_voice` for a cloned voice the
+/// daemon has registered means the backend lost it, and is worth registering
+/// again, where any other refusal is final.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendRefusal {
+    pub status: u16,
+    /// The contract's machine-readable code, such as `unknown_voice`.
+    pub message: Option<String>,
+    /// The backend's words for the user.
+    pub detail: Option<String>,
+}
+
+impl BackendRefusal {
+    /// Whether the backend does not know the voice it was asked to speak in.
+    #[must_use]
+    pub fn is_unknown_voice(&self) -> bool {
+        self.status == 400 && self.message.as_deref() == Some("unknown_voice")
+    }
+}
+
+impl std::fmt::Display for BackendRefusal {
+    /// The backend's own `detail` or `message`, which reaches the user, over
+    /// the raw body.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let msg = self
+            .detail
+            .as_deref()
+            .or(self.message.as_deref())
+            .unwrap_or("synthesis failed");
+        write!(f, "backend returned {}: {msg}", self.status)
+    }
+}
+
+impl std::error::Error for BackendRefusal {}
+
+/// Turn a non-`200` synthesize response into an error: a [`BackendRefusal`],
+/// which [`is_unknown_voice`] can read back.
 #[must_use]
 pub fn synthesize_error(status: u16, body: &[u8]) -> anyhow::Error {
-    let msg = serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|v| {
-            v.get("detail")
-                .or_else(|| v.get("message"))
-                .and_then(|m| m.as_str())
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| "synthesis failed".to_string());
-    anyhow!("backend returned {status}: {msg}")
+    let v = serde_json::from_slice::<serde_json::Value>(body).ok();
+    let field = |name: &str| {
+        v.as_ref()
+            .and_then(|v| v.get(name)?.as_str())
+            .map(str::to_owned)
+    };
+    anyhow::Error::new(BackendRefusal {
+        status,
+        message: field("message"),
+        detail: field("detail"),
+    })
+}
+
+/// Whether a synthesis failed because the backend does not know the voice.
+#[must_use]
+pub fn is_unknown_voice(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<BackendRefusal>()
+        .is_some_and(BackendRefusal::is_unknown_voice)
 }

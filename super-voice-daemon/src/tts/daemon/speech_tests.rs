@@ -516,3 +516,161 @@ fn a_change_of_rate_starts_the_windows_over() {
     assert_eq!(frames[0].due, 1_024);
     assert!((frames[0].sample_rate - 48_000.0).abs() < f32::EPSILON);
 }
+
+/// A backend that knows only the cloned voices it was given since it last
+/// lost them, and refuses any other the way the contract says, before any
+/// audio. `amnesiac` makes it forget each voice as soon as it is given one.
+struct ForgetfulBackend {
+    info: ModelInfoData,
+    log: Arc<Log>,
+    known: Arc<Mutex<Vec<String>>>,
+    attempts: Arc<Mutex<usize>>,
+    amnesiac: bool,
+}
+
+impl ModelInfo for ForgetfulBackend {
+    fn info(&self) -> &ModelInfoData {
+        &self.info
+    }
+}
+
+impl ModelState for ForgetfulBackend {
+    fn device(&self) -> String {
+        "cpu".to_string()
+    }
+}
+
+#[async_trait::async_trait]
+impl Synthesize for ForgetfulBackend {
+    async fn synthesize(
+        &self,
+        request: &SynthesizeRequest<'_>,
+        _sink: &mut (dyn SynthesisSink + Send),
+    ) -> anyhow::Result<()> {
+        *self.attempts.lock().unwrap() += 1;
+        match request.voice {
+            Some(v) if v.starts_with("voice:") && !self.known.lock().unwrap().iter().any(|k| k == v) => {
+                Err(crate::tts::tts_models::v1::synthesize_error(
+                    400,
+                    br#"{"status":"error","message":"unknown_voice","detail":"This cloned voice is not registered."}"#,
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    async fn register_voice(&self, request: &RegisterVoiceRequest<'_>) -> anyhow::Result<()> {
+        self.log.registered.lock().unwrap().push(Registration {
+            voice: request.voice.to_string(),
+            transcript: request.transcript.map(str::to_owned),
+            pcm_bytes: request.pcm.len(),
+        });
+        if !self.amnesiac {
+            self.known.lock().unwrap().push(request.voice.to_string());
+        }
+        Ok(())
+    }
+
+    async fn unregister_voice(&self, voice: &str) -> anyhow::Result<()> {
+        self.log.released.lock().unwrap().push(voice.to_string());
+        Ok(())
+    }
+}
+
+/// What a test reads back from a [`ForgetfulBackend`].
+struct Forgetful {
+    model: crate::tts::daemon::types::SharedLoadedModel,
+    log: Arc<Log>,
+    known: Arc<Mutex<Vec<String>>>,
+    attempts: Arc<Mutex<usize>>,
+}
+
+fn forgetful(amnesiac: bool) -> Forgetful {
+    let definition = cloning_model(2.0, false);
+    let log = Arc::new(Log::default());
+    let known = Arc::new(Mutex::new(Vec::new()));
+    let attempts = Arc::new(Mutex::new(0));
+    let backend = ForgetfulBackend {
+        info: ModelInfoData::new(
+            definition.name.clone(),
+            definition.source.clone(),
+            true,
+            false,
+            Duration::from_millis(0),
+        ),
+        log: Arc::clone(&log),
+        known: Arc::clone(&known),
+        attempts: Arc::clone(&attempts),
+        amnesiac,
+    };
+    let model = Arc::new(tokio::sync::RwLock::new(Some(LoadedModel::new(
+        definition,
+        Box::new(backend),
+    ))));
+    Forgetful {
+        model,
+        log,
+        known,
+        attempts,
+    }
+}
+
+/// A backend that loses a cloned voice it was given (a subprocess backend
+/// started again, a WASM backend whose private `/tmp` went away) is given it
+/// again, and the utterance is spoken rather than failed.
+#[tokio::test]
+async fn a_backend_that_lost_a_cloned_voice_is_given_it_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, library) = engine(dir.path());
+    let voice = library.create(&clip(3.0), "Ada", None).unwrap().voice_id();
+    let backend = forgetful(false);
+
+    engine
+        .speak(&backend.model, "Hello there.", Some(&voice), None)
+        .await
+        .expect("the first utterance registers and speaks");
+    assert_eq!(backend.log.registered.lock().unwrap().len(), 1);
+
+    backend.known.lock().unwrap().clear(); // the backend loses it
+    engine
+        .speak(&backend.model, "Hello again.", Some(&voice), None)
+        .await
+        .expect("the voice is given again and the utterance spoken");
+    let registered = backend.log.registered.lock().unwrap().clone();
+    assert_eq!(registered.len(), 2, "registered again: {registered:?}");
+    assert!(registered.iter().all(|r| r.voice == voice));
+    assert_eq!(
+        *backend.attempts.lock().unwrap(),
+        3,
+        "one chunk, one refused chunk, and its retry"
+    );
+}
+
+/// The retry is once. A backend that refuses the voice again right after
+/// being given it fails the utterance instead of looping.
+#[tokio::test]
+async fn a_voice_refused_again_after_the_retry_fails_the_utterance() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, library) = engine(dir.path());
+    let voice = library.create(&clip(3.0), "Ada", None).unwrap().voice_id();
+    let backend = forgetful(true);
+
+    let error = engine
+        .speak(&backend.model, "Hello there.", Some(&voice), None)
+        .await
+        .expect_err("the backend never keeps the voice");
+    assert!(
+        matches!(error, SpeakError::Synthesis(ref m) if m.contains("not registered")),
+        "{error:?}"
+    );
+    assert_eq!(
+        backend.log.registered.lock().unwrap().len(),
+        2,
+        "registered before the utterance, and once more on the refusal"
+    );
+    assert_eq!(
+        *backend.attempts.lock().unwrap(),
+        2,
+        "tried, and retried once"
+    );
+}
