@@ -39,6 +39,14 @@ An `accel` this machine has no build for answers `422 incompatible`; one that
 is not a framework, `400 bad_request`. An update keeps the framework installed
 when the new release still has a build for it.
 
+The build a switch replaces is kept, under
+`<backends dir>/.builds/<backend dir>/`. Installing it again, with the same
+release still current, moves it back instead of downloading it, so the install
+reports no `downloading`, `verifying` or `extracting` progress. The listing
+says which builds this is true of (`on_disk`). Only the release installed has
+builds kept: an install of another release drops the others, and an uninstall
+drops them all.
+
 The installed `backend.toml` is the backend's own manifest, published as a
 pinned release asset (the `manifest` field on every index entry). The daemon
 downloads it, verifies its SHA-256 against the pin, confirms it parses, passes

@@ -71,7 +71,7 @@ GET /registry/backend/list?include_incompatible=false&kind=wasm&online=true&q=op
         }
       },
       "builds": [
-        { "accel": "cuda",   "size": 734003200 },
+        { "accel": "cuda",   "size": 734003200, "on_disk": true },
         { "accel": "vulkan", "size": 152043520 },
         { "accel": "cpu",    "size": 98566144 }
       ],
@@ -123,8 +123,11 @@ Per-entry fields beyond what `index.json` carries:
   counted). The first is `selected_asset`'s: what an install picks when none is
   asked for. A client switching an installed backend to another framework (see
   the [device](../pipeline/device.md) endpoints) reads the download that costs
-  from here, and installs it with `POST .../install` and that `accel`. Absent
-  for a WASM backend, which has one build.
+  from here, and installs it with `POST .../install` and that `accel`.
+  `on_disk` is `true` for a build already on this machine: the one installed,
+  or one an install of another framework's build replaced, which the daemon
+  keeps. Installing it downloads nothing. Absent means `false`. Absent for a
+  WASM backend, which has one build.
 - `compatibility.reason` — present only when `compatible = false`. Human-readable.
   A backend whose [`contract`](../../../backend/config.md#contract-generations)
   generation this daemon does not know is reported here too — before any

@@ -208,6 +208,18 @@ pub(crate) async fn uninstall_backend(
         );
     }
 
+    // The builds an earlier switch of framework replaced, kept for a switch
+    // back. Best effort: the backend is gone either way.
+    if let (Some(backends_dir), Some(name)) =
+        (dir.parent(), dir.file_name().and_then(|n| n.to_str()))
+        && let Err(e) = super_engine_daemon::registry::kept::remove_all(backends_dir, name).await
+    {
+        warn!(
+            "Failed to remove the builds kept for {}: {e}",
+            dir.display()
+        );
+    }
+
     // Refresh in-memory discovery.
     s.daemon.refresh_backends().await;
 
