@@ -100,7 +100,7 @@ pub trait ModelState: ModelInfo {
 /// Both halves are read per request — the headers on each `/v1` call, the host
 /// list on each outbound connection — which is what makes
 /// [`Synthesize::reconfigure`] possible at all.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct BackendContext {
     /// `x-tts-secret-*` / `x-tts-option-*` pairs injected on every `/v1`
     /// request, per the contract's request-header section.
@@ -110,6 +110,19 @@ pub struct BackendContext {
     /// for every subprocess backend — those run under `PrivateNetwork=yes` and
     /// can dial nothing at all.
     pub user_allowed_hosts: Vec<String>,
+}
+
+/// Prints the headers through [`Redacted`], so a secret's value never reaches
+/// a log line or an error message.
+///
+/// [`Redacted`]: crate::secret_headers::Redacted
+impl std::fmt::Debug for BackendContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackendContext")
+            .field("headers", &crate::secret_headers::Redacted(&self.headers))
+            .field("user_allowed_hosts", &self.user_allowed_hosts)
+            .finish()
+    }
 }
 
 /// Common contract for any TTS backend.
