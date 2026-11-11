@@ -34,7 +34,7 @@
   ]
 
   [workspace.package]
-    version = "0.3.0-beta.3"
+    version = "0.3.0-beta.4"
     authors = ["Jorge Menjivar <jorge@menjivar.ai>"]
     edition = "2024"
 
