@@ -64,15 +64,16 @@ impl DBusManager {
     pub async fn new() -> Result<Self> {
         let connection = Connection::session().await?;
 
-        // Request the service name
-        connection
-            .request_name("com.github.jorge_menjivar.SuperVoice")
-            .await?;
-
-        // Serve the interface
+        // The interface is served before the name is taken: a client can call
+        // as soon as the name appears on the bus, and a call that arrives
+        // before the object exists is lost.
         connection
             .object_server()
             .at(OBJECT_PATH, SuperVoiceDBusService)
+            .await?;
+
+        connection
+            .request_name("com.github.jorge_menjivar.SuperVoice")
             .await?;
 
         Ok(Self { connection })
