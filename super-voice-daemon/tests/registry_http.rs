@@ -154,7 +154,9 @@ fn extract_sse_data_for_event(raw: &[u8], event_name: &str) -> Vec<String> {
 // ---------- index.json fixture -----------------------------------------------
 
 /// Minimal `index.json` with a single wasm backend whose `source` is
-/// `"github.com/x/y"` and `id` is `"openai"`.
+/// `"github.com/x/y"` and `id` is `"openai"`. Its `backend_id` is the
+/// `[backend].id` of [`FIXTURE_BACKEND_MANIFEST`]; the daemon drops an entry
+/// without a valid one.
 fn fixture_index_wasm(asset_url: &str) -> String {
     serde_json::json!({
         "schema_version": 1,
@@ -162,6 +164,7 @@ fn fixture_index_wasm(asset_url: &str) -> String {
         "min_client": "0.0.0",
         "backends": [{
             "id": "openai",
+            "backend_id": "app.test.y",
             "source": "github.com/x/y",
             "version": "1.0.0",
             "tag": "v1.0.0",
@@ -204,6 +207,7 @@ fn fixture_index_at_version(asset_url: &str, version: &str) -> String {
         "min_client": "0.0.0",
         "backends": [{
             "id": "openai",
+            "backend_id": "app.test.y",
             "source": "github.com/x/y",
             "version": version,
             "tag": format!("v{version}"),
