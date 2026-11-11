@@ -68,6 +68,7 @@ The shortcut runs the `voice` command, which you can also use directly:
 ```bash
 voice record --write   # Record and transcribe. Types the result after silence, or when you run it again.
 voice speak "Hello"    # Speak text with the loaded model. `voice speak stop` stops it.
+voice speak --read     # Speak the selected or copied text. Run it again while it speaks to stop it.
 ```
 
 Manage the daemon with the usual systemd controls:
