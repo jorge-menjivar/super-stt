@@ -590,6 +590,8 @@ struct MockModel {
     info: crate::tts::tts_models::synthesize::ModelInfoData,
     /// Every context this instance has been handed, in order.
     reconfigured: SeenContexts,
+    /// The framework it reports running on.
+    device: &'static str,
 }
 impl crate::tts::tts_models::synthesize::ModelInfo for MockModel {
     fn info(&self) -> &crate::tts::tts_models::synthesize::ModelInfoData {
@@ -598,7 +600,7 @@ impl crate::tts::tts_models::synthesize::ModelInfo for MockModel {
 }
 impl crate::tts::tts_models::synthesize::ModelState for MockModel {
     fn device(&self) -> String {
-        "cpu".to_string()
+        self.device.to_string()
     }
 }
 #[async_trait::async_trait]
@@ -634,6 +636,16 @@ async fn seed_loaded_model(daemon: &SuperTTSDaemon, name: &str, source: &str) {
 /// recorded here has also established that the slot still holds *that*
 /// instance — a reload would have replaced it.
 async fn seed_recording_model(daemon: &SuperTTSDaemon, name: &str, source: &str) -> SeenContexts {
+    seed_model_on(daemon, name, source, "cpu").await
+}
+
+/// [`seed_recording_model`], running on `device`.
+async fn seed_model_on(
+    daemon: &SuperTTSDaemon,
+    name: &str,
+    source: &str,
+    device: &'static str,
+) -> SeenContexts {
     use crate::tts::daemon::types::LoadedModel;
     use crate::tts::tts_models::ModelDefinition;
     use crate::tts::tts_models::synthesize::ModelInfoData;
@@ -661,6 +673,7 @@ async fn seed_recording_model(daemon: &SuperTTSDaemon, name: &str, source: &str)
         Box::new(MockModel {
             info,
             reconfigured: std::sync::Arc::clone(&reconfigured),
+            device,
         }),
     ));
     reconfigured
@@ -1162,6 +1175,58 @@ async fn a_framework_whose_build_is_not_installed_is_refused() {
         None,
         "nothing is recorded"
     );
+}
+
+/// A switch is from the framework the model is running on, not the one its
+/// setting names. After the Vulkan build was replaced by the CPU build, a
+/// model still running on Vulkan and switched to the CPU was announced as a
+/// switch "from cpu to cpu": its setting resolves to the CPU, the one
+/// framework the installed build runs.
+#[tokio::test]
+async fn a_switch_is_announced_from_where_the_model_runs() {
+    use crate::tts::daemon::events::Topic;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/kokoro";
+    let folder = folder_with_builds(source, "kokoro-82m", "synthesis", r#""vulkan""#);
+    // The CPU build replaced the Vulkan one the model was loaded from.
+    std::fs::write(
+        folder.path().join("installed.json"),
+        r#"{"selected":{"target":"x86_64-unknown-linux-gnu","accel":"cpu"}}"#,
+    )
+    .expect("record");
+    seed_folder_backend(&daemon, source, folder.path()).await;
+    seed_model_on(&daemon, "kokoro-82m", source, "vulkan").await;
+    daemon
+        .model
+        .write()
+        .await
+        .as_mut()
+        .expect("seeded")
+        .definition
+        .supported_devices = vec![
+        super_voice_registry_types::manifest::Device::Cpu,
+        super_voice_registry_types::manifest::Device::Gpu,
+    ];
+
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+    // The fixture has no binary, so the reload fails; the announcement is
+    // what is being checked.
+    let _ = daemon
+        .handle_set_model_device("kokoro-82m".to_string(), "cpu".to_string())
+        .await;
+
+    let switching = loop {
+        let (_topic, event) =
+            tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv_json())
+                .await
+                .expect("a switching_device event")
+                .expect("the event stream is open");
+        if event["status"] == "switching_device" {
+            break event;
+        }
+    };
+    assert_eq!(switching["from_device"], "vulkan", "{switching}");
+    assert_eq!(switching["target_device"], "cpu", "{switching}");
 }
 
 /// There is no global default: a model nobody chose a framework for runs on

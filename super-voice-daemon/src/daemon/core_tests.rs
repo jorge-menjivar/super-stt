@@ -1570,6 +1570,52 @@ async fn a_framework_whose_build_is_not_installed_is_refused() {
     );
 }
 
+/// A switch is from the framework the model is running on, not the one its
+/// setting names. After the Vulkan build was replaced by the CPU build, a
+/// model still running on Vulkan and switched to the CPU was announced as a
+/// switch "from cpu to cpu": its setting resolves to the CPU, the one
+/// framework the installed build runs.
+#[tokio::test]
+async fn a_switch_is_announced_from_where_the_model_runs() {
+    use crate::daemon::device_management::PipelineStage;
+    use crate::daemon::events::Topic;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/whisper";
+    let folder = folder_with_builds(source, "large", "transcription", r#""vulkan""#);
+    // The CPU build replaced the Vulkan one the model was loaded from.
+    std::fs::write(
+        folder.path().join("installed.json"),
+        r#"{"selected":{"target":"x86_64-unknown-linux-gnu","accel":"cpu"}}"#,
+    )
+    .expect("record");
+    seed_folder_backend(&daemon, source, folder.path()).await;
+    seed_transcription_on(&daemon, "large", source, "vulkan").await;
+
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+    // The fixture has no binary, so the reload fails; the announcement is
+    // what is being checked.
+    let _ = daemon
+        .handle_set_model_device(
+            PipelineStage::Transcription,
+            "large".to_string(),
+            "cpu".to_string(),
+        )
+        .await;
+
+    let switching = loop {
+        let (_topic, event) =
+            tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv_json())
+                .await
+                .expect("a switching_device event")
+                .expect("the event stream is open");
+        if event["status"] == "switching_device" {
+            break event;
+        }
+    };
+    assert_eq!(switching["from_device"], "vulkan", "{switching}");
+    assert_eq!(switching["target_device"], "cpu", "{switching}");
+}
+
 /// There is no global default: a model nobody chose a framework for runs on
 /// the best one its installed build runs, which is the first offered, not
 /// the CPU.
@@ -2743,6 +2789,33 @@ async fn seed_post_processor_on(
     source: &str,
     device: &'static str,
 ) -> SeenContexts {
+    use super_voice_registry_types::manifest::ModelRole;
+    let (loaded, reconfigured) = scripted_loaded(name, source, ModelRole::PostProcessor, device);
+    *daemon.post_processor.write().await = Some(loaded);
+    reconfigured
+}
+
+/// Seed stage 1 with a [`ScriptedTranscribe`] serving `(source, name)`,
+/// running on `device`.
+async fn seed_transcription_on(
+    daemon: &SuperSTTDaemon,
+    name: &str,
+    source: &str,
+    device: &'static str,
+) {
+    use super_voice_registry_types::manifest::ModelRole;
+    let (loaded, _) = scripted_loaded(name, source, ModelRole::Transcription, device);
+    *daemon.model.write().await = Some(loaded);
+}
+
+/// A loaded [`ScriptedTranscribe`] serving `(source, name)` in `role`,
+/// running on `device`, and the contexts it is handed.
+fn scripted_loaded(
+    name: &str,
+    source: &str,
+    role: super_voice_registry_types::manifest::ModelRole,
+    device: &'static str,
+) -> (crate::daemon::types::LoadedModel, SeenContexts) {
     use crate::daemon::types::LoadedModel;
     use crate::stt_models::ModelDefinition;
     use crate::stt_models::transcribe::ModelInfoData;
@@ -2760,15 +2833,13 @@ async fn seed_post_processor_on(
         realtime: false,
         product: super_voice_registry_types::manifest::VoiceModel {
             force_preview_support: true,
-            ..super_voice_registry_types::manifest::VoiceModel::new(
-                super_voice_registry_types::manifest::ModelRole::PostProcessor,
-            )
+            ..super_voice_registry_types::manifest::VoiceModel::new(role)
         },
         provider: None,
     };
     let info = ModelInfoData::new(name, source, false, false, Duration::from_secs(1));
     let reconfigured: SeenContexts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    *daemon.post_processor.write().await = Some(LoadedModel {
+    let loaded = LoadedModel {
         definition,
         instance: Box::new(ScriptedTranscribe {
             info,
@@ -2776,8 +2847,8 @@ async fn seed_post_processor_on(
             reconfigured: std::sync::Arc::clone(&reconfigured),
             device,
         }),
-    });
-    reconfigured
+    };
+    (loaded, reconfigured)
 }
 
 /// One second of finite samples — passes `validate_audio` and survives

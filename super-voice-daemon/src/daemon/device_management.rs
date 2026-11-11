@@ -322,7 +322,7 @@ impl SuperSTTDaemon {
 
         match stage {
             PipelineStage::Transcription => {
-                self.switch_transcription_device(target, &device, &current, shutdown_rx)
+                self.switch_transcription_device(target, &device, &actual, &current, shutdown_rx)
                     .await
             }
             PipelineStage::PostProcessor => {
@@ -527,22 +527,29 @@ impl SuperSTTDaemon {
     }
 
     /// Reload the stage-1 model onto `device`: unload, load, and on failure
-    /// recover onto `previous`. The preference is stored only once the load
-    /// succeeded, so a failed switch leaves the model's setting as it was.
+    /// recover onto `fallback`, the framework its setting loads it on. The
+    /// preference is stored only once the load succeeded, so a failed switch
+    /// leaves the model's setting as it was.
+    ///
+    /// `from` is the framework the model is running on, which is what the
+    /// switch is from. It is not always one `fallback` could be: a model still
+    /// running on a build that an install has since replaced cannot be loaded
+    /// on that framework again.
     async fn switch_transcription_device(
         &self,
         target: DeviceTarget,
         device: &str,
-        previous: &str,
+        from: &str,
+        fallback: &str,
         mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
     ) -> DaemonResponse {
         let name = target.definition.name.clone();
         let source = target.definition.source.clone();
-        info!("Starting device switch for {name} from {previous} to {device}");
+        info!("Starting device switch for {name} from {from} to {device}");
 
         self.events
             .publish_daemon_status(DaemonStatusEvent::SwitchingDevice {
-                from_device: previous.to_string(),
+                from_device: from.to_string(),
                 target_device: device.to_string(),
                 model: name.clone(),
                 stage: PipelineStage::Transcription.position(),
@@ -567,7 +574,7 @@ impl SuperSTTDaemon {
                 let actual_device = self.finalize_loaded_model(definition, instance).await;
                 self.store_model_device(&target, device).await;
                 info!(
-                    "Device switch completed for {name}: {previous} -> {device} (actual: {actual_device})"
+                    "Device switch completed for {name}: {from} -> {device} (actual: {actual_device})"
                 );
                 self.events.publish_daemon_status(DaemonStatusEvent::Ready {
                     model_loaded: true,
@@ -584,20 +591,21 @@ impl SuperSTTDaemon {
                 .await
             }
             Err(e) => {
-                self.recover_transcription_device(&target, e, device, previous)
+                self.recover_transcription_device(&target, e, device, fallback)
                     .await
             }
         }
     }
 
-    /// A failed switch: report it, then try to put the model back on
-    /// `previous`. Nothing was stored, so the setting needs no reverting.
+    /// A failed switch: report it, then try to load the model again on
+    /// `fallback`, the framework its setting loads it on. Nothing was stored,
+    /// so the setting needs no reverting.
     async fn recover_transcription_device(
         &self,
         target: &DeviceTarget,
         error: anyhow::Error,
         device: &str,
-        previous: &str,
+        fallback: &str,
     ) -> DaemonResponse {
         let name = &target.definition.name;
         let source = &target.definition.source;
@@ -618,21 +626,21 @@ impl SuperSTTDaemon {
             ));
         }
 
-        warn!("Attempting to recover by reverting {name} to previous device: {previous}");
+        warn!("Attempting to recover by reloading {name} on {fallback}, its setting");
         match self
-            .load_model_with_target_device(name, source, previous)
+            .load_model_with_target_device(name, source, fallback)
             .await
         {
             Ok((instance, definition)) => {
                 let actual_device = self.finalize_loaded_model(definition, instance).await;
                 warn!(
-                    "Recovery successful - {name} reverted to {previous} (actual: {actual_device})"
+                    "Recovery successful - {name} reloaded on {fallback} (actual: {actual_device})"
                 );
                 self.events.publish_daemon_status(DaemonStatusEvent::Ready {
                     model_loaded: true,
                     model_name: Some(name.clone()),
                     actual_device: Some(actual_device.clone()),
-                    preferred_device: Some(previous.to_string()),
+                    preferred_device: Some(fallback.to_string()),
                     stage: PipelineStage::Transcription.position(),
                 });
                 DaemonResponse::error(&format!(
