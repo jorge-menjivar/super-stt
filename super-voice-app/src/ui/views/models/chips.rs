@@ -198,6 +198,14 @@ pub(super) fn stage_chips(
     Some(chips.wrap().vertical_spacing(spacing.space_xxs).into())
 }
 
+/// Whether a backend in the catalog takes the user's dictation context, which
+/// earns its card the Contexts chip. The index says it on each speech-to-text
+/// model of a backend that declared it. An index or a daemon from before the
+/// field says nothing, and reads as no.
+pub(super) fn entry_accepts_context(entry: &super_voice_shared::registry::RegistryBackend) -> bool {
+    entry.models.iter().any(|m| m.product.accepts_context)
+}
+
 /// Whether a stage's backend is handed the user's dictation context, which
 /// earns it the Contexts chip. The daemon sends a context only with speech to
 /// text's requests, so a backend that declared it can use one still hears
@@ -1129,7 +1137,7 @@ mod update_offer_tests {
     //! daemon's — these fix what the card does with it, including the failure
     //! this started from: the flag rides on the registry catalog, so a chip can
     //! survive the update it describes and then do nothing when clicked.
-    use super::update_offer;
+    use super::{entry_accepts_context, update_offer};
     use super_voice_shared::registry::RegistryBackend;
 
     fn entry(installed: Option<&str>, latest: &str) -> RegistryBackend {
@@ -1166,6 +1174,29 @@ mod update_offer_tests {
             update_available,
             index_stale: None,
         }
+    }
+
+    /// A catalog entry gets the Contexts chip when the index marks any of its
+    /// models as taking a context, and not when none is, which is also how an
+    /// index from before the field reads.
+    #[test]
+    fn a_catalog_entry_takes_a_context_when_a_model_does() {
+        let model =
+            |role: &str, accepts_context: bool| super_voice_shared::registry::RegistryModel {
+                name: "m".to_string(),
+                provider: String::new(),
+                supported_devices: vec!["cpu".to_string()],
+                product: super_voice_registry_types::index::VoiceIndexModel {
+                    role: role.to_string(),
+                    accepts_context,
+                },
+            };
+        let mut e = entry(None, "1.0.0");
+        assert!(!entry_accepts_context(&e));
+        e.models = vec![model("synthesis", false), model("post_processor", false)];
+        assert!(!entry_accepts_context(&e));
+        e.models.push(model("transcription", true));
+        assert!(entry_accepts_context(&e));
     }
 
     #[test]

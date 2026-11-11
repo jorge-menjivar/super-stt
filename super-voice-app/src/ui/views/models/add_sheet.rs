@@ -9,7 +9,10 @@ use crate::state::registry::{AddSource, PreviewState};
 use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage};
 
-use super::chips::{CloudEgress, capability_chips, count_chip, model_device_chips, role_label};
+use super::chips::{
+    CloudEgress, capability_chips, count_chip, entry_accepts_context, model_device_chips,
+    role_label,
+};
 use super::surface::{card_divider, muted_text_color};
 
 /// Right-side "Install manually" sheet, rendered as a COSMIC context drawer.
@@ -244,9 +247,13 @@ fn resolved_preview(
         hosts: b.allowed_hosts.as_slice(),
         user_url: false,
     });
-    // No Contexts chip: the registry index does not carry whether a backend
-    // can use a dictation context, only an installed manifest does.
-    if let Some(chips) = capability_chips(b.supports_gpu, b.supports_cpu, egress, false, false) {
+    if let Some(chips) = capability_chips(
+        b.supports_gpu,
+        b.supports_cpu,
+        egress,
+        entry_accepts_context(b),
+        false,
+    ) {
         col = col.push(chips);
     }
 

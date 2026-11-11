@@ -10,8 +10,13 @@ use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage};
 
 use super::active::backend_glyph_tile;
-use super::chips::{CloudEgress, capability_chips, models_inventory, result_count, role_groups};
-use super::surface::{card_divider, card_surface, card_title_block, muted_text_color, repo_button};
+use super::chips::{
+    CloudEgress, capability_chips, entry_accepts_context, models_inventory, result_count,
+    role_groups,
+};
+use super::surface::{
+    card_divider, card_facts, card_surface, card_title_block, muted_text_color, repo_button,
+};
 
 /// Browse tab split into its two regions: the fixed search + filter toolbar
 /// (with the live result count) and the scrollable list of backend cards.
@@ -304,9 +309,13 @@ pub(super) fn download_card<'a>(
         hosts: entry.allowed_hosts.as_slice(),
         user_url: false,
     });
-    // No Contexts chip: the registry index does not carry whether a backend
-    // can use a dictation context, only an installed manifest does.
-    let caps = capability_chips(entry.supports_gpu, entry.supports_cpu, egress, false, true);
+    let caps = capability_chips(
+        entry.supports_gpu,
+        entry.supports_cpu,
+        egress,
+        entry_accepts_context(entry),
+        true,
+    );
     let groups = role_groups(
         entry
             .models
@@ -314,18 +323,8 @@ pub(super) fn download_card<'a>(
             .map(|m| (m.name.as_str(), m.product.role.as_str())),
     );
     let inventory = models_inventory(&groups);
-    if inventory.is_some() || caps.is_some() {
-        let mut meta = widget::row::with_capacity(2)
-            .spacing(spacing.space_s)
-            .align_y(Alignment::Center)
-            .width(Length::Fill);
-        if let Some(inv) = inventory {
-            meta = meta.push(widget::container(inv).width(Length::Fill));
-        }
-        if let Some(c) = caps {
-            meta = meta.push(c);
-        }
-        card = card.push(card_divider()).push(meta);
+    if let Some(facts) = card_facts(inventory, caps) {
+        card = card.push(card_divider()).push(facts);
     }
 
     // Footer: contextual note on the left, Install button on the right.
