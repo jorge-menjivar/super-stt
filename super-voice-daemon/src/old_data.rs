@@ -11,9 +11,34 @@
 //!
 //! A folder already in the new place is never replaced. The old copy is left
 //! where it was, and the log says so.
+//!
+//! A hidden folder is neither a backend nor a voice: it is the old product's
+//! scratch space, like the folder its installer staged downloads in. It is
+//! never moved. An empty one is removed, so the old folder can go too.
+//!
+//! A backend Super Voice cannot read is not moved either. In the new folder
+//! discovery would skip it on every scan, and the Library would not show it,
+//! so its models would fill the disk with no way to remove them from the app.
+//! It stays in the old folder, where the user can find it.
 
 use log::{info, warn};
 use std::path::Path;
+
+/// Why Super Voice cannot use the folder at a path, if it cannot. Checked
+/// before a folder is moved.
+pub type Usable = fn(&Path) -> Result<(), String>;
+
+/// Why Super Voice cannot use the backend in `dir`, if it cannot: the rules
+/// discovery holds an installed backend to.
+///
+/// # Errors
+/// The reason, when its manifest cannot be read or breaks a runtime rule.
+pub fn readable_backend(dir: &Path) -> Result<(), String> {
+    use crate::stt_models::backends::manifest::{Manifest, validate_runtime};
+    let manifest =
+        Manifest::load_installed(dir).map_err(|e| format!("{:#}", anyhow::Error::from(e)))?;
+    validate_runtime(&manifest).map_err(|e| format!("{e:#}"))
+}
 
 /// The products whose data Super Voice takes over, by their data folders'
 /// names.
@@ -24,21 +49,27 @@ pub const OLD_PRODUCTS: [&str; 2] = ["super-stt", "super-tts"];
 pub struct Moved {
     /// The folders now in the new place, by name.
     pub moved: Vec<String>,
-    /// The folders left behind, because the new place already had one of the
-    /// same name or the move failed.
+    /// The folders left behind, because Super Voice cannot use them, the new
+    /// place already had one of the same name, or the move failed.
     pub left: Vec<String>,
 }
 
-/// Move every folder in `from` into `into`, then remove `from` if nothing is
-/// left in it. `what` is one of them, `backend` or `voice`, for the log.
-/// Nothing to move, or no `from` at all, is not an error.
+/// Move every folder in `from` that `usable` accepts into `into`, then remove
+/// `from` if nothing is left in it. `what` is one of them, `backend` or
+/// `voice`, for the log. Nothing to move, or no `from` at all, is not an
+/// error.
 ///
 /// # Errors
 /// When `from` exists but cannot be read, or `into` cannot be created. A
 /// folder that cannot be moved is left in place and reported in
 /// [`Moved::left`], not returned as an error, so one bad folder does not keep
 /// the others from moving.
-pub fn move_folders(from: &Path, into: &Path, what: &str) -> std::io::Result<Moved> {
+pub fn move_folders(
+    from: &Path,
+    into: &Path,
+    what: &str,
+    usable: Usable,
+) -> std::io::Result<Moved> {
     let entries = match std::fs::read_dir(from) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Moved::default()),
@@ -56,6 +87,20 @@ pub fn move_folders(from: &Path, into: &Path, what: &str) -> std::io::Result<Mov
     names.sort();
     for name in names {
         let shown = name.to_string_lossy().into_owned();
+        if shown.starts_with('.') {
+            if std::fs::remove_dir(from.join(&name)).is_ok() {
+                info!("Removed the empty {shown} from {}", from.display());
+            }
+            continue;
+        }
+        if let Err(reason) = usable(&from.join(&name)) {
+            info!(
+                "Leaving {what} {shown} in {}: Super Voice cannot use it: {reason}",
+                from.display()
+            );
+            report.left.push(shown);
+            continue;
+        }
         let target = into.join(&name);
         if target.exists() {
             warn!(
@@ -101,13 +146,89 @@ pub fn old_product_dir(voice_dir: &Path, product: &str) -> Option<std::path::Pat
 
 #[cfg(test)]
 mod tests {
-    use super::{Moved, move_folders, old_product_dir};
+    use super::{Moved, move_folders, old_product_dir, readable_backend};
     use std::path::Path;
 
     fn backend(root: &Path, name: &str, marker: &str) {
         let dir = root.join(name);
         std::fs::create_dir_all(dir.join("models")).unwrap();
         std::fs::write(dir.join("backend.toml"), marker).unwrap();
+    }
+
+    /// Every folder is one Super Voice can use.
+    #[allow(clippy::unnecessary_wraps)]
+    fn any(_: &Path) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// A Super STT backend, from before contracts named a product or a role.
+    const SUPER_STT_MANIFEST: &str = r#"
+[backend]
+    source      = "github.com/x/whisper"
+    name        = "Whisper"
+    version     = "0.1.0"
+    kind        = "subprocess"
+    entrypoint  = "whisper"
+    contract    = "v1"
+    description = "Test backend."
+
+[[models]]
+    name                = "tiny"
+    primary_language    = "en"
+    supported_languages = ["en"]
+    supported_devices   = ["cpu"]
+"#;
+
+    /// The same, with a key of text to speech's, as Super TTS's backends
+    /// declared them: without a role, Super Voice reads the model as
+    /// transcribing, and refuses the key.
+    fn super_tts_manifest() -> String {
+        SUPER_STT_MANIFEST.replace(
+            "supported_devices   = [\"cpu\"]",
+            "supported_devices   = [\"cpu\"]\n    max_input_chars     = 500",
+        )
+    }
+
+    #[test]
+    fn a_super_stt_backend_is_readable() {
+        let home = tempfile::tempdir().unwrap();
+        backend(home.path(), "app.super-stt.whisper", SUPER_STT_MANIFEST);
+        assert_eq!(
+            readable_backend(&home.path().join("app.super-stt.whisper")),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_super_tts_backend_is_not_readable() {
+        let home = tempfile::tempdir().unwrap();
+        backend(home.path(), "app.super-tts.kokoro", &super_tts_manifest());
+        let reason = readable_backend(&home.path().join("app.super-tts.kokoro")).unwrap_err();
+        assert!(reason.contains("max_input_chars"), "{reason}");
+    }
+
+    /// A backend Super Voice cannot read stays in the old folder. Moved, it
+    /// would be skipped on every scan and missing from the Library, with no
+    /// way to remove it from the app.
+    #[test]
+    fn a_backend_super_voice_cannot_read_is_left_where_it_was() {
+        let home = tempfile::tempdir().unwrap();
+        let from = home.path().join("super-tts/backends");
+        let into = home.path().join("super-voice/backends");
+        backend(&from, "app.super-tts.kokoro", &super_tts_manifest());
+        backend(&from, "app.super-stt.whisper", SUPER_STT_MANIFEST);
+
+        let report = move_folders(&from, &into, "backend", readable_backend).unwrap();
+
+        assert_eq!(
+            report,
+            Moved {
+                moved: vec!["app.super-stt.whisper".into()],
+                left: vec!["app.super-tts.kokoro".into()],
+            }
+        );
+        assert!(from.join("app.super-tts.kokoro/backend.toml").is_file());
+        assert!(!into.join("app.super-tts.kokoro").exists());
     }
 
     #[test]
@@ -118,7 +239,7 @@ mod tests {
         backend(&from, "app.super-stt.whisper", "whisper");
         backend(&from, "app.super-stt.voxtral", "voxtral");
 
-        let report = move_folders(&from, &into, "backend").unwrap();
+        let report = move_folders(&from, &into, "backend", any).unwrap();
 
         assert_eq!(
             report,
@@ -149,7 +270,7 @@ mod tests {
         backend(&from, "app.super-stt.qwen", "old");
         backend(&into, "app.super-stt.qwen", "new");
 
-        let report = move_folders(&from, &into, "backend").unwrap();
+        let report = move_folders(&from, &into, "backend", any).unwrap();
 
         assert_eq!(report.left, vec!["app.super-stt.qwen".to_string()]);
         assert_eq!(
@@ -162,6 +283,46 @@ mod tests {
         );
     }
 
+    /// The installer's staging folder is no backend. Super Voice has its own,
+    /// so moving it was refused with a warning on every start, and the old
+    /// folder could never be removed.
+    #[test]
+    fn an_empty_staging_folder_is_removed_not_moved() {
+        let home = tempfile::tempdir().unwrap();
+        let from = home.path().join("super-tts/backends");
+        let into = home.path().join("super-voice/backends");
+        std::fs::create_dir_all(from.join(".staging")).unwrap();
+        std::fs::create_dir_all(into.join(".staging")).unwrap();
+        backend(&from, "app.super-tts.kokoro", "kokoro");
+
+        let report = move_folders(&from, &into, "backend", any).unwrap();
+
+        assert_eq!(
+            report,
+            Moved {
+                moved: vec!["app.super-tts.kokoro".into()],
+                left: vec![],
+            }
+        );
+        assert!(!from.exists(), "the emptied folder is removed");
+        assert!(into.join(".staging").is_dir(), "Super Voice's own is kept");
+    }
+
+    /// A hidden folder with something in it is left where it is, and is not
+    /// reported as a backend left behind.
+    #[test]
+    fn a_staging_folder_in_use_is_left_alone() {
+        let home = tempfile::tempdir().unwrap();
+        let from = home.path().join("super-tts/backends");
+        let into = home.path().join("super-voice/backends");
+        std::fs::create_dir_all(from.join(".staging/partial")).unwrap();
+
+        let report = move_folders(&from, &into, "backend", any).unwrap();
+
+        assert_eq!(report, Moved::default());
+        assert!(from.join(".staging/partial").is_dir());
+    }
+
     #[test]
     fn nothing_to_move_is_not_an_error() {
         let home = tempfile::tempdir().unwrap();
@@ -169,6 +330,7 @@ mod tests {
             &home.path().join("super-stt/backends"),
             &home.path().join("super-voice/backends"),
             "backend",
+            any,
         )
         .unwrap();
         assert_eq!(report, Moved::default());
@@ -200,7 +362,7 @@ mod tests {
         std::fs::write(from.join("3f2a/clip.wav"), b"RIFF").unwrap();
         std::fs::write(from.join("3f2a/voice.json"), b"{}").unwrap();
 
-        let report = move_folders(&from, &into, "voice").unwrap();
+        let report = move_folders(&from, &into, "voice", any).unwrap();
 
         assert_eq!(report.moved, vec!["3f2a".to_string()]);
         assert_eq!(std::fs::read(into.join("3f2a/clip.wav")).unwrap(), b"RIFF");
