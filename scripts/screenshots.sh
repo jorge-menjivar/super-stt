@@ -40,6 +40,8 @@ SHOTS=(
     "app-12 speech"
     "app-13 voices"
     "app-14 customization"
+    "app-15 connection"
+    "app-16 updates"
 )
 
 # The nested output, and where the window lands on it. The window size is
