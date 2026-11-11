@@ -43,11 +43,15 @@ pub const MAX_FRAME_LEN: u32 = 1 << 20;
 pub const MAX_TOTAL_AUDIO_BYTES: u64 = 32 << 20;
 
 /// Header naming the response's sample rate in Hz.
-pub const HEADER_SAMPLE_RATE: &str = "x-tts-sample-rate";
+pub const HEADER_SAMPLE_RATE: &str = "x-voice-sample-rate";
 /// Header naming the response's channel count.
-pub const HEADER_CHANNELS: &str = "x-tts-channels";
+pub const HEADER_CHANNELS: &str = "x-voice-channels";
 /// Header naming the response's sample format.
-pub const HEADER_FORMAT: &str = "x-tts-format";
+pub const HEADER_FORMAT: &str = "x-voice-format";
+/// The prefix the three headers above had before they were named
+/// `x-voice-*`. Backends built before then send `x-tts-sample-rate`,
+/// `x-tts-channels` and `x-tts-format`, which are read the same.
+pub const FORMER_HEADER_PREFIX: &str = "x-tts-";
 /// Content type a framed synthesis response carries.
 pub const CONTENT_TYPE: &str = "application/vnd.super-voice.frames";
 
@@ -75,7 +79,7 @@ impl SampleFormat {
         }
     }
 
-    /// Wire spelling, as it appears in the `x-tts-format` header.
+    /// Wire spelling, as it appears in the `x-voice-format` header.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -148,8 +152,12 @@ impl AudioParams {
     /// Returns [`FrameError::BadParams`] when a header is missing, unparseable,
     /// or names an implausible rate or channel count.
     pub fn from_headers<'a>(lookup: impl Fn(&str) -> Option<&'a str>) -> Result<Self, FrameError> {
+        // Each header under its name, or else under its former one.
         let get = |name: &str| {
-            lookup(name).ok_or_else(|| FrameError::BadParams(format!("missing {name}")))
+            let former = name.replacen("x-voice-", FORMER_HEADER_PREFIX, 1);
+            lookup(name)
+                .or_else(|| lookup(&former))
+                .ok_or_else(|| FrameError::BadParams(format!("missing {name}")))
         };
         let sample_rate: u32 = get(HEADER_SAMPLE_RATE)?
             .trim()
@@ -652,6 +660,24 @@ mod tests {
                 sample_rate: 24000,
                 channels: 1,
                 format: SampleFormat::S16Le,
+            }
+        );
+    }
+
+    #[test]
+    fn reads_audio_params_under_their_former_names() {
+        let p = AudioParams::from_headers(headers(&[
+            ("x-tts-sample-rate", "22050"),
+            ("x-tts-channels", "2"),
+            ("x-tts-format", "f32le"),
+        ]))
+        .expect("a backend built before the x-voice-* names still parses");
+        assert_eq!(
+            p,
+            AudioParams {
+                sample_rate: 22050,
+                channels: 2,
+                format: SampleFormat::F32Le,
             }
         );
     }

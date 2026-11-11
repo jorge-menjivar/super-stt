@@ -127,7 +127,7 @@ pub struct BackendModel {
 /// file.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BackendSecret {
-    /// `snake_case` identifier; the backend reads it as `x-tts-secret-<name>`.
+    /// `snake_case` identifier; the backend reads it as `x-voice-secret-<name>`.
     pub name: String,
     /// Human-readable label for the UI. Falls back to `name` when absent.
     #[serde(default)]
@@ -143,7 +143,7 @@ pub struct BackendSecret {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BackendOption {
     /// `snake_case` identifier (the daemon config key; the backend reads it as
-    /// `x-tts-option-<name>`).
+    /// `x-voice-option-<name>`).
     pub name: String,
     /// Human-readable label for the UI. Falls back to `name` when absent.
     #[serde(default)]

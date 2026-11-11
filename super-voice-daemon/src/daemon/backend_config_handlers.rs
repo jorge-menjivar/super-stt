@@ -386,7 +386,7 @@ impl SuperSTTDaemon {
     /// override in config, and hand it to the stages already running.
     ///
     /// Takes effect on the backend's next request, not its next model load.
-    /// Options are injected as `x-stt-option-*` headers on every `/v1` call and
+    /// Options are injected as `x-voice-option-*` headers on every `/v1` call and
     /// read there, so the value reaching a running instance is a matter of
     /// swapping what it injects; it used to reload the model instead — both
     /// stages of it — which unmapped and remapped gigabytes of weights to
@@ -412,7 +412,7 @@ impl SuperSTTDaemon {
             }
         }
         // Refuse a value the transports cannot carry, before it is stored. An
-        // option value is injected as an `x-stt-option-*` request header, and a
+        // option value is injected as an `x-voice-option-*` request header, and a
         // header holds neither a control character nor an unbounded number of
         // bytes — so storing one reports success and then breaks every request
         // the backend makes, naming nothing the user set.

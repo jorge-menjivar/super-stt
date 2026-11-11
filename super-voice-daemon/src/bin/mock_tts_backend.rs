@@ -206,7 +206,7 @@ fn frame(kind: u8, payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `POST /v1/synthesize` — a framed s16le ramp, and the `x-tts-option-*`
+/// `POST /v1/synthesize` — a framed s16le ramp, and the `x-voice-option-*`
 /// headers the request carried echoed into the mark frame as `options`.
 ///
 /// The echo rides on the mark because that is the one frame in the stream with
@@ -240,7 +240,7 @@ async fn synthesize(
     let mut options: Vec<String> = headers
         .iter()
         .filter_map(|(k, v)| {
-            let name = k.as_str().strip_prefix("x-tts-option-")?;
+            let name = k.as_str().strip_prefix("x-voice-option-")?;
             Some(format!("{name}={}", v.to_str().unwrap_or("?")))
         })
         .collect();
@@ -257,11 +257,14 @@ async fn synthesize(
         [
             (CONTENT_TYPE, "application/vnd.super-voice.frames"),
             (
-                axum::http::HeaderName::from_static("x-tts-sample-rate"),
+                axum::http::HeaderName::from_static("x-voice-sample-rate"),
                 "24000",
             ),
-            (axum::http::HeaderName::from_static("x-tts-channels"), "1"),
-            (axum::http::HeaderName::from_static("x-tts-format"), "s16le"),
+            (axum::http::HeaderName::from_static("x-voice-channels"), "1"),
+            (
+                axum::http::HeaderName::from_static("x-voice-format"),
+                "s16le",
+            ),
         ],
         body,
     )

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::backend_headers::{self, Feature};
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends::{self, DiscoveredBackend};
@@ -251,7 +252,7 @@ impl SuperSTTDaemon {
         })
     }
 
-    /// Form the `x-stt-secret-*` / `x-stt-option-*` headers a backend is
+    /// Form the `x-voice-secret-*` / `x-voice-option-*` headers a backend is
     /// handed on every `/v1` request, whichever transport carries it.
     ///
     /// Secrets come solely from the daemon's secrets file, by backend source
@@ -272,7 +273,12 @@ impl SuperSTTDaemon {
                 .get_backend_secret(&backend.source, &secret.name)
                 .filter(|v| !v.is_empty());
             match value {
-                Some(v) => headers.push((format!("x-stt-secret-{}", secret.name), v)),
+                Some(v) => backend_headers::push(
+                    &mut headers,
+                    Feature::SpeechToText,
+                    &format!("secret-{}", secret.name),
+                    v,
+                ),
                 // Safety-net error: the settings UI is expected to surface this
                 // requirement *before* the user can request a model load. If
                 // that pre-flight is bypassed (a UI bug, or a non-UI client),
@@ -289,7 +295,12 @@ impl SuperSTTDaemon {
         }
         for opt in &backend.options {
             if let Some(v) = resolved_backend_option(overrides, opt) {
-                headers.push((format!("x-stt-option-{}", opt.name), v));
+                backend_headers::push(
+                    &mut headers,
+                    Feature::SpeechToText,
+                    &format!("option-{}", opt.name),
+                    v,
+                );
             }
         }
         // The user's dictation context, for a backend that said it can use one.
@@ -315,13 +326,20 @@ impl SuperSTTDaemon {
                 // backend reading one and not the other should not have to
                 // distinguish "absent" from "empty".
                 if !context.prompt.trim().is_empty() {
-                    headers.push(("x-stt-prompt".to_string(), json_ascii(&context.prompt)));
+                    backend_headers::push(
+                        &mut headers,
+                        Feature::SpeechToText,
+                        "prompt",
+                        json_ascii(&context.prompt),
+                    );
                 }
                 if !context.vocabulary.is_empty() {
-                    headers.push((
-                        "x-stt-vocabulary".to_string(),
+                    backend_headers::push(
+                        &mut headers,
+                        Feature::SpeechToText,
+                        "vocabulary",
                         json_ascii_array(&context.vocabulary),
-                    ));
+                    );
                 }
             }
         }
@@ -596,7 +614,7 @@ mod tests {
                 .expect("headers for a secret-free backend");
             let injected = headers
                 .iter()
-                .find(|(k, _)| k == "x-stt-option-base_url")
+                .find(|(k, _)| k == "x-voice-option-base_url")
                 .map(|(_, v)| v.as_str());
             let egress = SuperSTTDaemon::base_url_egress_hosts(&backend, &overrides);
             assert_eq!(injected, expected_header, "header for {stored:?}");
@@ -649,7 +667,7 @@ mod tests {
             .expect("headers for a secret-free backend");
         let injected = headers
             .iter()
-            .find(|(k, _)| k == "x-stt-option-base_url")
+            .find(|(k, _)| k == "x-voice-option-base_url")
             .map(|(_, v)| v.as_str());
         assert_eq!(injected, Some("https://gw.example.com:8443/v1"));
         assert_eq!(
@@ -753,7 +771,7 @@ mod tests {
             .expect("headers for a secret-free backend");
         let injected = headers
             .iter()
-            .find(|(k, _)| k == "x-stt-option-base_url")
+            .find(|(k, _)| k == "x-voice-option-base_url")
             .map(|(_, v)| v.as_str())
             .expect("base_url is injected from the snapshot");
         let egress = SuperSTTDaemon::base_url_egress_hosts(&backend, &overrides);
@@ -800,7 +818,7 @@ mod tests {
         assert!(
             !without
                 .iter()
-                .any(|(k, _)| k.starts_with("x-stt-prompt") || k.starts_with("x-stt-vocabulary")),
+                .any(|(k, _)| k.ends_with("-prompt") || k.ends_with("-vocabulary")),
             "no capability, no context headers: {without:?}"
         );
 
@@ -818,18 +836,18 @@ mod tests {
             .backend_headers(&opted_in, &std::collections::HashMap::new())
             .await
             .expect("headers");
-        assert_eq!(
+        let value = |name: &str| {
             with.iter()
-                .find(|(k, _)| k == "x-stt-prompt")
-                .map(|(_, v)| v.as_str()),
-            Some(r#""I dictate code.""#)
-        );
-        assert_eq!(
-            with.iter()
-                .find(|(k, _)| k == "x-stt-vocabulary")
-                .map(|(_, v)| v.as_str()),
-            Some(r#"["kubectl"]"#)
-        );
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+        };
+        // Under its name, and under the name a backend built before it reads.
+        for name in ["x-voice-prompt", "x-stt-prompt"] {
+            assert_eq!(value(name), Some(r#""I dictate code.""#), "{name}");
+        }
+        for name in ["x-voice-vocabulary", "x-stt-vocabulary"] {
+            assert_eq!(value(name), Some(r#"["kubectl"]"#), "{name}");
+        }
     }
 
     /// Both headers must survive the round trip a backend actually makes:
@@ -914,12 +932,12 @@ mod tests {
         };
 
         assert_eq!(
-            serde_json::from_str::<String>(&read_back("x-stt-prompt")).expect("decodes"),
+            serde_json::from_str::<String>(&read_back("x-voice-prompt")).expect("decodes"),
             prompt,
             "the prompt comes back exactly as the user typed it, newline and all"
         );
         assert_eq!(
-            serde_json::from_str::<Vec<String>>(&read_back("x-stt-vocabulary")).expect("decodes"),
+            serde_json::from_str::<Vec<String>>(&read_back("x-voice-vocabulary")).expect("decodes"),
             vocabulary,
             "a term holding a comma stays one term — that is why this is an array"
         );
@@ -983,14 +1001,14 @@ mod tests {
                 .await
                 .expect("headers");
             assert_eq!(
-                headers.iter().any(|(k, _)| k == "x-stt-prompt"),
+                headers.iter().any(|(k, _)| k == "x-voice-prompt"),
                 wants_prompt,
-                "x-stt-prompt for {id}: {headers:?}"
+                "x-voice-prompt for {id}: {headers:?}"
             );
             assert_eq!(
-                headers.iter().any(|(k, _)| k == "x-stt-vocabulary"),
+                headers.iter().any(|(k, _)| k == "x-voice-vocabulary"),
                 wants_terms,
-                "x-stt-vocabulary for {id}: {headers:?}"
+                "x-voice-vocabulary for {id}: {headers:?}"
             );
         }
     }

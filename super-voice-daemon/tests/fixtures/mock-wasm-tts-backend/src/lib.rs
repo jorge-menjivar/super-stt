@@ -79,9 +79,9 @@ impl Guest for Component {
                 200,
                 &[
                     ("content-type", "application/vnd.super-voice.frames"),
-                    ("x-tts-sample-rate", "24000"),
-                    ("x-tts-channels", "1"),
-                    ("x-tts-format", "s16le"),
+                    ("x-voice-sample-rate", "24000"),
+                    ("x-voice-channels", "1"),
+                    ("x-voice-format", "s16le"),
                 ],
                 &synthesize_body(),
             );

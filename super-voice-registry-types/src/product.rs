@@ -174,8 +174,8 @@ impl<'de> Deserialize<'de> for Contract {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VoiceCapabilities {
-    /// Opt into being handed the user's dictation context: an `x-stt-prompt`
-    /// header and an `x-stt-vocabulary` header, on every `/v1` request to a
+    /// Opt into being handed the user's dictation context: an `x-voice-prompt`
+    /// header and an `x-voice-vocabulary` header, on every `/v1` request to a
     /// speech-to-text model. Default `false`, which means neither header is
     /// sent.
     ///
@@ -237,7 +237,7 @@ pub struct VoiceModel {
     pub max_input_chars: Option<u32>,
     /// Text to speech: native output sample rate in Hz, e.g. `24000`.
     ///
-    /// Advisory. The authoritative rate is the `x-tts-sample-rate` response
+    /// Advisory. The authoritative rate is the `x-voice-sample-rate` response
     /// header on each synthesis, which is what the daemon resamples from — a
     /// manifest cannot know what a cloud provider will actually return. This
     /// value exists so the settings UI can show an output rate and the daemon

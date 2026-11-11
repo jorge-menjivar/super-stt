@@ -21,6 +21,7 @@ use log::info;
 use super_engine_daemon::subprocess::{self as engine, Start, json_headers};
 use super_voice_shared::tts::models::protocol::LoadProgress;
 
+use crate::backend_headers::{self, Feature};
 use crate::tts::tts_models::backends::manifest::{FileSpec, Manifest};
 use crate::tts::tts_models::download::DownloadItem;
 use crate::tts::tts_models::synthesize::{ModelInfo, ModelInfoData, ModelState, Synthesize};
@@ -43,8 +44,8 @@ impl SubprocessBackend {
     /// decides which variant of a per-architecture model file is fetched —
     /// deliberately not `device_pref`, so choosing CPU on a CUDA machine does
     /// not discard the CUDA files already on disk. `context_headers` are the
-    /// already-formed `x-tts-secret-*` / `x-tts-option-*` pairs to inject on
-    /// every request.
+    /// already-formed `x-voice-secret-*` / `x-voice-option-*` pairs to inject
+    /// on every request, each under its former name too.
     ///
     /// A model that declares `prepare_files` has those downloaded first. Its
     /// backend is then started and sent `POST /v1/prepare`, so it builds its
@@ -182,7 +183,12 @@ impl SubprocessBackend {
     /// it is for.
     fn model_headers(&self) -> Vec<(String, String)> {
         let mut headers = json_headers();
-        headers.push(("x-tts-model".to_string(), self.model_id.clone()));
+        backend_headers::push(
+            &mut headers,
+            Feature::TextToSpeech,
+            "model",
+            self.model_id.clone(),
+        );
         headers
     }
 

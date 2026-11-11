@@ -210,7 +210,7 @@ async fn a_changed_option_reaches_a_running_subprocess() {
 
     let (dir, _cleanup) = seed_backend_dir("reconfigure");
 
-    let option = "x-tts-option-voice_design_preset".to_string();
+    let option = "x-voice-option-voice_design_preset".to_string();
     let mut backend = SubprocessBackend::spawn(
         &dir,
         "mock-reconfigure",
@@ -249,7 +249,7 @@ async fn a_changed_option_reaches_a_running_subprocess() {
 }
 
 /// The contract says every `/v1` request carries the user's `[[options]]` as
-/// `x-tts-option-*` headers, whichever transport. A backend that steers on one
+/// `x-voice-option-*` headers, whichever transport. A backend that steers on one
 /// — the Qwen backend designs its voice from a pair of them — reads them off
 /// the request, so the daemon has to put them there.
 ///
@@ -267,11 +267,11 @@ async fn option_headers_reach_the_subprocess() {
 
     let headers = vec![
         (
-            "x-tts-option-voice_design_preset".to_string(),
+            "x-voice-option-voice_design_preset".to_string(),
             "Deep narrator (male)".to_string(),
         ),
         (
-            "x-tts-option-voice_design_description".to_string(),
+            "x-voice-option-voice_design_description".to_string(),
             "A hoarse pirate".to_string(),
         ),
     ];

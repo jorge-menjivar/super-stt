@@ -22,6 +22,7 @@ use super_voice_shared::models::protocol::LoadProgress;
 
 use super_voice_shared::utils::audio::{ResampleQuality, resample};
 
+use crate::backend_headers::{self, Feature};
 use crate::stt_models::backends::manifest::{FileSpec, Manifest};
 use crate::stt_models::download::DownloadItem;
 use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
@@ -43,7 +44,8 @@ impl SubprocessBackend {
     /// resolved accelerator (`"cpu"`, `"cuda"`, `"rocm"`, `"metal"`,
     /// `"vulkan"`), or empty when none resolved, which leaves the backend to
     /// select for itself. `context_headers` are the already-formed
-    /// `x-stt-secret-*` / `x-stt-option-*` pairs to inject on every request.
+    /// `x-voice-secret-*` / `x-voice-option-*` pairs to inject on every
+    /// request, each under its former name too.
     ///
     /// A model that declares `prepare_files` has those downloaded first. Its
     /// backend is then started and sent `POST /v1/prepare`, so it builds its
@@ -167,7 +169,12 @@ impl SubprocessBackend {
     /// it is for.
     fn model_headers(&self) -> Vec<(String, String)> {
         let mut headers = json_headers();
-        headers.push(("x-stt-model".to_string(), self.model_id.clone()));
+        backend_headers::push(
+            &mut headers,
+            Feature::SpeechToText,
+            "model",
+            self.model_id.clone(),
+        );
         headers
     }
 }

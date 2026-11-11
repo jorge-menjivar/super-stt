@@ -8,8 +8,7 @@ store a backend's declared secrets (API keys and the like), check whether each
 is configured, and clear them. It **cannot read a secret value back** — no
 endpoint under this scope returns a stored value. The only reader of a secret's
 value is the daemon's own model-load path, which injects it as an
-`x-stt-secret-<name>` header to a speech-to-text model's backend, or
-`x-tts-secret-<name>` to a synthesis model's (see
+`x-voice-secret-<name>` header to the model's backend (see
 [contract.md](../backend/contract.md#request-headers)); it is never serialized
 into a client response.
 

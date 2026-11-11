@@ -691,7 +691,7 @@ fn backend_with_option(
 
 /// A value the transports cannot carry is refused, and not stored.
 ///
-/// An option value is injected as an `x-tts-option-*` request header, and a
+/// An option value is injected as an `x-voice-option-*` request header, and a
 /// header holds no control character. Storing one and reporting success is the
 /// worst outcome available: the settings UI then shows a value the backend is
 /// not using, and every request the backend makes dies inside the transport
@@ -795,7 +795,7 @@ async fn an_option_write_reconfigures_the_running_model() {
     assert!(
         headers
             .iter()
-            .any(|(k, v)| k == "x-tts-option-temperature" && v == "1.1"),
+            .any(|(k, v)| k == "x-voice-option-temperature" && v == "1.1"),
         "the new value must be in the headers the instance now injects: {headers:?}"
     );
 

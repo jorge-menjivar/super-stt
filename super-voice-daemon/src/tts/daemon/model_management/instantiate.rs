@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::backend_headers::{self, Feature};
 use crate::registry::host_detect::Host;
 use crate::tts::daemon::types::SuperTTSDaemon;
 use crate::tts::tts_models::ModelDefinition;
@@ -277,7 +278,7 @@ impl SuperTTSDaemon {
         })
     }
 
-    /// Form the `x-tts-secret-*` / `x-tts-option-*` headers a backend is
+    /// Form the `x-voice-secret-*` / `x-voice-option-*` headers a backend is
     /// handed on every `/v1` request, whichever transport carries it.
     ///
     /// Secrets come solely from the daemon's secrets file, by backend source
@@ -298,7 +299,12 @@ impl SuperTTSDaemon {
                 .get_backend_secret(&backend.source, &secret.name)
                 .filter(|v| !v.is_empty());
             match value {
-                Some(v) => headers.push((format!("x-tts-secret-{}", secret.name), v)),
+                Some(v) => backend_headers::push(
+                    &mut headers,
+                    Feature::TextToSpeech,
+                    &format!("secret-{}", secret.name),
+                    v,
+                ),
                 // Safety-net error: the settings UI is expected to surface this
                 // requirement *before* the user can request a model load. If
                 // that pre-flight is bypassed (a UI bug, or a non-UI client),
@@ -315,7 +321,12 @@ impl SuperTTSDaemon {
         }
         for opt in &backend.options {
             if let Some(v) = resolved_backend_option(overrides, opt) {
-                headers.push((format!("x-tts-option-{}", opt.name), v));
+                backend_headers::push(
+                    &mut headers,
+                    Feature::TextToSpeech,
+                    &format!("option-{}", opt.name),
+                    v,
+                );
             }
         }
         Ok(headers)
@@ -511,7 +522,7 @@ mod tests {
                 .expect("headers for a secret-free backend");
             let injected = headers
                 .iter()
-                .find(|(k, _)| k == "x-tts-option-base_url")
+                .find(|(k, _)| k == "x-voice-option-base_url")
                 .map(|(_, v)| v.as_str());
             let egress = SuperTTSDaemon::base_url_egress_hosts(&backend, &overrides);
             assert_eq!(injected, expected_header, "header for {stored:?}");
@@ -562,7 +573,7 @@ mod tests {
             .expect("headers for a secret-free backend");
         let injected = headers
             .iter()
-            .find(|(k, _)| k == "x-tts-option-base_url")
+            .find(|(k, _)| k == "x-voice-option-base_url")
             .map(|(_, v)| v.as_str());
         assert_eq!(injected, Some("https://gw.example.com:8443/v1"));
         assert_eq!(
@@ -663,7 +674,7 @@ mod tests {
             .expect("headers for a secret-free backend");
         let injected = headers
             .iter()
-            .find(|(k, _)| k == "x-tts-option-base_url")
+            .find(|(k, _)| k == "x-voice-option-base_url")
             .map(|(_, v)| v.as_str())
             .expect("base_url is injected from the snapshot");
         let egress = SuperTTSDaemon::base_url_egress_hosts(&backend, &overrides);

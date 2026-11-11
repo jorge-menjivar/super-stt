@@ -362,7 +362,7 @@ async fn a_changed_option_reaches_a_running_subprocess() {
 
     let (dir, _cleanup) = seed_backend_dir("reconfigure");
 
-    let option = "x-stt-option-styling".to_string();
+    let option = "x-voice-option-styling".to_string();
     let mut processor = SubprocessBackend::spawn(
         &dir,
         "mock-reconfigure",
@@ -400,7 +400,7 @@ async fn a_changed_option_reaches_a_running_subprocess() {
 }
 
 /// The contract says every `/v1` request carries the user's `[[options]]` as
-/// `x-stt-option-*` headers, whichever transport. A subprocess backend that
+/// `x-voice-option-*` headers, whichever transport. A subprocess backend that
 /// steers on an option — a register, a style prompt — reads them off the
 /// request, so the daemon has to put them there; the mock echoes what it got.
 #[tokio::test]
@@ -413,8 +413,8 @@ async fn option_headers_reach_the_subprocess() {
     let (dir, _cleanup) = seed_backend_dir("headers");
 
     let headers = vec![
-        ("x-stt-option-styling".to_string(), "formal".to_string()),
-        ("x-stt-option-context".to_string(), "email".to_string()),
+        ("x-voice-option-styling".to_string(), "formal".to_string()),
+        ("x-voice-option-context".to_string(), "email".to_string()),
     ];
     let mut processor = SubprocessBackend::spawn(&dir, "mock-cleanup", "cpu", None, headers)
         .await

@@ -69,18 +69,18 @@ Manifest `allowed_hosts` entries remain fully SSRF-guarded.
 
 ## Secrets, options and the dictation context
 
-The active model (`x-stt-model` or `x-tts-model`), the secrets and options a
+The active model (`x-voice-model`), the secrets and options a
 backend declares in its [configuration](./config.md), and — for a
 speech-to-text backend declaring `[capabilities] context = true` — the user's
-[dictation context](../endpoints/v1/context.md) as `x-stt-prompt` and
-`x-stt-vocabulary`, all arrive as request headers on every `/v1` request (see
+[dictation context](../endpoints/v1/context.md) as `x-voice-prompt` and
+`x-voice-vocabulary`, all arrive as request headers on every `/v1` request (see
 [request headers](./contract.md#request-headers)). The component reads them from
 the incoming request's headers; it never sees the secrets file, and it needs no
 `wasi:config` import.
 
 For an OpenAI backend declaring `OPENAI_API_KEY`, each `/v1/transcribe`
-arrives with `x-stt-model` and `x-stt-secret-OPENAI_API_KEY`, and each
-`/v1/synthesize` with `x-tts-model` and `x-tts-secret-OPENAI_API_KEY`; the
+and each `/v1/synthesize` arrives with `x-voice-model` and
+`x-voice-secret-OPENAI_API_KEY`; the
 component reads the key and sets `Authorization: Bearer <value>` on its
 outbound request to `api.openai.com`. It must not forward the injected header
 upstream.
@@ -164,7 +164,7 @@ handle: func(
 ```
 
 The daemon invokes `handle` once per consumer realtime session. `headers`
-carries the daemon-injected `x-stt-*` or `x-tts-*` context (model name,
+carries the daemon-injected `x-voice-*` context (model name,
 secrets, options, and for speech to text the dictation context when the backend
 declares it) as UTF-8 key/value pairs. `consumer` is the host-owned consumer
 WebSocket.
@@ -211,13 +211,12 @@ resource. A guest must still call `recv` to take it.
   buffering the whole utterance.
 - Make all outbound calls through `wasi:http/outgoing-handler`; do not rely
   on raw sockets.
-- Read secrets and options from the injected `x-stt-secret-*` and
-  `x-stt-option-*` request headers, or `x-tts-secret-*` and `x-tts-option-*`
-  for a synthesis model; use a secret only to authenticate outbound calls, and
+- Read secrets and options from the injected `x-voice-secret-*` and
+  `x-voice-option-*` request headers; use a secret only to authenticate outbound calls, and
   never forward it upstream.
 - For speech to text, to bias recognition toward what the user is actually
-  dictating, declare `[capabilities] context = true` and read `x-stt-prompt`
-  (a JSON string) and `x-stt-vocabulary` (a JSON array of strings), shaping
+  dictating, declare `[capabilities] context = true` and read `x-voice-prompt`
+  (a JSON string) and `x-voice-vocabulary` (a JSON array of strings), shaping
   them however your upstream wants them. Both are escaped to pure ASCII, so an ordinary JSON
   parse is the whole decode.
 - For a cloud backend, report `state: "ready"` from `GET /v1/status` as soon

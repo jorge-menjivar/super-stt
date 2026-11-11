@@ -389,7 +389,7 @@ async fn set_empty_value_is_400() {
 /// A value that cannot ride in a request header is refused end to end, and the
 /// stored value is untouched.
 ///
-/// The daemon injects every option as `x-stt-option-<name>`, so a line break in
+/// The daemon injects every option as `x-voice-option-<name>`, so a line break in
 /// one would be undeliverable — and worse than undeliverable, because the write
 /// would report success and the backend would then fail every request with an
 /// error naming a header rather than the setting the user typed.

@@ -6,8 +6,7 @@ and so on) a backend
 declares as `[[options]]` in its
 [`backend.toml`](../../../backend/config.md). The daemon stores option
 overrides as plaintext in its config and injects each as an
-`x-stt-option-<name>` request header (`x-tts-option-<name>` for a synthesis
-model) on every `/v1` request (see
+`x-voice-option-<name>` request header on every `/v1` request (see
 [contract.md](../../../backend/contract.md#request-headers)).
 
 A write takes effect on the backend's **next request**, not its next model
@@ -148,8 +147,7 @@ running backend kept the old value. No stage is left with nothing loaded.
 be read from is refused with `400 invalid_value`, and nothing is stored.
 
 Every option value is checked against what a request header can carry, because
-that is how it is delivered: the daemon injects it as `x-stt-option-<name>` (or
-`x-tts-option-<name>`) on
+that is how it is delivered: the daemon injects it as `x-voice-option-<name>` on
 every `/v1` call. A value longer than 4000 characters, or carrying a control
 character, is refused with `400 invalid_value` and nothing is stored. Refusing
 the write is the only point at which the user learns — a stored value that

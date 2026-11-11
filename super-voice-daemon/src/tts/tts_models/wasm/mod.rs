@@ -4,8 +4,9 @@
 //!
 //! A [`WasmBackend`] is a `super_engine_daemon::wasm::WasmComponent`, shared
 //! with Super STT, presented through the daemon's [`Synthesize`] trait.
-//! Secrets and options are injected as `x-tts-secret-*` / `x-tts-option-*`
-//! request headers; outbound egress is confined to the backend's
+//! Secrets and options are injected as `x-voice-secret-*` /
+//! `x-voice-option-*` request headers, each under its former `x-tts-*` name
+//! too; outbound egress is confined to the backend's
 //! `allowed_hosts` plus the endpoint the user authorized through its
 //! `base_url` option (see [`host::AllowlistHooks`]).
 
@@ -20,6 +21,7 @@ use async_trait::async_trait;
 use http_body_util::BodyExt;
 use super_engine_daemon::wasm::WasmComponent;
 
+use crate::backend_headers::{self, Feature};
 use crate::tts::tts_models::synthesize::{ModelInfo, ModelInfoData, ModelState, Synthesize};
 use host::AllowlistHooks;
 
@@ -36,7 +38,7 @@ pub struct WasmBackend {
 
 impl WasmBackend {
     /// Load a component for a discovered model. The request headers are the
-    /// already-formed `x-tts-secret-*` / `x-tts-option-*` pairs to inject.
+    /// already-formed `x-voice-secret-*` / `x-voice-option-*` pairs to inject.
     ///
     /// `allowed_hosts` are the backend's manifest-pinned `[network].allowed_hosts`
     /// (SSRF-guarded); `user_allowed_hosts` is what the user authorized via a
@@ -178,7 +180,12 @@ impl WasmBackend {
         let body = crate::tts::tts_models::v1::build_synthesize_body(req)?;
         let mut headers = self.component.request_headers();
         headers.push(("content-type".to_string(), "application/json".to_string()));
-        headers.push(("x-tts-model".to_string(), self.model_id.clone()));
+        backend_headers::push(
+            &mut headers,
+            Feature::TextToSpeech,
+            "model",
+            self.model_id.clone(),
+        );
         self.component
             .invoke_streaming(
                 "POST",
@@ -244,7 +251,12 @@ impl WasmBackend {
     fn voice_headers(&self) -> Vec<(String, String)> {
         let mut headers = self.component.request_headers();
         headers.push(("content-type".to_string(), "application/json".to_string()));
-        headers.push(("x-tts-model".to_string(), self.model_id.clone()));
+        backend_headers::push(
+            &mut headers,
+            Feature::TextToSpeech,
+            "model",
+            self.model_id.clone(),
+        );
         headers
     }
 
@@ -313,23 +325,24 @@ impl Synthesize for WasmBackend {
     }
 
     /// Run one consumer realtime session: the backend's `ws-server.handle`,
-    /// with the same `x-tts-*` headers a batch call gets plus the model id.
+    /// with the same `x-voice-*` headers a batch call gets plus the model id.
     ///
     /// # Errors
     /// Returns an error if the backend is not realtime-capable, instantiation
     /// fails, or the guest's handler returns a `ws-error`.
     #[cfg(feature = "wasm-backends")]
     async fn realtime_session(&self, transport: ws_host::ConsumerStreamTransport) -> Result<()> {
-        let mut headers: Vec<(String, Vec<u8>)> = self
-            .component
-            .request_headers()
+        let mut pairs = self.component.request_headers();
+        backend_headers::push(
+            &mut pairs,
+            Feature::TextToSpeech,
+            "model",
+            self.model_id.clone(),
+        );
+        let headers = pairs
             .into_iter()
             .map(|(k, v)| (k, v.into_bytes()))
             .collect();
-        headers.push((
-            "x-tts-model".to_string(),
-            self.model_id.clone().into_bytes(),
-        ));
         self.component.realtime_session(headers, transport).await
     }
 }

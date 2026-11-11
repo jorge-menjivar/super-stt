@@ -38,7 +38,7 @@ pub const CLIP_SAMPLE_RATE: u32 = 24_000;
 pub const CLIP_CHANNELS: u16 = 1;
 
 /// Wire name of the sample format a registered clip is delivered in, matching
-/// the `x-tts-format` vocabulary of the synthesis response.
+/// the `x-voice-format` vocabulary of the synthesis response.
 pub const CLIP_FORMAT: &str = "s16le";
 
 /// Longest clip the library will store, in seconds.
