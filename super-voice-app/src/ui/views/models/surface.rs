@@ -251,6 +251,30 @@ pub(super) fn card_divider<'a>() -> Element<'a, Message> {
     widget::divider::horizontal::default().into()
 }
 
+/// A Library card's facts row: the backend's models taking the width, its
+/// capability chips opposite. Installed and Browse cards share it, so a
+/// backend reads the same before and after it is installed. `None` when there
+/// is neither, so the card skips the row and the divider above it.
+pub(super) fn card_facts<'a>(
+    models: Option<Element<'a, Message>>,
+    chips: Option<Element<'a, Message>>,
+) -> Option<Element<'a, Message>> {
+    if models.is_none() && chips.is_none() {
+        return None;
+    }
+    let mut facts = widget::row::with_capacity(2)
+        .spacing(cosmic::theme::spacing().space_s)
+        .align_y(cosmic::iced::Alignment::Center)
+        .width(Length::Fill);
+    if let Some(models) = models {
+        facts = facts.push(widget::container(models).width(Length::Fill));
+    }
+    if let Some(chips) = chips {
+        facts = facts.push(chips);
+    }
+    Some(facts.into())
+}
+
 /// The de-emphasized color for a card's secondary line (the repo id): the
 /// container's text color dimmed so the technical `source` reads as a caption
 /// rather than competing with the backend name.
@@ -262,38 +286,6 @@ pub(super) fn muted_text_color() -> cosmic::iced::Color {
         .into();
     c.a = 0.65;
     c
-}
-
-/// One caption per kind of model a backend serves, each naming the kind and
-/// then its models joined by " · " (e.g.
-/// `"Speech to text: whisper-large-v3 · whisper-medium"`). De-emphasized so it
-/// reads as a secondary detail under the card's description. `None` when the
-/// backend serves no models.
-///
-/// Browse describes a backend the user has not installed, so which kinds it
-/// ships is exactly what decides whether they want it.
-pub(super) fn models_line<'a>(groups: &[super::chips::RoleGroup]) -> Option<Element<'a, Message>> {
-    if groups.is_empty() {
-        return None;
-    }
-    let muted = muted_text_color();
-    let lines: Vec<Element<'a, Message>> = groups
-        .iter()
-        .map(|group| {
-            text::caption(format!(
-                "{}: {}",
-                group.label,
-                group.names.join(" \u{00b7} ")
-            ))
-            .class(cosmic::theme::Text::Color(muted))
-            .into()
-        })
-        .collect();
-    Some(
-        cosmic::iced::widget::column(lines)
-            .spacing(cosmic::theme::spacing().space_xxxs)
-            .into(),
-    )
 }
 
 /// A small icon button that opens a backend's source repository in the

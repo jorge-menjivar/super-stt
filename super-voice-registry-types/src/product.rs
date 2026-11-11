@@ -428,8 +428,9 @@ fn default_voice_kinds() -> Vec<VoiceKind> {
 }
 
 /// The per-model fields Super Voice's index carries beside `name` and
-/// `supported_devices`: the model's role, as its manifest spells it, so a
-/// client can tell what a backend's models are for before installing it.
+/// `supported_devices`: the model's role, as its manifest spells it, and
+/// whether it is handed the user's dictation context, so a client can tell what
+/// a backend's models are for, and which take a context, before installing it.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceIndexModel {
@@ -437,6 +438,14 @@ pub struct VoiceIndexModel {
     /// before the field existed has none, and its models transcribe.
     #[serde(default = "default_role")]
     pub role: String,
+    /// Whether the daemon hands this model the user's dictation context: a
+    /// speech-to-text model of a backend declaring `[capabilities] context =
+    /// true`. Said per model because only speech to text's requests carry a
+    /// context, so a backend serving both features takes it for some models
+    /// and not others. An index published before the field existed has none,
+    /// and is read as `false`.
+    #[serde(default)]
+    pub accepts_context: bool,
 }
 
 /// The index's role when an entry has none: [`ModelRole`]'s default, spelled,
@@ -630,9 +639,14 @@ impl Product for Voice {
         Ok(())
     }
 
-    fn index_model(model: &ModelEntry<VoiceModel>) -> VoiceIndexModel {
+    fn index_model(
+        capabilities: &VoiceCapabilities,
+        model: &ModelEntry<VoiceModel>,
+    ) -> VoiceIndexModel {
+        let role = model.product.role;
         VoiceIndexModel {
-            role: model.product.role.to_string(),
+            role: role.to_string(),
+            accepts_context: capabilities.context && role != ModelRole::Synthesis,
         }
     }
 }

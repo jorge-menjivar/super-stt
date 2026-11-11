@@ -175,7 +175,13 @@ pub(super) fn stage_chips(
         user_url: backend_has_user_url(backend),
     });
     let compute = stage_device_support(app.device_offers.backend(stage, &backend.source), backend);
-    let caps = capability_chips(compute.gpu, compute.cpu, egress, true);
+    let caps = capability_chips(
+        compute.gpu,
+        compute.cpu,
+        egress,
+        stage_hears_context(stage, backend),
+        true,
+    );
     let count = app.stage_catalog.models(stage, &backend.source).len();
     if caps.is_none() && count == 0 {
         return None;
@@ -190,6 +196,25 @@ pub(super) fn stage_chips(
     // Wraps rather than squeezes: in a picker row beside its Select button a
     // chip that runs out of width would break its label mid-chip.
     Some(chips.wrap().vertical_spacing(spacing.space_xxs).into())
+}
+
+/// Whether a backend in the catalog takes the user's dictation context, which
+/// earns its card the Contexts chip. The index says it on each speech-to-text
+/// model of a backend that declared it. An index or a daemon from before the
+/// field says nothing, and reads as no.
+pub(super) fn entry_accepts_context(entry: &super_voice_shared::registry::RegistryBackend) -> bool {
+    entry.models.iter().any(|m| m.product.accepts_context)
+}
+
+/// Whether a stage's backend is handed the user's dictation context, which
+/// earns it the Contexts chip. The daemon sends a context only with speech to
+/// text's requests, so a backend that declared it can use one still hears
+/// nothing of it when synthesizing.
+fn stage_hears_context(
+    stage: crate::state::Stage,
+    backend: &crate::daemon::backends::BackendInfo,
+) -> bool {
+    backend.accepts_context && stage != crate::state::Stage::Synthesis
 }
 
 /// "1 model", "9 models", "1 post-processor": what a stage calls its models.
@@ -602,7 +627,8 @@ pub(super) fn cloud_chip(
 }
 
 /// The capability-chip row for a backend: GPU / CPU advertise local compute,
-/// Cloud (when `online` is `Some`) flags an online backend. Returns
+/// Cloud (when `online` is `Some`) flags an online backend, and Contexts
+/// (when `context`) one that is handed the user's dictation context. Returns
 /// `None` when there's nothing to advertise, so callers skip the row rather
 /// than render an empty band.
 ///
@@ -613,12 +639,15 @@ pub(super) fn cloud_chip(
 /// the same time would paint half-behind it). With the menu closed — and on
 /// the active-backend / Browse cards, which have no overflow menu — tooltips
 /// show as normal.
-// reason: "supports_gpu" / "supports_cpu" are the clearest names
-#[allow(clippy::similar_names)]
+// reason: "supports_gpu" / "supports_cpu" are the clearest names, and each
+// bool says whether one chip, or the tooltips, show; a struct would only
+// rename them at every call
+#[allow(clippy::similar_names, clippy::fn_params_excessive_bools)]
 pub(super) fn capability_chips(
     supports_gpu: bool,
     supports_cpu: bool,
     online: Option<CloudEgress<'_>>,
+    context: bool,
     tooltips: bool,
 ) -> Option<Element<'static, Message>> {
     use super::surface::rounded_tooltip;
@@ -655,6 +684,18 @@ pub(super) fn capability_chips(
             cloud_chip(neutral, egress)
         } else {
             capability_chip(icons::CLOUD, crate::fl!("cloud"), neutral)
+        });
+    }
+    if context {
+        let chip = capability_chip(icons::CHAT_TEXT, crate::fl!("contexts"), neutral);
+        chips.push(if tooltips {
+            rounded_tooltip(
+                chip,
+                text::body(crate::fl!("uses-your-dictation-context")),
+                widget::tooltip::Position::Top,
+            )
+        } else {
+            chip
         });
     }
     if chips.is_empty() {
@@ -887,6 +928,27 @@ mod capability_tests {
         }
     }
 
+    /// The Contexts chip shows on speech to text's stages for a backend that
+    /// declared it can use a context, and on no stage for one that did not.
+    #[test]
+    fn the_contexts_chip_follows_the_declaration() {
+        use crate::state::Stage;
+        let mut b = backend_with_devices(&[&["cpu"]]);
+        assert!(!stage_hears_context(Stage::Transcription, &b));
+        b.accepts_context = true;
+        assert!(stage_hears_context(Stage::Transcription, &b));
+        assert!(stage_hears_context(Stage::PostProcessing, &b));
+    }
+
+    /// Text to speech is never handed a context, so its stage shows no chip
+    /// even for a backend that serves both features and declared one.
+    #[test]
+    fn synthesis_shows_no_contexts_chip() {
+        let mut b = backend_with_devices(&[&["cpu"]]);
+        b.accepts_context = true;
+        assert!(!stage_hears_context(crate::state::Stage::Synthesis, &b));
+    }
+
     /// Both GPU backends (`cuda`, `metal`) surface the GPU chip, including
     /// when paired with `cpu` in the same model's device list.
     #[test]
@@ -1075,7 +1137,7 @@ mod update_offer_tests {
     //! daemon's — these fix what the card does with it, including the failure
     //! this started from: the flag rides on the registry catalog, so a chip can
     //! survive the update it describes and then do nothing when clicked.
-    use super::update_offer;
+    use super::{entry_accepts_context, update_offer};
     use super_voice_shared::registry::RegistryBackend;
 
     fn entry(installed: Option<&str>, latest: &str) -> RegistryBackend {
@@ -1112,6 +1174,29 @@ mod update_offer_tests {
             update_available,
             index_stale: None,
         }
+    }
+
+    /// A catalog entry gets the Contexts chip when the index marks any of its
+    /// models as taking a context, and not when none is, which is also how an
+    /// index from before the field reads.
+    #[test]
+    fn a_catalog_entry_takes_a_context_when_a_model_does() {
+        let model =
+            |role: &str, accepts_context: bool| super_voice_shared::registry::RegistryModel {
+                name: "m".to_string(),
+                provider: String::new(),
+                supported_devices: vec!["cpu".to_string()],
+                product: super_voice_registry_types::index::VoiceIndexModel {
+                    role: role.to_string(),
+                    accepts_context,
+                },
+            };
+        let mut e = entry(None, "1.0.0");
+        assert!(!entry_accepts_context(&e));
+        e.models = vec![model("synthesis", false), model("post_processor", false)];
+        assert!(!entry_accepts_context(&e));
+        e.models.push(model("transcription", true));
+        assert!(entry_accepts_context(&e));
     }
 
     #[test]

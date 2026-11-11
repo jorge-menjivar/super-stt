@@ -287,6 +287,7 @@ update-super-voice = Update Super Voice
 updates = Updates
 use = Use
 use-none = Use none
+uses-your-dictation-context = Uses your dictation context
 verifying = Verifying
 verifying-progress = Verifying…
 version = Version

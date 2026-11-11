@@ -287,6 +287,7 @@ update-super-voice = Mettre à jour Super Voice
 updates = Mises à jour
 use = Utiliser
 use-none = N’utiliser aucun contexte
+uses-your-dictation-context = Utilise votre contexte de dictée
 verifying = Vérification
 verifying-progress = Vérification…
 version = Version

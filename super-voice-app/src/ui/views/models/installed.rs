@@ -16,7 +16,7 @@ use super::chips::{
     backend_supports_gpu, capability_chips, models_inventory, role_groups, update_chip,
     update_offer, update_progress_chip,
 };
-use super::surface::{card_divider, card_surface, card_title_block, repo_button};
+use super::surface::{card_divider, card_facts, card_surface, card_title_block, repo_button};
 
 /// The Library's Installed tab, as its filter toolbar and its cards: every
 /// backend the daemon discovered on disk, one card each. The active backend is
@@ -208,6 +208,7 @@ pub(super) fn installed_card<'a>(
         backend_supports_gpu(backend),
         backend_supports_cpu(backend),
         egress,
+        backend.accepts_context,
         // Suppress chip tooltips while this card's overflow menu is open, so the
         // menu paints cleanly on top instead of a tooltip showing half-behind it.
         !menu_open,
@@ -216,19 +217,8 @@ pub(super) fn installed_card<'a>(
     let mut card = widget::column::with_capacity(3)
         .spacing(spacing.space_s)
         .push(header);
-    if inventory.is_some() || caps.is_some() {
-        card = card.push(card_divider());
-        let mut meta = widget::row::with_capacity(2)
-            .spacing(spacing.space_s)
-            .align_y(Alignment::Center)
-            .width(Length::Fill);
-        if let Some(inv) = inventory {
-            meta = meta.push(widget::container(inv).width(Length::Fill));
-        }
-        if let Some(c) = caps {
-            meta = meta.push(c);
-        }
-        card = card.push(meta);
+    if let Some(facts) = card_facts(inventory, caps) {
+        card = card.push(card_divider()).push(facts);
     }
     let surface = card_surface(card, false);
 
