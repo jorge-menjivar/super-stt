@@ -509,7 +509,7 @@
             }
           },
           "400": {
-            "description": "The value was empty (`invalid_request`), or the value is one the option will not take (`invalid_value`): not among its declared `choices`, longer than 4000 characters, or carrying a control character. An option value is injected as an `x-stt-option-<name>` request header, which can hold neither a line break nor an unbounded number of bytes, so a value that cannot be delivered is refused rather than stored. Use `DELETE` to clear an override.",
+            "description": "The value was empty (`invalid_request`), or the value is one the option will not take (`invalid_value`): not among its declared `choices`, longer than 4000 characters, or carrying a control character. An option value is injected as an `x-voice-option-<name>` request header, which can hold neither a line break nor an unbounded number of bytes, so a value that cannot be delivered is refused rather than stored. Use `DELETE` to clear an override.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9586,7 +9586,7 @@
           },
           "name": {
             "type": "string",
-            "description": "`snake_case` identifier (the daemon config key; the backend reads it as\n`x-stt-option-<name>`)."
+            "description": "`snake_case` identifier (the daemon config key; the backend reads it as\n`x-voice-option-<name>`)."
           },
           "required": {
             "type": "boolean"
@@ -9727,7 +9727,7 @@
           },
           "name": {
             "type": "string",
-            "description": "`snake_case` identifier; the backend reads it as `x-stt-secret-<name>`."
+            "description": "`snake_case` identifier; the backend reads it as `x-voice-secret-<name>`."
           },
           "required": {
             "type": "boolean"
