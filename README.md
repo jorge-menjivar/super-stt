@@ -45,16 +45,30 @@ Under the hood it's two things:
 
 ## ⌨️ Using it
 
+Open **Super Voice** from your app launcher. Everything starts there:
+
+1. **Models:** pick a model for speech to text and one for text to speech, or install one from **Library → Browse**.
+2. **Speech to text → Recording:** press **Test Recording**, speak, and the transcription appears in the app.
+3. **Text to speech → Speech:** type something and press **Speak** to hear it.
+4. **Text to speech → Voices:** record or import a sample to clone your own voice.
+5. **Speech to text → Contexts:** say what you're dictating and list the words it should get right, like names and product terms.
+
+### Dictate anywhere with a shortcut
+
+Press **Super+Space**, speak, and your words are typed into whatever app is focused: your editor, browser, chat or terminal. The installer binds it for you on COSMIC. On other desktops, add a custom shortcut for `voice record --write`.
+
+1. The shortcut asks the daemon to start transcribing from your mic.
+2. You speak, and the daemon transcribes your audio.
+3. When you stop, on silence or by pressing the shortcut again, it types the transcription into the focused app.
+
+### From the command line
+
+The shortcut runs the `voice` command, which you can also use directly:
+
 ```bash
-voice record --write # Record and transcribes. Types the result after silence is detected or you run the command again.
-voice speak "Hello" # Speak text with the loaded speech model. `voice speak stop` stops it.
+voice record --write   # Record and transcribe. Types the result after silence, or when you run it again.
+voice speak "Hello"    # Speak text with the loaded model. `voice speak stop` stops it.
 ```
-
-Bind `voice record --write` to a key combo. Super+Space is the convention (the COSMIC installer does this for you; on other desktops add a custom shortcut for `voice record --write`). When you trigger it:
-
-1. `voice` asks the running daemon to start transcribing from your mic.
-2. You speak; the daemon transcribes your audio.
-3. When you stop (on silence or a second trigger), it types the transcription into the focused app.
 
 Manage the daemon with the usual systemd controls:
 
