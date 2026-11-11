@@ -155,6 +155,7 @@ impl AppModel {
             write_method_test_countdown: None,
             notification_method:
                 super_voice_shared::models::notification_method::NotificationMethod::default(),
+            idle_unload_secs: 0,
             volume: 100,
             last_committed_volume: 100,
 

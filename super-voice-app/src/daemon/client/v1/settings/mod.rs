@@ -10,6 +10,7 @@
 //! [`super::models`], [`super::update`].
 
 pub(crate) mod audio_theme;
+pub(crate) mod idle_unload;
 pub(crate) mod language;
 pub(crate) mod notification_method;
 pub(crate) mod preview_typing;

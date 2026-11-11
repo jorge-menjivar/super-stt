@@ -203,6 +203,25 @@ impl FromDaemon for UpdateCheckEnabledState {
     }
 }
 
+/// How long a model may sit unused before it is unloaded.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct IdleUnloadState {
+    #[schema(example = "success")]
+    status: &'static str,
+    /// Seconds; `0` keeps models loaded.
+    #[schema(example = 300)]
+    idle_unload_after_secs: u64,
+}
+
+impl FromDaemon for IdleUnloadState {
+    fn from_daemon(resp: DaemonResponse) -> Self {
+        Self {
+            status: "success",
+            idle_unload_after_secs: resp.idle_unload_after_secs.unwrap_or(0),
+        }
+    }
+}
+
 /// Which release channel updates come from.
 #[derive(Serialize, ToSchema)]
 pub(crate) struct UpdateBetaOptinState {

@@ -285,6 +285,7 @@ impl AppModel {
             "post_processor" => Some(crate::core::app::handlers::stage::load_block(
                 BlockStage::PostProcessing,
             )),
+            "idle_unload" => Some(crate::core::app::handlers::tasks::load_idle_unload()),
             // A context was added, edited, deleted, or put in force.
             // One topic covers the whole family because the answer to
             // any of them is the same: re-read the list. The open

@@ -123,6 +123,9 @@ pub struct SuperTTSDaemon {
     // Read in `instantiate_backend`, which every load path funnels through.
     // See `super_engine_daemon::load_gate`.
     pub loading: Arc<LoadGate>,
+    // The synthesis model's last use, for unloading it when idle. See
+    // `model_management::idle`.
+    pub idle: Arc<crate::idle_unload::IdleTracker>,
     // The secrets file: the session tokens the daemon has issued and every
     // backend's API keys. One per process, opened at startup; clones share it.
     pub secrets: Secrets,
@@ -181,6 +184,7 @@ pub(crate) async fn test_daemon() -> SuperTTSDaemon {
             },
         )),
         loading: Arc::new(LoadGate::default()),
+        idle: Arc::default(),
         // In memory: no daemon test reads or writes the user's secrets file.
         secrets: Secrets::in_memory(),
     }

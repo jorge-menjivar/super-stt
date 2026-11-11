@@ -67,6 +67,8 @@ impl TryFrom<DaemonRequest> for Command {
             "get_update_beta_optin" => Ok(Command::GetUpdateBetaOptin),
             "set_volume" => cmd_set_volume(&request),
             "get_volume" => Ok(Command::GetVolume),
+            "set_idle_unload" => cmd_set_idle_unload(&request),
+            "get_idle_unload" => Ok(Command::GetIdleUnload),
             "set_primary_language" => cmd_set_primary_language(&request),
             "get_primary_language" => Ok(Command::GetPrimaryLanguage),
             "clear_primary_language" => Ok(Command::ClearPrimaryLanguage),
@@ -415,6 +417,16 @@ fn cmd_set_volume(request: &DaemonRequest) -> Result<Command, String> {
         return Err("Volume must be between 0 and 100".to_string());
     }
     Ok(Command::SetVolume { volume })
+}
+
+fn cmd_set_idle_unload(request: &DaemonRequest) -> Result<Command, String> {
+    let after_secs = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("after_secs"))
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("Missing after_secs for set_idle_unload command")?;
+    Ok(Command::SetIdleUnload { after_secs })
 }
 
 fn cmd_set_backend_option(request: &DaemonRequest) -> Result<Command, String> {

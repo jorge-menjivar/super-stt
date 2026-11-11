@@ -39,6 +39,7 @@ pub use v1::pipeline::{StageState, get_stage_view};
 pub use v1::settings::audio_theme::{
     get_current_audio_theme, load_audio_themes, set_and_test_audio_theme, set_audio_theme,
 };
+pub use v1::settings::idle_unload::{get_idle_unload, set_idle_unload};
 pub use v1::settings::notification_method::{get_notification_method, set_notification_method};
 pub use v1::settings::preview_typing::{get_preview_typing, set_preview_typing};
 pub use v1::settings::recording_stop_mode::{get_recording_stop_mode, set_recording_stop_mode};

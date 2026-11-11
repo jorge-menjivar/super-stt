@@ -608,3 +608,17 @@ registry-phase-verifying = verifying
 registry-phase-extracting = extracting
 registry-phase-installing = installing
 registry-phase-finishing = finishing
+
+# Idle unload
+memory = Memory
+unload-idle-models = Unload Idle Models
+unload-idle-models-description = Free a model's memory when it has not been used for a while. It loads again on the next recording or speech, which waits for it.
+unload-after = Unload After
+idle-minutes = { $minutes ->
+        [one] { $minutes } minute
+       *[other] { $minutes } minutes
+    }
+idle-seconds = { $seconds ->
+        [one] { $seconds } second
+       *[other] { $seconds } seconds
+    }

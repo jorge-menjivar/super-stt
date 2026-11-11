@@ -161,6 +161,11 @@ when a capture is already in progress.
 | 429  | `rate_limited`                     | Per-client rate limit hit; back off and retry                           |
 | 503  | `connection_rejected`              | Server refused the connection                                           |
 
+When the daemon unloads idle models
+([`/settings/idle_unload`](./settings/idle_unload.md)), a request that finds the selected model unloaded loads it first
+and starts once it has: `409 model_not_loaded` then means no model is selected,
+or the load failed.
+
 A failure is also surfaced to the user according to the
 [`/settings/notification_method`](./settings/notification_method.md) setting. With the default,
 `auto`, the daemon sends a desktop notification; typing a short fixed notice

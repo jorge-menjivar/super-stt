@@ -204,6 +204,7 @@ path needs the `settings` scope:
 | `/v1/settings/audio_theme` | `GET`, `POST` | `settings` | [settings/audio_theme.md](./endpoints/v1/settings/audio_theme.md) |
 | `/v1/settings/audio_theme/list` | `GET` | `settings` | [settings/audio_theme/list.md](./endpoints/v1/settings/audio_theme/list.md) |
 | `/v1/settings/audio_theme/test` | `POST` | `settings` | [settings/audio_theme/test.md](./endpoints/v1/settings/audio_theme/test.md) |
+| `/v1/settings/idle_unload` | `GET`, `POST` | `settings` | [settings/idle_unload.md](./endpoints/v1/settings/idle_unload.md) |
 | `/v1/settings/language` | `GET`, `POST`, `DELETE` | `settings` | [settings/language.md](./endpoints/v1/settings/language.md) |
 | `/v1/settings/language/list` | `GET` | `settings` | [settings/language/list.md](./endpoints/v1/settings/language/list.md) |
 | `/v1/settings/notification_method` | `GET`, `POST` | `settings` | [settings/notification_method.md](./endpoints/v1/settings/notification_method.md) |

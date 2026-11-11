@@ -39,6 +39,7 @@ pub enum Message {
     RecordingStopMode(RecordingStopModeMessage),
     WriteMethod(WriteMethodMessage),
     NotificationMethod(NotificationMethodMessage),
+    IdleUnload(IdleUnloadMessage),
     Backend(BackendMessage),
     /// The Contexts page: the dictation contexts, and which one is in force.
     Contexts(ContextsMessage),
@@ -621,6 +622,14 @@ pub enum NotificationMethodMessage {
     Error(String),
 }
 
+/// Idle-unload setting: seconds an unused model stays loaded, `0` for always.
+#[derive(Debug, Clone)]
+pub enum IdleUnloadMessage {
+    Changed(u64),
+    Loaded(u64),
+    Error(String),
+}
+
 /// Backend catalog + per-backend secret/option configuration.
 /// Secrets are managed via the daemon's secrets endpoints; options go to the
 /// daemon config via the client.
@@ -943,6 +952,7 @@ message_from! {
     RecordingStopMode => RecordingStopModeMessage,
     WriteMethod => WriteMethodMessage,
     NotificationMethod => NotificationMethodMessage,
+    IdleUnload => IdleUnloadMessage,
     Backend => BackendMessage,
     Contexts => ContextsMessage,
     Language => LanguageMessage,

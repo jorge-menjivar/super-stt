@@ -99,7 +99,7 @@ graph TD
     R_Settings -.-> E36["GET/POST /audio_theme<br/>GET /audio_theme/list<br/>POST /audio_theme/test"]
     R_Settings -.-> E37["GET/POST/DELETE /language<br/>GET /language/list"]
     R_Settings -.-> E38["GET/POST /write_method<br/>POST /write_method/test"]
-    R_Settings -.-> E39["GET/POST /notification_method"]
+    R_Settings -.-> E39["GET/POST /notification_method<br/>GET/POST /idle_unload"]
     R_Settings -.-> E40["GET/POST /preview_typing<br/>GET/POST /recording_stop_mode"]
     R_Settings -.-> E41["GET/POST /update_check_enabled<br/>GET/POST /update_beta_optin"]
 

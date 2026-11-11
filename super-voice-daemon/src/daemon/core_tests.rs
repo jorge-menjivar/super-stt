@@ -3076,3 +3076,64 @@ fn a_take_cue_theme_follows_the_request_override() {
         "the fallback for `audio_cues: true` must have cues to play"
     );
 }
+
+/// An idle unload frees the model and keeps it selected, so the next request
+/// loads it again: an explicit unload switches the stage off instead.
+#[tokio::test]
+async fn idle_unload_frees_the_model_and_keeps_it_selected() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/openai";
+    seed_loaded_model(&daemon, "whisper-1", source).await;
+    daemon
+        .config
+        .write()
+        .await
+        .update_preferred_model("whisper-1".into(), source.into());
+
+    daemon.idle.rewind(Duration::from_secs(60));
+    assert!(daemon.unload_if_idle(Duration::from_secs(30)).await);
+
+    assert!(daemon.model.read().await.is_none());
+    assert!(daemon.config.read().await.transcription.is_active());
+}
+
+/// A model used within the idle time stays, and so does one a recording is
+/// using however long the recording runs: the idle time starts when it ends.
+#[tokio::test]
+async fn idle_unload_leaves_a_model_in_use() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    seed_loaded_model(&daemon, "whisper-1", "github.com/super-stt/openai").await;
+
+    daemon.idle.rewind(Duration::from_secs(10));
+    assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
+
+    daemon.idle.rewind(Duration::from_secs(60));
+    *daemon.busy.write().await = true;
+    assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
+    *daemon.busy.write().await = false;
+    assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
+
+    assert!(daemon.model.read().await.is_some());
+}
+
+/// Setting an idle time starts it counting from the change: a model already
+/// unused for longer is not unloaded the moment the setting is turned on.
+#[tokio::test]
+async fn set_idle_unload_counts_the_idle_time_from_the_change() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    seed_loaded_model(&daemon, "whisper-1", "github.com/super-stt/openai").await;
+    daemon.idle.rewind(Duration::from_secs(600));
+
+    let mut set_request = make_request("set_idle_unload");
+    set_request.data = Some(serde_json::json!({ "after_secs": 300 }));
+    let set_response = daemon.handle_command(set_request).await;
+    assert_eq!(set_response.status, "success");
+
+    let get_response = daemon.handle_command(make_request("get_idle_unload")).await;
+    assert_eq!(get_response.idle_unload_after_secs, Some(300));
+    let after = daemon.config.read().await.idle_unload.after().unwrap();
+    assert!(!daemon.unload_if_idle(after).await);
+}

@@ -177,6 +177,12 @@ pub enum Command {
         volume: u8,
     },
     GetVolume,
+    /// Seconds a model may sit unused before it is unloaded; `0` keeps models
+    /// loaded.
+    SetIdleUnload {
+        after_secs: u64,
+    },
+    GetIdleUnload,
     SetPrimaryLanguage {
         language: String,
     },

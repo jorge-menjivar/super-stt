@@ -166,6 +166,10 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub update_beta_optin: Option<String>,
 
+    // Seconds a model may sit unused before it is unloaded; 0 keeps it loaded
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_unload_after_secs: Option<u64>,
+
     // Streaming preview text (intermediate transcription during recording)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_text: Option<String>,
@@ -500,6 +504,12 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_notification_method(mut self, method: String) -> Self {
         self.notification_method = Some(method);
+        self
+    }
+
+    #[must_use]
+    pub fn with_idle_unload_after_secs(mut self, after_secs: u64) -> Self {
+        self.idle_unload_after_secs = Some(after_secs);
         self
     }
 

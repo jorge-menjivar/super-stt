@@ -8,6 +8,7 @@
 //! backends provision their own files when spawned.
 
 mod discovery;
+mod idle;
 mod instantiate;
 mod lifecycle;
 mod switch;

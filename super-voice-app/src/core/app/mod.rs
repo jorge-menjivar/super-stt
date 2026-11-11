@@ -175,6 +175,9 @@ pub struct AppModel {
     // Notification method
     pub notification_method: super_voice_shared::models::notification_method::NotificationMethod,
 
+    /// Seconds an unused model stays loaded; `0` keeps models loaded.
+    pub idle_unload_secs: u64,
+
     // Master volume (0-100)
     pub volume: u8,
     /// Last value successfully committed to (or loaded from) the daemon. The
