@@ -29,25 +29,13 @@
 # consent on the desktop.
 set -euo pipefail
 
-# File name, then scene, in the sidebar's order, a feature's tabs in theirs.
-# Keep in step with the README's captions.
+# File name, then scene, in the sidebar's order: the shots the README and the
+# app's metainfo show. Keep in step with both.
 SHOTS=(
-    "app-1 models"
-    "app-2 models/select-backend"
-    "app-3 models/model-menu"
-    "app-4 models/device-menu"
-    "app-5 models/language"
-    "app-6 library"
-    "app-7 library/browse"
-    "app-8 recording"
-    "app-9 input-simulation"
-    "app-10 contexts"
-    "app-11 contexts/edit"
-    "app-12 speech"
-    "app-13 voices"
-    "app-14 customization"
-    "app-15 connection"
-    "app-16 updates"
+    "models models/device-menu"
+    "library library/browse"
+    "contexts contexts/edit"
+    "voices voices"
 )
 
 # The nested output, and where the window lands on it. The window size is
