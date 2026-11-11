@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-11T03:54:24Z",
+  "generated_at": "2026-11-11T05:06:30Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -268,8 +268,8 @@
       "id": "qwen",
       "backend_id": "app.super-voice.qwen-asr",
       "source": "github.com/super-libre/super-stt-qwen",
-      "version": "0.1.1",
-      "tag": "v0.1.1",
+      "version": "0.1.2",
+      "tag": "v0.1.2",
       "name": "Qwen ASR",
       "description": "Local Qwen3-ASR speech-to-text with streamed previews.",
       "license": "GPL-3.0-only",
@@ -308,25 +308,25 @@
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 15501580,
-            "sha256": "7a0a63b0d41bc89c7ceee8bbae9fae45c713169b9a5dcaedb40ca380c5dbbe44"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-x86_64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 15503974,
+            "sha256": "6c54d350035fce7dea4831f8d6192d34de13db68898de78fefa776f1694133dd"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 12,
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-cuda12.tar.gz",
-            "size": 56559786,
-            "sha256": "e390adc9c7131b83aaf604624104520baeeb0540c13033e56fe3656f710b8e22"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-x86_64-unknown-linux-gnu-cuda12.tar.gz",
+            "size": 56569953,
+            "sha256": "5afefbc3e251bc10b52e06347542bde25d2c3a2341676e74a8b6afda0b1c52e9"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cuda",
             "cuda_major": 13,
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz",
-            "size": 56566872,
-            "sha256": "26d34b412bad2f1b31b075263558694134b932d354f948ecffbfef8770cc066f"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz",
+            "size": 56567082,
+            "sha256": "96f2953a9abcc5f0454c7bba5a396aa11759674cff9b28e987d49293dd22a9f2"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -346,67 +346,67 @@
               "gfx1200",
               "gfx1201"
             ],
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-rocm.tar.gz",
-            "size": 64782520,
-            "sha256": "0340916eeb2aec61dead7db9abc722542e35104632e7597b38775f1883f4ef61"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-x86_64-unknown-linux-gnu-rocm.tar.gz",
+            "size": 64799189,
+            "sha256": "3f0eaf2f6248b7843d61d6657a388e3bed5115cf2c6fd826f6d2f90cfa31bd69"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "vulkan",
             "vulkan_api": "1.2",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-vulkan.tar.gz",
-            "size": 33272847,
-            "sha256": "83e07f4ba02019cd5e5e58f5e9f292f3ecb4ebbf773a020ee3b04492a276f5c6"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-x86_64-unknown-linux-gnu-vulkan.tar.gz",
+            "size": 33296879,
+            "sha256": "c5a72c4abe97e932482743662cf8e702ae44198abe07e635ee1c48ee442b35aa"
           },
           {
             "target": "aarch64-unknown-linux-gnu",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-aarch64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 15503973,
-            "sha256": "047110cdd7e1ac4d4dc429eaaaed98d6e40c54243e7c4dac2e936c42bff6c2a1"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-aarch64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 15518258,
+            "sha256": "a35fcd9a9c7bbfe816a25d2843578dfe430649e915b12e022b2299515b52afe5"
           },
           {
             "target": "aarch64-unknown-linux-gnu",
             "accel": "vulkan",
             "vulkan_api": "1.2",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-aarch64-unknown-linux-gnu-vulkan.tar.gz",
-            "size": 37651333,
-            "sha256": "14c943ca15b87cbebbe7e1cae3368f5bf7b5496d91c9e225a7a4fe4be2333c2f"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-aarch64-unknown-linux-gnu-vulkan.tar.gz",
+            "size": 37648804,
+            "sha256": "b677e9a73d3bd033bedd4613c4c8dfb7fd37d7762b7c0f0934d224c12b50b7e2"
           },
           {
             "target": "aarch64-apple-darwin",
             "accel": "metal",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-aarch64-apple-darwin-metal.tar.gz",
-            "size": 27977959,
-            "sha256": "abf27c787c41eb006a43fcbe15c63be21a2f61d7ea2f2de53da05f614379c0f6"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-aarch64-apple-darwin-metal.tar.gz",
+            "size": 27993263,
+            "sha256": "626a3d13884551e2723c29ed4e247275d45df9c750302fdda30634b2c0bbd378"
           },
           {
             "target": "aarch64-apple-darwin",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-aarch64-apple-darwin-cpu.tar.gz",
-            "size": 13413090,
-            "sha256": "83ab252d4b52c59eefc09d21b16620b1f26ff7dade596cea081227cac8e0d6b0"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-aarch64-apple-darwin-cpu.tar.gz",
+            "size": 13344080,
+            "sha256": "84d3b5d1726c44e8a91beff680903140732b1c93d36d762448f0761db8d32d96"
           },
           {
             "target": "x86_64-apple-darwin",
             "accel": "metal",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-apple-darwin-metal.tar.gz",
-            "size": 29053045,
-            "sha256": "8c732033334e946852825b267600e15aeea0062ff7a7c1e85e6889decc7f0cfa"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-x86_64-apple-darwin-metal.tar.gz",
+            "size": 29064074,
+            "sha256": "76868a817db5ab21bf991413ac834316225c4992de6b8b9b1983c755c5eb4f98"
           },
           {
             "target": "x86_64-apple-darwin",
             "accel": "cpu",
-            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-apple-darwin-cpu.tar.gz",
-            "size": 14406725,
-            "sha256": "62ff6f7ddfd8afbc28e943ec27d7b2d2f67a966f0867bf1fda9958d0d1548713"
+            "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/qwen3-asr-x86_64-apple-darwin-cpu.tar.gz",
+            "size": 14403144,
+            "sha256": "7c3d96ff012c3e5c680f2ebcfa01a2d9e7502932deff91543ce7b7095a2d044d"
           }
         ]
       },
       "manifest": {
-        "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.1/backend.toml",
-        "size": 9535,
-        "sha256": "4548d451b9f04b98d2f47778250d3fe08b6ca9792b8593992e0999b27245c3a5"
+        "url": "https://github.com/super-libre/super-voice-qwen-asr/releases/download/v0.1.2/backend.toml",
+        "size": 9854,
+        "sha256": "e9565e4c1911193429e0a290e6fea24aa655b3db90b8a3ae55336a2981ba314d"
       }
     },
     {
