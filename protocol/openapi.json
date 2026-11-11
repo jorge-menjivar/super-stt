@@ -10109,8 +10109,12 @@
             "allOf": [
               {
                 "type": "object",
-                "description": "The per-model fields Super Voice's index carries beside `name` and\n`supported_devices`: the model's role, as its manifest spells it, so a\nclient can tell what a backend's models are for before installing it.",
+                "description": "The per-model fields Super Voice's index carries beside `name` and\n`supported_devices`: the model's role, as its manifest spells it, and\nwhether it is handed the user's dictation context, so a client can tell what\na backend's models are for, and which take a context, before installing it.",
                 "properties": {
+                  "accepts_context": {
+                    "type": "boolean",
+                    "description": "Whether the daemon hands this model the user's dictation context: a\nspeech-to-text model of a backend declaring `[capabilities] context =\ntrue`. Said per model because only speech to text's requests carry a\ncontext, so a backend serving both features takes it for some models\nand not others. An index published before the field existed has none,\nand is read as `false`."
+                  },
                   "role": {
                     "type": "string",
                     "description": "`transcription`, `post_processor` or `synthesis`. An index published\nbefore the field existed has none, and its models transcribe."
