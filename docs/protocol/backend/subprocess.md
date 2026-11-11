@@ -45,8 +45,8 @@ backend directory and the following environment:
 | `CUDA_CACHE_MAXSIZE`       | Bounds that cache. The driver's own default is around a gigabyte, and the cache is per backend, so the default would be inherited once per installed backend. |
 
 The daemon also sets the three under `SUPER_STT_` and `SUPER_TTS_`, with the
-same values, because backends published for Super STT and Super TTS read
-those names (`SUPER_STT_BACKEND_SOCKET` and so on). A new backend reads the
+same values, because backends published before Super Voice read those names
+(`SUPER_STT_BACKEND_SOCKET` and so on). A new backend reads the
 `SUPER_VOICE_` ones.
 
 On startup the backend binds `SUPER_VOICE_BACKEND_SOCKET`, begins serving
