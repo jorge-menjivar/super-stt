@@ -22,6 +22,7 @@ pub const WARNING: &[u8] = include_bytes!("../../resources/icons/phosphor/warnin
 pub const CPU: &[u8] = include_bytes!("../../resources/icons/phosphor/cpu.svg");
 pub const GRAPHICS_CARD: &[u8] = include_bytes!("../../resources/icons/phosphor/graphics-card.svg");
 pub const CLOUD: &[u8] = include_bytes!("../../resources/icons/phosphor/cloud.svg");
+pub const CHAT_TEXT: &[u8] = include_bytes!("../../resources/icons/phosphor/chat-text.svg");
 pub const DOTS_THREE_VERTICAL: &[u8] =
     include_bytes!("../../resources/icons/phosphor/dots-three-vertical.svg");
 pub const ARROWS_CLOCKWISE: &[u8] =

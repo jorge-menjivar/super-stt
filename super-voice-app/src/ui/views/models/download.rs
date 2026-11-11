@@ -297,7 +297,11 @@ pub(super) fn download_card<'a>(
         hosts: entry.allowed_hosts.as_slice(),
         user_url: false,
     });
-    if let Some(chips) = capability_chips(entry.supports_gpu, entry.supports_cpu, egress, true) {
+    // No Contexts chip: the registry index does not carry whether a backend
+    // can use a dictation context, only an installed manifest does.
+    if let Some(chips) =
+        capability_chips(entry.supports_gpu, entry.supports_cpu, egress, false, true)
+    {
         card = card.push(chips);
     }
 

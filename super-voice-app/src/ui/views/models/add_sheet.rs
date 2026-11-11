@@ -244,7 +244,9 @@ fn resolved_preview(
         hosts: b.allowed_hosts.as_slice(),
         user_url: false,
     });
-    if let Some(chips) = capability_chips(b.supports_gpu, b.supports_cpu, egress, false) {
+    // No Contexts chip: the registry index does not carry whether a backend
+    // can use a dictation context, only an installed manifest does.
+    if let Some(chips) = capability_chips(b.supports_gpu, b.supports_cpu, egress, false, false) {
         col = col.push(chips);
     }
 
