@@ -54,6 +54,6 @@
   forge = "github"
 
 [whisper]
-  id    = "app.super-stt.whisper"
+  id    = "app.super-voice.whisper"
   repo  = "github.com/jorge-menjivar/super-stt-whisper"
   forge = "github"
