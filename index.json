@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-11T07:15:34Z",
+  "generated_at": "2026-11-11T09:24:53Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -109,10 +109,10 @@
     },
     {
       "id": "mistral",
-      "backend_id": "app.super-stt.mistral",
+      "backend_id": "app.super-voice.mistral",
       "source": "github.com/jorge-menjivar/super-stt-mistral",
-      "version": "0.1.1",
-      "tag": "v0.1.1",
+      "version": "0.2.0",
+      "tag": "v0.2.0",
       "name": "Mistral",
       "description": "Cloud speech-to-text via the Mistral (Voxtral) API.",
       "license": "GPL-3.0-only",
@@ -128,22 +128,31 @@
       "supports_cpu": false,
       "models": [
         {
-          "name": "voxtral-mini-latest",
+          "name": "voxtral-mini-transcribe-3",
           "provider": "",
           "supported_devices": [
             "none"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
-          "name": "voxtral-mini-transcribe-realtime-2602",
+          "name": "voxtral-small-transcribe-3",
           "provider": "",
           "supported_devices": [
             "none"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
+        },
+        {
+          "name": "voxtral-mini-transcribe-realtime-3",
+          "provider": "",
+          "supported_devices": [
+            "none"
+          ],
+          "role": "transcription",
+          "accepts_context": true
         }
       ],
       "secrets": [
@@ -156,15 +165,15 @@
       "options": [],
       "assets": {
         "wasm": {
-          "url": "https://github.com/jorge-menjivar/super-stt-mistral/releases/download/v0.1.1/mistral.wasm",
-          "size": 280029,
-          "sha256": "c829b1a71c71ed0b1567e6f8bee0a16c87f033fbf31dd084c532863ff052594a"
+          "url": "https://github.com/super-libre/super-voice-mistral/releases/download/v0.2.0/mistral.wasm",
+          "size": 335559,
+          "sha256": "44e5b3804fdaf44616c4b9d2bd1366577e9ea70369bd9ccf7e2a258937107255"
         }
       },
       "manifest": {
-        "url": "https://github.com/jorge-menjivar/super-stt-mistral/releases/download/v0.1.1/backend.toml",
-        "size": 1538,
-        "sha256": "d291db462c340d66d7c11bf14d7adb4bce0ca2d6dd9ead94ee69d104b81eea8b"
+        "url": "https://github.com/super-libre/super-voice-mistral/releases/download/v0.2.0/backend.toml",
+        "size": 2749,
+        "sha256": "ef896b39182e3af29187e8d587a1153113ef17fb744a6e2b96a5f2be63c70f9e"
       }
     },
     {
