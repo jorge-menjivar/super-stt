@@ -8,7 +8,6 @@ use crate::daemon::client::get_gpu_info;
 use crate::state::{ContextPage, DaemonStatus, ModelsTab};
 use crate::ui::messages::{Message, ModelsPageMessage};
 use cosmic::prelude::*;
-use log::debug;
 
 impl AppModel {
     /// Models-page UI: tab switch, per-backend dropdown / GPU / select, the
@@ -149,7 +148,8 @@ impl AppModel {
             }
 
             ModelsPageMessage::GpuInfoLoaded(gpus) => {
-                debug!("GpuInfoLoaded: storing {} GPU(s) in app state", gpus.len());
+                // Every GPU poll lands here; see `get_gpu_info`.
+                log::trace!("GpuInfoLoaded: storing {} GPU(s) in app state", gpus.len());
                 self.gpu_info = gpus;
                 Task::none()
             }

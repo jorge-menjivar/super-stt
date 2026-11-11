@@ -11,11 +11,14 @@ use super_voice_shared::daemon::http_client::HttpResult;
 use super_voice_shared::daemon::http_client::transport;
 
 /// GPU inventory + memory (HTTP `GET /gpu_info`). Empty when no GPU is detected.
+///
+/// The app polls this every few seconds, so its lines are at trace: at debug
+/// they were four lines every poll.
 pub async fn get_gpu_info() -> HttpResult<Vec<super_voice_shared::models::protocol::GpuInfo>> {
-    log::debug!("get_gpu_info: requesting GET /gpu_info");
+    log::trace!("get_gpu_info: requesting GET /gpu_info");
     let result = with_settings_token(|socket, token| async move {
         let resp = transport::settings_get(socket, &token, "/gpu_info").await?;
-        log::debug!(
+        log::trace!(
             "get_gpu_info: response status={:?} gpu_info={:?}",
             resp.status,
             resp.gpu_info
@@ -27,7 +30,7 @@ pub async fn get_gpu_info() -> HttpResult<Vec<super_voice_shared::models::protoc
     })
     .await;
     match &result {
-        Ok(gpus) => log::debug!("get_gpu_info: parsed {} GPU(s): {gpus:?}", gpus.len()),
+        Ok(gpus) => log::trace!("get_gpu_info: parsed {} GPU(s): {gpus:?}", gpus.len()),
         Err(e) => log::warn!("get_gpu_info: request failed: {e}"),
     }
     result
