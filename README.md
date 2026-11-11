@@ -4,9 +4,9 @@
 
 # Super Voice
 
-**Speak into any app on Linux. Your words appear as text.**
+**Speak into any app on Linux, and hear any text read aloud.**
 
-*One shortcut to dictate anywhere • Any model from a growing library • An open protocol any app can build on • Built in Rust*
+*One shortcut to dictate anywhere • Natural voices, or clone your own • Any model from a growing library • An open protocol any app can build on • Built in Rust*
 
 [![coverage](https://img.shields.io/endpoint?url=https://jorge-menjivar.github.io/super-voice/coverage/coverage.json)](https://jorge-menjivar.github.io/super-voice/coverage/)
 
