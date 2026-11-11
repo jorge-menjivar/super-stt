@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-11T06:43:03Z",
+  "generated_at": "2026-11-11T07:15:34Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -169,10 +169,10 @@
     },
     {
       "id": "openai",
-      "backend_id": "app.super-stt.openai",
+      "backend_id": "app.super-voice.openai",
       "source": "github.com/jorge-menjivar/super-stt-openai",
-      "version": "0.1.2",
-      "tag": "v0.1.2",
+      "version": "0.2.0",
+      "tag": "v0.2.0",
       "name": "OpenAI",
       "description": "Cloud speech-to-text via the OpenAI API.",
       "license": "GPL-3.0-only",
@@ -194,7 +194,7 @@
             "none"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "gpt-4o-transcribe",
@@ -203,7 +203,7 @@
             "none"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "gpt-4o-mini-transcribe",
@@ -212,7 +212,7 @@
             "none"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "other",
@@ -221,7 +221,7 @@
             "none"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "gpt-live-transcribe",
@@ -230,7 +230,7 @@
             "none"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         },
         {
           "name": "other-realtime",
@@ -239,7 +239,7 @@
             "none"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         }
       ],
       "secrets": [
@@ -263,15 +263,15 @@
       ],
       "assets": {
         "wasm": {
-          "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.2/openai.wasm",
-          "size": 313374,
-          "sha256": "b7bedd6856a4a268782274e778f0f239c686e6b46ef15fabfdeb4d12fc623048"
+          "url": "https://github.com/super-libre/super-voice-openai/releases/download/v0.2.0/openai.wasm",
+          "size": 372247,
+          "sha256": "faa0f624b2b0c8fb6150da7777e149a3edd33f85d48ded03801ee5ec575d1d0c"
         }
       },
       "manifest": {
-        "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.2/backend.toml",
-        "size": 7793,
-        "sha256": "be2179514236942332c477dad7cd8a50377d117fbec77a296b1c3c645248f572"
+        "url": "https://github.com/super-libre/super-voice-openai/releases/download/v0.2.0/backend.toml",
+        "size": 8462,
+        "sha256": "e2c41206f9db48ecd92849eec5bf679b5ab9a1ac6173351a5f59f720e85226b4"
       }
     },
     {
