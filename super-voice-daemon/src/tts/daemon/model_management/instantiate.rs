@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
 use crate::backend_headers::{self, Feature};
 use crate::registry::host_detect::Host;
 use crate::tts::daemon::types::SuperTTSDaemon;
