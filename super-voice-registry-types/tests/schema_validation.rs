@@ -95,13 +95,10 @@ fn a_fixture_still_exercises_the_provider_key() {
     );
 }
 
-/// The schema requires an `id` of every entry, and every entry has one now.
-/// The entries that predated the requirement were named here until each
-/// gained one, which took a release of that backend declaring the id before
-/// this file could pin it; Deepgram was the last. Anything the schema objects
-/// to, a new entry with no id included, fails this test.
-const ENTRIES_STILL_WITHOUT_AN_ID: &[&str] = &[];
-
+/// The schema requires an `id` of every entry, and every entry has one. The
+/// entries that predated the requirement were exempt here until each gained
+/// one; Deepgram was the last. Anything the schema objects to, a new entry
+/// with no id included, fails this test.
 #[test]
 fn accepts_registry_toml() {
     let v = jsonschema::validator_for(&super_voice_registry_types::schema::registry_schema())
@@ -111,31 +108,13 @@ fn accepts_registry_toml() {
         .unwrap();
     let doc = toml_to_json(&std::fs::read_to_string(root.join("registry/registry.toml")).unwrap());
 
-    let mut missing_id: Vec<String> = Vec::new();
-    let mut other: Vec<String> = Vec::new();
-    for e in v.iter_errors(&doc) {
-        // The offending entry is the first segment of the instance path.
-        let key = e
-            .instance_path()
-            .to_string()
-            .trim_start_matches('/')
-            .split('/')
-            .next()
-            .unwrap_or_default()
-            .to_string();
-        if e.to_string().contains("\"id\" is a required property") {
-            missing_id.push(key);
-        } else {
-            other.push(format!("{key}: {e}"));
-        }
-    }
-    missing_id.sort();
-
-    assert!(other.is_empty(), "registry.toml schema errors: {other:#?}");
-    assert_eq!(
-        missing_id, ENTRIES_STILL_WITHOUT_AN_ID,
-        "the set of entries without an `id` changed; update \
-         ENTRIES_STILL_WITHOUT_AN_ID (shrinking it is the point)"
+    let errors: Vec<String> = v
+        .iter_errors(&doc)
+        .map(|e| format!("{}: {e}", e.instance_path()))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "registry.toml schema errors: {errors:#?}"
     );
 }
 

@@ -2,23 +2,18 @@
 //! `super-voice-indexer`: builds Super Voice's backend registry index. The
 //! indexer is `super_engine_indexer`'s; what is here is what makes it Super
 //! Voice's.
+//!
+//! Every registry entry must declare an `id`, and the indexer refuses one
+//! without. The entries that predated the requirement were exempt until each
+//! backend's own release declared one; Deepgram was the last, and the
+//! exemption is gone.
 
 use super_engine_indexer::Indexer;
 use super_voice_registry_types::Voice;
 
-/// Entries exempt from the `id` requirement: none.
-///
-/// The requirement came after the registry's first backends, and the entries
-/// that predated it were tolerated without an `id` until each backend's own
-/// release declared one. Deepgram was the last. Every entry declares an `id`
-/// now, so the indexer refuses one without, as `registry.schema.json` already
-/// told an editor.
-const GRANDFATHERED: &[&str] = &[];
-
 const INDEXER: Indexer = Indexer {
     name: "super-voice-indexer",
     user_agent: Voice::USER_AGENT,
-    grandfathered: GRANDFATHERED,
 };
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
@@ -28,7 +23,6 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::GRANDFATHERED;
     use super_engine_indexer::registry_toml::Registry;
 
     /// The shipped file must keep parsing as the `id` requirement lands.
@@ -38,15 +32,15 @@ mod tests {
             .parent()
             .unwrap();
         let text = std::fs::read_to_string(root.join("registry/registry.toml")).unwrap();
-        Registry::parse(&text, GRANDFATHERED).expect("registry.toml parses");
+        Registry::parse(&text).expect("registry.toml parses");
     }
 
-    /// No entry is exempt any more: one without an `id` is refused, the last
-    /// formerly exempt name included.
+    /// An entry without an `id` is refused, the last formerly exempt name
+    /// included.
     #[test]
     fn refuses_an_entry_without_an_id() {
         let text = "[deepgram]\n    repo = \"github.com/jorge-menjivar/super-stt-deepgram\"\n    forge = \"github\"\n";
-        let parsed = Registry::parse(text, GRANDFATHERED);
+        let parsed = Registry::parse(text);
         assert!(parsed.is_err(), "an entry without an id must be refused");
     }
 }

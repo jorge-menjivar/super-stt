@@ -125,9 +125,12 @@ build tree names its artifact after the crate, not after the entrypoint.
 
 **Install directory.** A backend is installed into a directory named by its
 `[backend].id`, whichever route installed it — the registry, a custom
-repository, or a local directory. A backend whose manifest declares no `id`
-is installed under the registry key instead, so installs that predate the
-identifier keep their directory.
+repository, or a local directory. A registry install always has one: the
+registry requires an `id` of every entry, and the daemon drops an index entry
+whose `backend_id` is missing or malformed. Only a custom-repository or
+local-directory install can go without, of a `v1` manifest that declares no
+`id`; it is installed under the last segment of its `[backend].source`, the
+repository's name.
 
 That directory must be free for this backend to take. An install whose target
 directory already holds a backend declaring a different `[backend].source`
