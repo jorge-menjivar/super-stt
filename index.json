@@ -1,13 +1,14 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-11-11T09:24:53Z",
+  "generated_at": "2026-11-11T10:55:31Z",
   "min_client": "0.1.0",
   "backends": [
     {
       "id": "deepgram",
+      "backend_id": "app.super-voice.deepgram",
       "source": "github.com/jorge-menjivar/super-stt-deepgram",
-      "version": "0.1.0",
-      "tag": "v0.1.0",
+      "version": "0.2.0",
+      "tag": "v0.2.0",
       "name": "Deepgram",
       "description": "Cloud speech-to-text via the Deepgram API.",
       "license": "GPL-3.0-only",
@@ -29,7 +30,7 @@
             "none"
           ],
           "role": "transcription",
-          "accepts_context": false
+          "accepts_context": true
         }
       ],
       "secrets": [
@@ -42,15 +43,15 @@
       "options": [],
       "assets": {
         "wasm": {
-          "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/deepgram.wasm",
-          "size": 208325,
-          "sha256": "3f00db3c6dd7fd2a67a865df4c2ac259d62eefe8e02971f23ce99ad24758dc6d"
+          "url": "https://github.com/super-libre/super-voice-deepgram/releases/download/v0.2.0/deepgram.wasm",
+          "size": 270751,
+          "sha256": "828428a8a0aed772e27725160d9d7954205fe6c12147925e0d4dbf75363209fb"
         }
       },
       "manifest": {
-        "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/backend.toml",
-        "size": 2110,
-        "sha256": "4cf34eaee84404fb31b0e7f120626cbcde63e9a4da233cd45e43feea8cc873c1"
+        "url": "https://github.com/super-libre/super-voice-deepgram/releases/download/v0.2.0/backend.toml",
+        "size": 2878,
+        "sha256": "e40e010aa25bf78f48dcf3423971238cded06bdb12bad3a5a7bb03b8fadea00a"
       }
     },
     {
