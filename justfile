@@ -605,7 +605,10 @@ run-app *args:
     # signed — the binary reverts to ad-hoc, with its mtime rolled back to
     # the deps artifact's, and macOS quietly drops every grant again.
 
-    exec env RUST_BACKTRACE=full RUST_LOG=super_voice_app=debug,super_voice_shared=debug \
+    # The app's own lines at info, and none of the toolkit's. A RUST_LOG of
+    # your own wins, e.g. `RUST_LOG=super_voice_app=debug just run-app`.
+    exec env RUST_BACKTRACE=full \
+        RUST_LOG="${RUST_LOG:-super_voice_app=info,super_voice_shared=info}" \
         "$exe"
 
 # Run the daemon for testing purposes.
@@ -645,8 +648,9 @@ run-daemon *args:
     # signed — the binary reverts to ad-hoc, with its mtime rolled back to
     # the deps artifact's, and macOS quietly drops every grant again.
 
-    exec env RUST_BACKTRACE=full RUST_LOG=super_voice_daemon=debug \
-        "$exe" -v
+    # Logs at info, as the installed service does. A RUST_LOG of your own
+    # wins, e.g. `RUST_LOG=info,super_voice_daemon=debug just run-daemon`.
+    exec env RUST_BACKTRACE=full "$exe"
 
 # Run the CLI for testing purposes (talks to the running daemon over the HTTP socket)
 # Usage: just run-cli [ping|status|record|stop|logout] [args]
@@ -668,8 +672,7 @@ run-cli *args:
     # signed — the binary reverts to ad-hoc, with its mtime rolled back to
     # the deps artifact's, and macOS quietly drops every grant again.
 
-    exec env RUST_BACKTRACE=full RUST_LOG=super_stt_cli=debug,super_voice_shared=debug \
-        "$exe" {{ args }}
+    exec env RUST_BACKTRACE=full "$exe" {{ args }}
 
 # Run the consent dialog on its own, without the daemon. The dialog is
 # env-driven rather than argument-driven, so this fills in a plausible request;
@@ -701,7 +704,7 @@ run-consent *scopes: linux-only-gui
     # Quiet RUST_LOG: the default pulls in thousands of wgpu/zbus/wayland lines
     # at startup and buries the dialog's own output.
     env RUST_BACKTRACE=full \
-        RUST_LOG=super_voice_consent=debug,super_voice_shared=debug \
+        RUST_LOG="${RUST_LOG:-super_voice_consent=info,super_voice_shared=info}" \
         SUPER_VOICE_AUTH_APP_NAME="Test App" \
         SUPER_VOICE_AUTH_SCOPES="$scopes" \
         SUPER_VOICE_AUTH_EXE_PATH="/usr/bin/test-app" \
