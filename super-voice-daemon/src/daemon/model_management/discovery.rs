@@ -38,7 +38,7 @@ impl SuperSTTDaemon {
         // still depends on, the same reason uninstall refuses. The duplicate
         // is harmless until the next refresh.
         if !losers.is_empty() {
-            if self.switch_guard().await.is_some() || self.tts.is_busy() {
+            if self.switch_guard().is_some() || self.tts.is_busy() {
                 log::warn!(
                     "{} duplicate backend director(ies) left for a later refresh: \
                      a backend is busy",
@@ -60,6 +60,20 @@ impl SuperSTTDaemon {
     /// preference or it can't be found — the daemon never auto-picks an
     /// arbitrary model, since loading one can pull gigabytes.
     pub async fn pick_startup_model(&self) -> Option<(String, String)> {
+        self.selected_model()
+            .await
+            .map_err(|why| {
+                if let Some(why) = why {
+                    info!("{why}");
+                }
+            })
+            .ok()
+    }
+
+    /// [`pick_startup_model`](Self::pick_startup_model) without its log
+    /// line, for checks that run on every request. The error is why there is
+    /// no model to load, when there is one worth logging.
+    pub(crate) async fn selected_model(&self) -> Result<(String, String), Option<String>> {
         let (enabled, pref_model, pref_source) = {
             let c = self.config.read().await;
             (
@@ -69,7 +83,7 @@ impl SuperSTTDaemon {
             )
         };
         if pref_model.is_empty() {
-            return None;
+            return Err(None);
         }
         // The stage remembers its model across an unload now, so the selection
         // alone no longer means "load this". The flag is what says so — the
@@ -77,8 +91,9 @@ impl SuperSTTDaemon {
         // load. Checked after the empty case, so an idle daemon does not log a
         // line naming no model.
         if !enabled {
-            info!("Stage 1 is switched off; staying idle with {pref_model} still selected");
-            return None;
+            return Err(Some(format!(
+                "Stage 1 is switched off; staying idle with {pref_model} still selected"
+            )));
         }
         // A config predating `preferred_source` names a model but not the
         // backend serving it. Resolve it the same way the wire path does — from
@@ -89,20 +104,19 @@ impl SuperSTTDaemon {
         // recorded either, stay idle and let the user pick.
         let pref_source = if pref_source.is_empty() {
             let Some(resolved) = self.active_backend_source().await else {
-                info!(
+                return Err(Some(format!(
                     "Startup model {pref_model} names no source and no backend is selected; \
                      staying idle"
-                );
-                return None;
+                )));
             };
             resolved
         } else {
             pref_source
         };
         let backends = self.backends.read().await;
-        let (_, def) = backends::find_model(&backends, &pref_model, &pref_source)?;
+        let (_, def) = backends::find_model(&backends, &pref_model, &pref_source).ok_or(None)?;
         // A required secret is enforced at load, not here.
-        Some((def.name.clone(), def.source.clone()))
+        Ok((def.name.clone(), def.source.clone()))
     }
 }
 
@@ -159,7 +173,9 @@ mod tests {
         write_backend(&loser, "1.0.0");
 
         let daemon = test_daemon().await;
-        *daemon.busy.write().await = true;
+        // A recording under way, for as long as its claim is held.
+        let (recording, _cancelled) = daemon.recording.reserve().expect("free");
+        let _stop = recording.start().expect("not cancelled");
         daemon.config.write().await.backends_dir = Some(root.path().to_string_lossy().into_owned());
 
         daemon.refresh_backends().await;

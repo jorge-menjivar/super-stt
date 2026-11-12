@@ -668,14 +668,18 @@ async fn seed_model_on(
     };
     let info = ModelInfoData::new(name, source, true, true, Duration::from_secs(1));
     let reconfigured: SeenContexts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    *daemon.model.write().await = Some(LoadedModel::new(
-        definition,
-        Box::new(MockModel {
-            info,
-            reconfigured: std::sync::Arc::clone(&reconfigured),
-            device,
-        }),
-    ));
+    crate::tts::daemon::types::put_model(
+        &daemon.model,
+        LoadedModel::new(
+            definition,
+            Box::new(MockModel {
+                info,
+                reconfigured: std::sync::Arc::clone(&reconfigured),
+                device,
+            }),
+        ),
+    )
+    .await;
     reconfigured
 }
 
@@ -1200,7 +1204,7 @@ async fn a_switch_is_announced_from_where_the_model_runs() {
         .model
         .write()
         .await
-        .as_mut()
+        .get_mut()
         .expect("seeded")
         .definition
         .supported_devices = vec![
@@ -1469,7 +1473,7 @@ async fn set_model_device_on_the_device_in_use_reloads_nothing() {
         .model
         .write()
         .await
-        .as_mut()
+        .get_mut()
         .expect("seeded")
         .definition
         .supported_devices = vec![super_voice_registry_types::manifest::Device::Cpu];
@@ -2118,11 +2122,11 @@ async fn idle_unload_frees_the_model_and_keeps_it_selected() {
         .await
         .update_synthesis_model("kokoro-1".into(), source.into());
 
-    daemon.idle.rewind(Duration::from_secs(10));
+    daemon.model.backdate(Duration::from_secs(10));
     assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
     assert!(daemon.model.read().await.is_some());
 
-    daemon.idle.rewind(Duration::from_secs(60));
+    daemon.model.backdate(Duration::from_secs(60));
     assert!(daemon.unload_if_idle(Duration::from_secs(30)).await);
 
     assert!(daemon.model.read().await.is_none());
@@ -2130,4 +2134,135 @@ async fn idle_unload_frees_the_model_and_keeps_it_selected() {
         daemon.config.read().await.synthesis.preferred_model,
         "kokoro-1"
     );
+}
+
+/// Text that cannot be spoken is refused before a model is loaded for it, so
+/// with idle unload on an empty request does not load a model only to fail.
+#[tokio::test]
+async fn speak_refuses_text_before_loading_a_model() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/openai";
+    {
+        let mut config = daemon.config.write().await;
+        config.update_synthesis_model("kokoro-1".into(), source.into());
+        config.idle_unload.after_secs = 30;
+    }
+    // A load on demand waits for this one, so a refusal that returns at once
+    // never tried one.
+    let _load = daemon.model.begin_load().await.expect("a turn");
+
+    for text in [
+        "",
+        "   ",
+        &"a".repeat(crate::tts::daemon::speech::MAX_TEXT_CHARS + 1),
+    ] {
+        let response = tokio::time::timeout(
+            Duration::from_secs(1),
+            daemon.handle_speak(text.to_string()),
+        )
+        .await
+        .expect("refused without waiting for a load");
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidValue));
+    }
+}
+
+/// With idle unload on, the model a request loads on demand is the selected
+/// one, so the voices page can describe it while it is out of memory. With
+/// it off, a model not in memory is not loaded by a request.
+#[tokio::test]
+async fn the_selected_model_is_loaded_on_demand_only_with_idle_unload_on() {
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/kokoro";
+    *daemon.backends.write().await = vec![fixture_backend_local(
+        "kokoro",
+        source,
+        "Kokoro",
+        "kokoro-tiny",
+    )];
+    daemon
+        .config
+        .write()
+        .await
+        .update_synthesis_model("kokoro-tiny".into(), source.into());
+
+    assert!(daemon.model_loaded_on_demand().await.is_none());
+
+    daemon.config.write().await.idle_unload.after_secs = 300;
+    let definition = daemon
+        .model_loaded_on_demand()
+        .await
+        .expect("the selected model");
+    assert_eq!(definition.name, "kokoro-tiny");
+    assert_eq!(definition.source, source);
+}
+
+/// An unload during a load waits for it, then clears the selection, rather
+/// than finding the slot empty and leaving the load to put the model back.
+#[tokio::test]
+async fn an_unload_during_a_load_waits_for_it_and_clears_the_selection() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    daemon
+        .config
+        .write()
+        .await
+        .update_synthesis_model("kokoro-1".into(), "github.com/super-tts/openai".into());
+    let slot = std::sync::Arc::clone(&daemon.model);
+    let load = slot.begin_load().await.expect("a turn");
+
+    let unload = tokio::spawn({
+        let daemon = daemon.clone();
+        async move { daemon.handle_unload_active_model().await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!unload.is_finished(), "answered before the load finished");
+
+    drop(load);
+    let response = unload.await.expect("no panic");
+    assert_eq!(response.status, "success");
+    assert!(
+        daemon
+            .config
+            .read()
+            .await
+            .synthesis
+            .preferred_model
+            .is_empty()
+    );
+}
+
+/// A speak whose model fails to load on demand notifies that, not "no model
+/// loaded": a model is selected, and loading another would not help.
+#[tokio::test]
+async fn a_speak_whose_model_fails_to_load_says_so() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/kokoro";
+    // No component on disk, so its load fails.
+    *daemon.backends.write().await = vec![fixture_backend_local(
+        "kokoro",
+        source,
+        "Kokoro",
+        "kokoro-tiny",
+    )];
+    {
+        let mut config = daemon.config.write().await;
+        config.update_synthesis_model("kokoro-tiny".into(), source.into());
+        config.idle_unload.after_secs = 30;
+    }
+    let (notifier, sent) = crate::tts::output::notification::Notifier::fake(false);
+    *daemon.notifier.lock().await = notifier;
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(10),
+        daemon.handle_speak("hello".to_string()),
+    )
+    .await
+    .expect("the load failed rather than hung");
+
+    assert_eq!(response.error_code, Some(ErrorCode::ModelNotLoaded));
+    let sent = sent.lock().unwrap();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].0, "Could not load the model");
 }

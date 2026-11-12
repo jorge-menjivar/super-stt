@@ -17,6 +17,20 @@ impl SuperTTSDaemon {
     /// when there is no preference or it can't be loaded — the daemon never
     /// auto-picks an arbitrary model, since loading one can pull gigabytes.
     pub async fn pick_startup_model(&self) -> Option<(String, String)> {
+        self.selected_model()
+            .await
+            .map_err(|why| {
+                if let Some(why) = why {
+                    info!("{why}");
+                }
+            })
+            .ok()
+    }
+
+    /// [`pick_startup_model`](Self::pick_startup_model) without its log
+    /// line, for checks that run on every request. The error is why there is
+    /// no model to load, when there is one worth logging.
+    pub(crate) async fn selected_model(&self) -> Result<(String, String), Option<String>> {
         let (pref_model, pref_source) = {
             let c = self.config.read().await;
             (
@@ -25,7 +39,7 @@ impl SuperTTSDaemon {
             )
         };
         if pref_model.is_empty() {
-            return None;
+            return Err(None);
         }
         // A config predating `preferred_source` names a model but not the
         // backend serving it. Resolve it the same way the wire path does — from
@@ -36,19 +50,18 @@ impl SuperTTSDaemon {
         // recorded either, stay idle and let the user pick.
         let pref_source = if pref_source.is_empty() {
             let Some(resolved) = self.active_backend_source().await else {
-                info!(
+                return Err(Some(format!(
                     "Startup model {pref_model} names no source and no backend is selected; \
                      staying idle"
-                );
-                return None;
+                )));
             };
             resolved
         } else {
             pref_source
         };
         let backends = self.backends.read().await;
-        let (_, def) = backends::find_model(&backends, &pref_model, &pref_source)?;
+        let (_, def) = backends::find_model(&backends, &pref_model, &pref_source).ok_or(None)?;
         // A required secret is enforced at load.
-        Some((def.name.clone(), def.source.clone()))
+        Ok((def.name.clone(), def.source.clone()))
     }
 }

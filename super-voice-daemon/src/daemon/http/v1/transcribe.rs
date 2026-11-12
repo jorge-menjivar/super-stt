@@ -170,7 +170,8 @@ async fn run_realtime_session(
     // arrives for REALTIME_IDLE_TIMEOUT the watchdog wins, the select! drops
     // the session future, and the read lock is released — preventing a
     // half-open TCP connection from wedging model switches indefinitely.
-    daemon.ensure_model_loaded().await;
+    // A load that fails is logged; the session reports the missing model.
+    let _ = daemon.ensure_model_loaded().await;
     {
         let guard = daemon.model.read().await;
         match guard.as_ref() {
@@ -453,7 +454,7 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
     // `docs/protocol/endpoints/v1/transcribe.md`). The client is
     // expected to consult `GET /v1/status::busy` and call
     // `/v1/stt/transcribe/stop` to end an in-flight capture.
-    if *s.daemon.busy.read().await || s.daemon.recording_is_pending() {
+    if s.daemon.recording.is_busy() {
         return recording_in_progress_response();
     }
 
@@ -490,7 +491,7 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
     // would hold the response headers for as long as the load takes, past the
     // time a client waits for them.
     if s.daemon.model.read().await.is_none() && !s.daemon.loads_on_demand().await {
-        if !*s.daemon.busy.read().await {
+        if !s.daemon.recording.is_busy() {
             let _ = s.daemon.handle_command(req).await;
         }
         return model_not_loaded_response();
@@ -550,9 +551,8 @@ fn transcribe_mic_sse(
     // immediately. Without this, a short silent recording finishes
     // before the first 5 s keep-alive arm fires, and the client's
     // hyper drops the connection on idle — which then cancels the
-    // spawn task's `cmd_fut` and leaves the daemon stuck with
-    // `busy=true` forever (`record_and_transcribe` never
-    // reaches `finalize_recording_session`).
+    // spawn task's `cmd_fut` mid-take (`record_and_transcribe` never
+    // reaches `finalize_recording_session`, and its recorder runs on).
     let _ = line_tx.send(Ok(axum::body::Bytes::from_static(b": stream-open\n\n")));
 
     let daemon = Arc::clone(&s.daemon);
@@ -644,15 +644,11 @@ fn transcribe_mic_sse(
         // finished, signal stop AND await `cmd_fut` to completion.
         // Cancelling `cmd_fut` here (by letting the async block end)
         // would leave `record_and_transcribe` mid-execution — it
-        // would never reach `finalize_recording_session`, and the
-        // daemon would be stuck with `busy=true` /
-        // `manual_stop_tx=Some(_)` until the next daemon restart.
+        // would never reach `finalize_recording_session`, and its
+        // recorder would run on without anyone to collect it.
         if client_disconnected {
-            // Waiting for its model, it has no stop channel yet.
-            daemon.cancel_pending_recording();
-            if let Some(tx) = daemon.manual_stop_tx.read().await.as_ref() {
-                let _ = tx.send(());
-            }
+            // Cancels it while it waits for its model; stops its capture after.
+            daemon.recording.stop();
             final_response = Some(cmd_fut.await);
         }
 
@@ -724,40 +720,24 @@ topic, or on the stream if the recording was started with `wait: true`.",
     ),
 )]
 pub(crate) async fn transcribe_stop(State(s): State<AppState>) -> Response {
-    // Idempotent: nothing to stop. Direct response — going through
-    // `handle_record_command` here would start a fresh recording
-    // because that path is shared with `record`'s start case.
-    // A recording waiting for its model is not busy yet: cancel it here.
-    if s.daemon.cancel_pending_recording() {
-        return narrowed(
-            DaemonResponse::success()
-                .with_message(DaemonResponse::RECORDING_STOP_SIGNAL_MSG.to_string()),
-            |r| Ack {
-                status: "success",
-                message: r.message,
-            },
-        );
-    }
-    if !*s.daemon.busy.read().await {
-        return narrowed(
-            DaemonResponse::success().with_message("No recording in progress".to_string()),
-            |r| Ack {
-                status: "success",
-                message: r.message,
-            },
-        );
-    }
-
-    // Recording active — dispatch through `handle_record_command`'s
-    // toggle branch, which produces one of the documented stop
-    // messages:
-    //   - "Recording stop signal sent"
+    // Stops directly, never through `handle_record_command`: that path is
+    // shared with `record`'s start case, so a recording that ended between a
+    // check here and its dispatch would have been answered with a new one.
+    // One of the documented stop messages comes back:
+    //   - "Recording stop signal sent" (also when it was waiting for its model)
     //   - "Manual stop not enabled in current mode"
     //   - "Transcription in progress, please wait"
+    //   - "No recording in progress"
     // (See `docs/protocol/endpoints/v1/transcribe/stop.md`.)
-    let req = build_request("record", None);
-    let resp = dispatch(&s.daemon, req).await;
-    narrowed(resp, |r| Ack {
+    let manual_stop = s
+        .daemon
+        .config
+        .read()
+        .await
+        .transcription
+        .recording_stop_mode
+        .manual_stop_enabled();
+    narrowed(s.daemon.stop_recording(manual_stop), |r| Ack {
         status: "success",
         message: r.message,
     })

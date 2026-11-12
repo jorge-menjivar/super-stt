@@ -28,7 +28,7 @@ impl SuperSTTDaemon {
     pub async fn handle_set_post_processor(&self, model: String, source: String) -> DaemonResponse {
         // Loading and unloading a backend instance during a recording is the
         // same hazard as switching the transcription model mid-recording.
-        if let Some(resp) = self.guard_model_mutation("change the post-processor").await {
+        if let Some(resp) = self.guard_model_mutation("change the post-processor") {
             return resp;
         }
 
@@ -101,7 +101,7 @@ impl SuperSTTDaemon {
     /// in place. Use [`Self::handle_clear_post_processor_backend`] to forget the
     /// selection entirely.
     pub async fn handle_clear_post_processor(&self) -> DaemonResponse {
-        if let Some(resp) = self.guard_model_mutation("change the post-processor").await {
+        if let Some(resp) = self.guard_model_mutation("change the post-processor") {
             return resp;
         }
         self.unload_post_processor_announced().await;
@@ -125,7 +125,7 @@ impl SuperSTTDaemon {
     /// Records *which* backend and validates that it serves one, without
     /// loading anything, so it cannot fail for runtime reasons.
     pub async fn handle_set_post_processor_backend(&self, source: String) -> DaemonResponse {
-        if let Some(resp) = self.guard_model_mutation("change the post-processor").await {
+        if let Some(resp) = self.guard_model_mutation("change the post-processor") {
             return resp;
         }
 
@@ -166,7 +166,7 @@ impl SuperSTTDaemon {
     /// Deselect the post-processor backend: unload, and forget the model with
     /// it. The twin of `DELETE /active_backend`.
     pub async fn handle_clear_post_processor_backend(&self) -> DaemonResponse {
-        if let Some(resp) = self.guard_model_mutation("change the post-processor").await {
+        if let Some(resp) = self.guard_model_mutation("change the post-processor") {
             return resp;
         }
         self.unload_post_processor_announced().await;

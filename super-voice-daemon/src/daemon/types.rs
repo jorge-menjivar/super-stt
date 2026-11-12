@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::config::DaemonConfig;
-use crate::daemon::device_management::PipelineStage;
 use crate::daemon::events::EventBus;
 use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
@@ -9,7 +8,7 @@ use crate::services::dbus::DBusManager;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use anyhow::Result;
 use std::sync::{Arc, RwLock};
-use super_engine_daemon::load_gate::LoadGate;
+use super_engine_daemon::model_slot::{ModelSlot, SlotModel};
 use super_engine_daemon::secrets::Secrets;
 use super_voice_shared::models::protocol::{DaemonStatusEvent, PreviewSource};
 use super_voice_shared::theme::AudioTheme;
@@ -58,8 +57,23 @@ pub struct LoadedModel {
     pub instance: Box<dyn crate::stt_models::transcribe::Transcribe>,
 }
 
-/// Shared handle to the currently-loaded model (or `None` while idle/loading).
-pub type SharedLoadedModel = Arc<tokio::sync::RwLock<Option<LoadedModel>>>;
+impl SlotModel for LoadedModel {
+    async fn shutdown(&mut self) {
+        if let Err(e) = self.instance.shutdown().await {
+            log::warn!("backend shutdown failed: {e}");
+        }
+    }
+}
+
+/// Shared handle to one stage's model slot: the model (or `None` while
+/// idle/loading), and every load and unload of it.
+pub type SharedLoadedModel = Arc<ModelSlot<LoadedModel>>;
+
+/// A load's turn at a stage's slot: what [`instantiate_backend`] needs, and
+/// what puts the model it loaded in the slot.
+///
+/// [`instantiate_backend`]: SuperSTTDaemon::instantiate_backend
+pub type LoadTurn<'a> = super_engine_daemon::model_slot::LoadTurn<'a, LoadedModel>;
 
 /// One preview on its way to the waiting `/stt/transcribe` client: the text and
 /// what it spans, which the client cannot tell from the text alone.
@@ -74,16 +88,6 @@ pub struct PreviewFrame {
 /// only when it is still its own.
 pub type PreviewSlot =
     Arc<tokio::sync::RwLock<Option<(u64, tokio::sync::mpsc::UnboundedSender<PreviewFrame>)>>>;
-
-/// The recording that has not started capturing yet: reserved from when it
-/// begins waiting for its model until it claims `busy`, so a stop always has
-/// one of the two to reach.
-pub type PendingRecording = Arc<std::sync::Mutex<Option<PendingStart>>>;
-
-/// A reserved recording's cancel handle. `None` once it has been cancelled:
-/// the reservation stays, marked, until the recording itself gives it up.
-#[derive(Debug)]
-pub struct PendingStart(pub(crate) Option<tokio::sync::oneshot::Sender<()>>);
 
 #[derive(Clone)]
 pub struct SuperSTTDaemon {
@@ -106,7 +110,10 @@ pub struct SuperSTTDaemon {
     pub events: Arc<EventBus>,
     pub audio_theme: Arc<RwLock<AudioTheme>>,
     pub volume: Arc<RwLock<u8>>,
-    pub busy: Arc<tokio::sync::RwLock<bool>>,
+    // The microphone recording, if one is under way: waiting for its model,
+    // capturing, or transcribing, and how to stop it. See
+    // `crate::daemon::recording::state`.
+    pub(crate) recording: Arc<crate::daemon::recording::RecordingState>,
     pub download_manager: Arc<DownloadStateManager>,
     // Configuration management
     pub config: Arc<tokio::sync::RwLock<DaemonConfig>>,
@@ -114,8 +121,6 @@ pub struct SuperSTTDaemon {
     pub resource_manager: Arc<ResourceManager>,
     // Preview typing setting (beta feature)
     pub preview_typing_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    // Sender used to signal a running recording to stop early (shortcut or external stop)
-    pub manual_stop_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::broadcast::Sender<()>>>>,
     // Cached keyboard simulator (session persists across recordings, except
     // for backends that go stale while idle — see `Simulator::is_cacheable`)
     pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
@@ -143,17 +148,6 @@ pub struct SuperSTTDaemon {
     // `GlobalShortcuts` portal, the session holding them. See
     // `crate::shortcuts`.
     pub shortcuts: Arc<crate::shortcuts::Shortcuts>,
-    // One model loads into each stage at a time, and the newest request for
-    // a stage wins. Taken in `instantiate_backend`, which every load of either
-    // stage passes through.
-    pub loading: Arc<StageLoadGates>,
-    // The recording waiting for its model to load, if one is: nothing is
-    // capturing yet, so `busy` is false and there is no `manual_stop_tx`. See
-    // `model_management::idle`.
-    pub pending_recording: PendingRecording,
-    // The transcription model's last use, for unloading it when idle. See
-    // `model_management::idle`.
-    pub idle: Arc<crate::idle_unload::IdleTracker>,
     // The secrets file: the session tokens the daemon has issued and every
     // backend's API keys. One per process, opened at startup; clones share it.
     pub secrets: Secrets,
@@ -162,85 +156,40 @@ pub struct SuperSTTDaemon {
     pub tts: crate::tts::daemon::types::SuperTTSDaemon,
 }
 
-/// A [`LoadGate`] for each pipeline stage.
-///
-/// One per stage, not one for the daemon: both stages are meant to hold a
-/// model at once, so a request for one must never supersede a load into the
-/// other.
-#[derive(Debug, Default)]
-pub struct StageLoadGates {
-    transcription: LoadGate,
-    post_processor: LoadGate,
-}
-
-impl StageLoadGates {
-    /// The gate every load into `stage` passes.
-    #[must_use]
-    pub fn get(&self, stage: PipelineStage) -> &LoadGate {
-        match stage {
-            PipelineStage::Transcription => &self.transcription,
-            PipelineStage::PostProcessor => &self.post_processor,
-        }
-    }
-}
-
-#[cfg(test)]
-mod stage_load_gate_tests {
-    use super::{PipelineStage, StageLoadGates};
-
-    /// A request for the post-processor arriving while a transcription model
-    /// waits to load must not make that load give up: the stages hold
-    /// different models.
-    #[tokio::test]
-    async fn a_request_for_one_stage_does_not_supersede_the_other() {
-        let gates = StageLoadGates::default();
-        let transcription = gates.get(PipelineStage::Transcription).ticket();
-        let _post_processor = gates.get(PipelineStage::PostProcessor).ticket();
-        assert!(
-            gates
-                .get(PipelineStage::Transcription)
-                .enter(transcription)
-                .await
-                .is_some(),
-            "a post-processor request superseded a transcription load"
-        );
-    }
-
-    /// Within a stage the newest request still wins.
-    #[tokio::test]
-    async fn a_newer_request_for_the_same_stage_supersedes() {
-        let gates = StageLoadGates::default();
-        let gate = gates.get(PipelineStage::PostProcessor);
-        let older = gate.ticket();
-        let _newer = gate.ticket();
-        assert!(gate.enter(older).await.is_none());
-    }
-}
-
 /// A daemon wired up with inert defaults: no model, no backends, nothing
 /// selected, and a `DaemonConfig::default()` that is never written to disk.
 ///
 /// Lives beside the struct so there is exactly one copy — a second would drift
 /// as fields are added (the compiler catches the drift, but only after someone
 /// has fixed the same literal twice).
+/// Put `model` in `slot` on a load turn of its own, as a load would. For
+/// tests that seed a loaded model.
+#[cfg(test)]
+pub(crate) async fn put_model(slot: &SharedLoadedModel, model: LoadedModel) {
+    slot.begin_load()
+        .await
+        .expect("nothing else loads in a test")
+        .install(model)
+        .await;
+}
+
 #[cfg(test)]
 pub(crate) async fn test_daemon() -> SuperSTTDaemon {
     let (shutdown_tx, _) = broadcast::channel(1);
     SuperSTTDaemon {
-        model: Arc::new(tokio::sync::RwLock::new(None)),
-        post_processor: Arc::new(tokio::sync::RwLock::new(None)),
+        model: Arc::default(),
+        post_processor: Arc::default(),
         audio_processor: Arc::new(AudioProcessor::new()),
         shutdown_tx,
         dbus_manager: None,
         events: Arc::new(EventBus::new()),
         audio_theme: Arc::new(RwLock::new(AudioTheme::default())),
         volume: Arc::new(RwLock::new(100)),
-        busy: Arc::new(tokio::sync::RwLock::new(false)),
+        recording: Arc::default(),
         download_manager: Arc::new(DownloadStateManager::new()),
         config: Arc::new(tokio::sync::RwLock::new(DaemonConfig::default())),
         resource_manager: Arc::new(ResourceManager::development()),
         preview_typing_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
         simulator: Arc::new(tokio::sync::RwLock::new(None)),
         preview_text: Arc::new(tokio::sync::RwLock::new(None)),
         backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
@@ -259,9 +208,6 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         )),
         self_update: Arc::new(crate::self_update::checker()),
         shortcuts: Arc::new(crate::shortcuts::Shortcuts::default()),
-        loading: Arc::new(StageLoadGates::default()),
-        idle: Arc::default(),
-        pending_recording: Arc::default(),
         // In memory: no daemon test reads or writes the user's secrets file.
         secrets: Secrets::in_memory(),
         tts: crate::tts::daemon::types::test_daemon().await,

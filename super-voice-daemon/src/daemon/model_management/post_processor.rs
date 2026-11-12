@@ -79,11 +79,15 @@ impl SuperSTTDaemon {
         //
         // Silent, because the slot is normally refilled in the same breath: the
         // `model_switched`/`ready` pair below is the event for this load,
-        // exactly as a stage-1 reload reports itself once. The instance is
-        // taken out of the lock before `shutdown()`, which can take seconds.
-        self.unload_post_processor().await;
+        // exactly as a stage-1 reload reports itself once. The slot takes the
+        // instance out on this load's turn, out of the lock before
+        // `shutdown()`, which can take seconds.
+        let Some(turn) = self.post_processor.begin_load().await else {
+            anyhow::bail!("loading {name} was superseded by a newer model load");
+        };
         let (instance, definition) = match self
             .instantiate_backend(
+                &turn,
                 &name,
                 &source,
                 chosen.as_deref(),
@@ -102,10 +106,11 @@ impl SuperSTTDaemon {
         };
 
         let actual_device = normalize_device(&instance.device());
-        *self.post_processor.write().await = Some(crate::daemon::types::LoadedModel {
+        turn.install(crate::daemon::types::LoadedModel {
             definition,
             instance,
-        });
+        })
+        .await;
         info!("Post-processor loaded: {name} (source={source})");
         self.broadcast_model_active(&name, &source, &actual_device, PipelineStage::PostProcessor);
         Ok(())
@@ -116,7 +121,7 @@ impl SuperSTTDaemon {
     /// [`handle_reload_active_model`](SuperSTTDaemon::handle_reload_active_model).
     /// No-op when stage 2 is idle; rejected during an active recording.
     pub async fn handle_reload_post_processor(&self) -> DaemonResponse {
-        if let Some(resp) = self.guard_model_mutation("reload the post-processor").await {
+        if let Some(resp) = self.guard_model_mutation("reload the post-processor") {
             return resp;
         }
         if !self.post_processor_loaded().await {
@@ -169,17 +174,13 @@ impl SuperSTTDaemon {
         });
     }
 
-    /// Drop the loaded post-processor, if any. Mirrors
-    /// [`unload_current_model`](SuperSTTDaemon::unload_current_model): take the
-    /// instance out of the lock first, then shut it down with the lock
-    /// released.
+    /// Drop the loaded post-processor, if any, after any load into its slot
+    /// in flight: see
+    /// [`ModelSlot::unload`](super_engine_daemon::model_slot::ModelSlot::unload).
     pub(in crate::daemon) async fn unload_post_processor(&self) {
-        let taken = self.post_processor.write().await.take();
-        if let Some(mut loaded) = taken {
-            if let Err(e) = loaded.instance.shutdown().await {
-                warn!("post-processor shutdown failed: {e}");
-            }
-            drop(loaded);
+        if let Some(unloaded) = self.post_processor.unload().await
+            && unloaded.model.is_some()
+        {
             info!("Post-processor unloaded");
         }
     }

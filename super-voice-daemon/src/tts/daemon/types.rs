@@ -6,7 +6,7 @@ use crate::tts::download_progress::DownloadStateManager;
 use crate::tts::tts_models::backends::{self, DiscoveredBackend};
 use anyhow::Result;
 use std::sync::Arc;
-use super_engine_daemon::load_gate::LoadGate;
+use super_engine_daemon::model_slot::{ModelSlot, SlotModel};
 use super_engine_daemon::secrets::Secrets;
 use super_voice_shared::tts::models::protocol::DaemonStatusEvent;
 use tokio::sync::broadcast;
@@ -80,8 +80,22 @@ impl LoadedModel {
     }
 }
 
-/// Shared handle to the currently-loaded model (or `None` while idle/loading).
-pub type SharedLoadedModel = Arc<tokio::sync::RwLock<Option<LoadedModel>>>;
+impl SlotModel for LoadedModel {
+    async fn shutdown(&mut self) {
+        if let Err(e) = self.instance.shutdown().await {
+            log::warn!("backend shutdown failed: {e}");
+        }
+    }
+}
+
+/// Shared handle to the synthesis model's slot: the model (or `None` while
+/// idle/loading), and every load and unload of it.
+pub type SharedLoadedModel = Arc<ModelSlot<LoadedModel>>;
+
+/// A load's turn at the synthesis slot: what
+/// [`instantiate_backend`](SuperTTSDaemon::instantiate_backend) needs, and
+/// what puts the model it loaded in the slot.
+pub type LoadTurn<'a> = super_engine_daemon::model_slot::LoadTurn<'a, LoadedModel>;
 
 /// Text to speech's part of the daemon: its model slot and speech engine, its
 /// voices, its backends, and handles on what the daemon has once — the config,
@@ -119,13 +133,6 @@ pub struct SuperTTSDaemon {
     // Reference clips for cloned voices. Shared with `speech`, which resolves
     // a `voice:<uuid>` id against it. See `crate::tts::voices`.
     pub voices: Arc<crate::tts::voices::VoiceLibrary>,
-    // One model loads at a time, and the newest request is the one that wins.
-    // Read in `instantiate_backend`, which every load path funnels through.
-    // See `super_engine_daemon::load_gate`.
-    pub loading: Arc<LoadGate>,
-    // The synthesis model's last use, for unloading it when idle. See
-    // `model_management::idle`.
-    pub idle: Arc<crate::idle_unload::IdleTracker>,
     // The secrets file: the session tokens the daemon has issued and every
     // backend's API keys. One per process, opened at startup; clones share it.
     pub secrets: Secrets,
@@ -141,6 +148,17 @@ pub struct Shared {
     pub shutdown_tx: broadcast::Sender<()>,
 }
 
+/// Put `model` in `slot` on a load turn of its own, as a load would. For
+/// tests that seed a loaded model.
+#[cfg(test)]
+pub(crate) async fn put_model(slot: &SharedLoadedModel, model: LoadedModel) {
+    slot.begin_load()
+        .await
+        .expect("nothing else loads in a test")
+        .install(model)
+        .await;
+}
+
 /// A daemon wired up with inert defaults: no model, no backends, nothing
 /// selected, and a `DaemonConfig::default()` that is never written to disk.
 ///
@@ -152,7 +170,7 @@ pub struct Shared {
 pub(crate) async fn test_daemon() -> SuperTTSDaemon {
     let (shutdown_tx, _) = broadcast::channel(1);
     SuperTTSDaemon {
-        model: Arc::new(tokio::sync::RwLock::new(None)),
+        model: Arc::default(),
         shutdown_tx,
         events: Arc::new(EventBus::new()),
         download_manager: Arc::new(DownloadStateManager::new()),
@@ -183,8 +201,6 @@ pub(crate) async fn test_daemon() -> SuperTTSDaemon {
                 channels: 1,
             },
         )),
-        loading: Arc::new(LoadGate::default()),
-        idle: Arc::default(),
         // In memory: no daemon test reads or writes the user's secrets file.
         secrets: Secrets::in_memory(),
     }

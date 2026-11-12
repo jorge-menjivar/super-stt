@@ -21,7 +21,7 @@ sub-resource of its singular noun:
 
 | Path | Method | Does |
 |---|---|---|
-| [`/tts/voice/list`](#get-ttsvoicelist)        | `GET`    | Every stored voice, plus what the loaded model can do with them |
+| [`/tts/voice/list`](#get-ttsvoicelist)        | `GET`    | Every stored voice, plus what the model that speaks can do with them |
 | [`/tts/voice`](#post-ttsvoice)                | `POST`   | Add one — the body is the WAV itself |
 | [`/tts/voice/{id}`](#get-ttsvoiceid)          | `GET`    | One voice's metadata |
 | [`/tts/voice/{id}`](#patch-ttsvoiceid)        | `PATCH`  | Rename it |
@@ -104,11 +104,13 @@ Authorization: Bearer …64hex…
 value without its prefix, for building paths under `/tts/voice`. `transcript` is
 omitted entirely when the voice was stored without one.
 
-`model` describes what the **currently loaded** model can do with these voices,
-and is `null` when nothing is loaded. It is the answer to the three questions a
-voices UI has: whether to offer cloning at all (`clones`), how much of a
-recording will actually be used (`clone_ref_seconds`), and whether to ask the
-user what the clip says (`needs_transcript`). The library itself is
+`model` describes what the model that speaks can do with these voices: the
+**currently loaded** one or, when the daemon unloads idle models
+([`/settings/idle_unload`](../settings/idle_unload.md)), the selected one the
+next request loads. It is `null` when there is neither. It is the answer to the
+three questions a voices UI has: whether to offer cloning at all (`clones`),
+how much of a recording will actually be used (`clone_ref_seconds`), and
+whether to ask the user what the clip says (`needs_transcript`). The library itself is
 model-independent — these fields change when the user switches models, the
 stored voices do not.
 

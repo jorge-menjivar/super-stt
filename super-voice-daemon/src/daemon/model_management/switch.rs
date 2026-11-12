@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::device_management::PipelineStage;
-use crate::daemon::types::SuperSTTDaemon;
+use crate::daemon::types::{LoadTurn, SuperSTTDaemon};
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends;
 use crate::stt_models::transcribe::Transcribe;
@@ -9,15 +9,17 @@ use super_voice_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, Er
 
 impl SuperSTTDaemon {
     /// Reject a model/backend/device mutation while a daemon-mic recording is in
-    /// flight. `action` names the operation for the human `message` (e.g.
+    /// flight, or waiting for its model to load. `action` names the operation for the human `message` (e.g.
     /// "change the backend", "switch models"); the machine-readable identity is
     /// always [`ErrorCode::RecordingInProgress`], so callers and clients never
     /// depend on the wording. Real-time (WebSocket) sessions are guarded
     /// separately — they hold the `model` read lock for their duration, so a
     /// mutation's write-lock acquisition already serializes behind them.
     /// Returns `None` when idle.
-    pub(crate) async fn guard_model_mutation(&self, action: &str) -> Option<DaemonResponse> {
-        if *self.busy.read().await {
+    pub(crate) fn guard_model_mutation(&self, action: &str) -> Option<DaemonResponse> {
+        // A recording waiting for its model counts: it starts capturing the
+        // moment that load finishes, with whatever model the slot then holds.
+        if self.recording.is_busy() {
             return Some(DaemonResponse::error_with_code(
                 ErrorCode::RecordingInProgress,
                 &format!("Cannot {action} during active recording. Please wait for it to finish."),
@@ -28,8 +30,8 @@ impl SuperSTTDaemon {
 
     /// Backend-mutation guard (`change the backend`) shared by the
     /// set/clear/unload active-backend commands and the HTTP uninstall handler.
-    pub(crate) async fn switch_guard(&self) -> Option<DaemonResponse> {
-        self.guard_model_mutation("change the backend").await
+    pub(crate) fn switch_guard(&self) -> Option<DaemonResponse> {
+        self.guard_model_mutation("change the backend")
     }
 
     /// `source` (repo id) of the currently selected backend, or `None` when
@@ -74,7 +76,7 @@ impl SuperSTTDaemon {
     /// the loaded model. Does not load a model — only `set_model` can fail at
     /// runtime.
     pub async fn handle_set_active_backend(&self, source: String) -> DaemonResponse {
-        if let Some(resp) = self.switch_guard().await {
+        if let Some(resp) = self.switch_guard() {
             return resp;
         }
         let dir_name = {
@@ -109,9 +111,11 @@ impl SuperSTTDaemon {
         // model (if any) is from the requested backend, otherwise the daemon
         // is idle. Same-source re-selects don't disturb a loaded model.
         let prev_dir = self.active_backend.read().await.clone();
-        if prev_dir.as_deref() != Some(dir_name.as_str()) {
-            self.unload_current_model().await;
-        }
+        let _unloaded = if prev_dir.as_deref() == Some(dir_name.as_str()) {
+            None
+        } else {
+            self.unload_current_model().await
+        };
 
         *self.active_backend.write().await = Some(dir_name.clone());
         self.config
@@ -148,10 +152,10 @@ impl SuperSTTDaemon {
 
     /// Clear the active backend: unload any model and return to idle.
     pub async fn handle_clear_active_backend(&self) -> DaemonResponse {
-        if let Some(resp) = self.switch_guard().await {
+        if let Some(resp) = self.switch_guard() {
             return resp;
         }
-        self.unload_current_model().await;
+        let _unloaded = self.unload_current_model().await;
         *self.active_backend.write().await = None;
         self.config.write().await.clear_active_backend();
         if let Err(e) = self.persist_config().await {
@@ -247,7 +251,10 @@ impl SuperSTTDaemon {
         }
 
         self.broadcast_model_loading_status(&model, PipelineStage::Transcription);
-        self.unload_current_model().await;
+        // Takes the current model out once it is this load's turn.
+        let Some(turn) = self.model.begin_load().await else {
+            return super::superseded("switch", &model);
+        };
         let chosen = self
             .config
             .read()
@@ -257,6 +264,7 @@ impl SuperSTTDaemon {
 
         match self
             .instantiate_backend(
+                &turn,
                 &model,
                 &backend_source,
                 chosen.as_deref(),
@@ -265,8 +273,14 @@ impl SuperSTTDaemon {
             .await
         {
             Ok((instance, definition)) => {
-                self.finalize_model_switch_success(model, backend_source, definition, instance)
-                    .await
+                self.finalize_model_switch_success(
+                    turn,
+                    model,
+                    backend_source,
+                    definition,
+                    instance,
+                )
+                .await
             }
             Err(e) => {
                 error!("Model switch failed: {e}");
@@ -277,12 +291,13 @@ impl SuperSTTDaemon {
 
     pub(super) async fn finalize_model_switch_success(
         &self,
+        turn: LoadTurn<'_>,
         model: String,
         source: String,
         definition: ModelDefinition,
         instance: Box<dyn Transcribe>,
     ) -> DaemonResponse {
-        let actual_device = self.finalize_loaded_model(definition, instance).await;
+        let actual_device = self.finalize_loaded_model(turn, definition, instance).await;
         {
             let mut config_guard = self.config.write().await;
             config_guard.update_preferred_model(model.clone(), source.clone());
@@ -304,7 +319,7 @@ impl SuperSTTDaemon {
     }
 
     async fn preflight_model_switch(&self, model: &str, source: &str) -> Option<DaemonResponse> {
-        if let Some(resp) = self.guard_model_mutation("switch models").await {
+        if let Some(resp) = self.guard_model_mutation("switch models") {
             warn!("Model switch rejected - recording in progress");
             return Some(resp);
         }

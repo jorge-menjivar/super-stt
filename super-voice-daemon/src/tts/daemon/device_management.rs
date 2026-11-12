@@ -13,7 +13,7 @@
 //! same `{ device, resolved_accel, available_devices }` body so a client never
 //! has to know which case it hit.
 
-use crate::tts::daemon::types::{SuperTTSDaemon, normalize_device};
+use crate::tts::daemon::types::{LoadTurn, SuperTTSDaemon, normalize_device};
 use crate::tts::tts_models::ModelDefinition;
 use crate::tts::tts_models::backends;
 use crate::tts::tts_models::synthesize::Synthesize;
@@ -89,12 +89,18 @@ impl SuperTTSDaemon {
         fallback: &str,
         mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
     ) -> DaemonResponse {
-        // Broadcast device switching status and unload current model
+        // Broadcast device switching status
         self.prepare_device_switch(from, device, model).await;
+        // The model is taken out, and its backend stopped, once it is this
+        // load's turn. The turn holds the slot through the recovery below, so
+        // no other load lands in between.
+        let Some(turn) = self.model.begin_load().await else {
+            return super::model_management::superseded("device switch", model);
+        };
 
         // Try to reload model with the requested device, but cancel if shutdown occurs
         let load_result = tokio::select! {
-            result = self.load_model_with_target_device(model, source, device) => {
+            result = self.load_model_with_target_device(&turn, model, source, device) => {
                 result
             }
             _ = shutdown_rx.recv() => {
@@ -105,17 +111,18 @@ impl SuperTTSDaemon {
 
         match load_result {
             Ok(model_instance) => {
-                self.handle_device_switch_success(model_instance, device, model, source, from)
+                self.handle_device_switch_success(turn, model_instance, device, model, source, from)
                     .await
             }
             Err(e) => {
-                self.handle_device_switch_failure(e, device, model, source, fallback)
+                self.handle_device_switch_failure(turn, e, device, model, source, fallback)
                     .await
             }
         }
     }
 
-    /// Prepare for device switch by broadcasting status and unloading current model
+    /// Prepare for device switch by broadcasting status. The model is taken
+    /// out on the reload's turn.
     async fn prepare_device_switch(&self, from_device: &str, to_device: &str, model: &str) {
         // Stage `actual_device` at the target for the duration of the switch,
         // so `get_device` does not keep reporting the device the model just
@@ -135,17 +142,12 @@ impl SuperTTSDaemon {
                 target_device: to_device.to_string(),
                 model: model.to_string(),
             });
-
-        // Unload current model (free memory). Route through the shared graceful
-        // path so the backend is `shutdown()` outside the write lock rather than
-        // dropped under it — a subprocess `Drop` can block for seconds freeing
-        // GPU memory, which would stall every reader (Tier 3 #2).
-        self.unload_current_model().await;
     }
 
     /// Handle successful device switch
     async fn handle_device_switch_success(
         &self,
+        turn: LoadTurn<'_>,
         model_instance: Box<dyn Synthesize>,
         device: &str,
         model_to_reload: &str,
@@ -166,7 +168,9 @@ impl SuperTTSDaemon {
                  uninstalled during the device switch)"
             ));
         };
-        let actual_device = self.finalize_loaded_model(definition, model_instance).await;
+        let actual_device = self
+            .finalize_loaded_model(turn, definition, model_instance)
+            .await;
 
         // Record the preference only now: a switch that failed to load must
         // leave the stored device as it was, or a daemon restart would put the
@@ -195,6 +199,7 @@ impl SuperTTSDaemon {
     /// again on `fallback`, the framework its setting loads it on.
     async fn handle_device_switch_failure(
         &self,
+        turn: LoadTurn<'_>,
         error: anyhow::Error,
         device: &str,
         model_to_reload: &str,
@@ -224,7 +229,7 @@ impl SuperTTSDaemon {
         warn!("Attempting to recover by reloading {model_to_reload} on {fallback}, its setting");
 
         match self
-            .load_model_with_target_device(model_to_reload, source, fallback)
+            .load_model_with_target_device(&turn, model_to_reload, source, fallback)
             .await
         {
             Ok(model_instance) => {
@@ -242,8 +247,9 @@ impl SuperTTSDaemon {
                 // Install the recovered model and record its actual device.
                 // The model's stored choice was never changed: it is stored
                 // only after a load succeeds, so there is nothing to revert.
-                let recovery_actual_device =
-                    self.finalize_loaded_model(definition, model_instance).await;
+                let recovery_actual_device = self
+                    .finalize_loaded_model(turn, definition, model_instance)
+                    .await;
 
                 warn!(
                     "Recovery successful - reloaded on {fallback} (actual: {recovery_actual_device})"

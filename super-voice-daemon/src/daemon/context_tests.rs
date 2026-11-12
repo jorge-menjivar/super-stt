@@ -403,8 +403,8 @@ async fn two_stages_on_two_backends(
 
     let (stage1, seen1) = stage("whisper-1", transcription, ModelRole::Transcription);
     let (stage2, seen2) = stage("tidy", processor, ModelRole::PostProcessor);
-    *daemon.model.write().await = Some(stage1);
-    *daemon.post_processor.write().await = Some(stage2);
+    crate::daemon::types::put_model(&daemon.model, stage1).await;
+    crate::daemon::types::put_model(&daemon.post_processor, stage2).await;
 
     (transcription, processor, seen1, seen2)
 }

@@ -73,6 +73,7 @@ the reason:
 | Failure                                | Summary                     | Body                             |
 |----------------------------------------|-----------------------------|----------------------------------|
 | No model is loaded                     | `No model loaded`           | `Load a model and try again.`    |
+| The selected model failed to load      | `Could not load the model`  | The reason, from the daemon      |
 | The recorder could not start           | `Could not start recording` | The reason, from the daemon      |
 | Capture died partway                   | `Recording failed`          | The reason, from the daemon      |
 | The audio was not transcribed          | `Transcription failed`      | The reason, from the backend     |
@@ -93,6 +94,7 @@ backend text:
 
 ```
 [Super Voice: no model loaded]
+[Super Voice: could not load the model]
 [Super Voice: could not start recording]
 [Super Voice: recording failed]
 [Super Voice: transcription failed]

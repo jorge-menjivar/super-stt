@@ -585,7 +585,7 @@ struct Forgetful {
     attempts: Arc<Mutex<usize>>,
 }
 
-fn forgetful(amnesiac: bool) -> Forgetful {
+async fn forgetful(amnesiac: bool) -> Forgetful {
     let definition = cloning_model(2.0, false);
     let log = Arc::new(Log::default());
     let known = Arc::new(Mutex::new(Vec::new()));
@@ -603,10 +603,9 @@ fn forgetful(amnesiac: bool) -> Forgetful {
         attempts: Arc::clone(&attempts),
         amnesiac,
     };
-    let model = Arc::new(tokio::sync::RwLock::new(Some(LoadedModel::new(
-        definition,
-        Box::new(backend),
-    ))));
+    let model: crate::tts::daemon::types::SharedLoadedModel = Arc::default();
+    crate::tts::daemon::types::put_model(&model, LoadedModel::new(definition, Box::new(backend)))
+        .await;
     Forgetful {
         model,
         log,
@@ -623,7 +622,7 @@ async fn a_backend_that_lost_a_cloned_voice_is_given_it_again() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, library) = engine(dir.path());
     let voice = library.create(&clip(3.0), "Ada", None).unwrap().voice_id();
-    let backend = forgetful(false);
+    let backend = forgetful(false).await;
 
     engine
         .speak(&backend.model, "Hello there.", Some(&voice), None)
@@ -653,7 +652,7 @@ async fn a_voice_refused_again_after_the_retry_fails_the_utterance() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, library) = engine(dir.path());
     let voice = library.create(&clip(3.0), "Ada", None).unwrap().voice_id();
-    let backend = forgetful(true);
+    let backend = forgetful(true).await;
 
     let error = engine
         .speak(&backend.model, "Hello there.", Some(&voice), None)
