@@ -2153,3 +2153,33 @@ async fn shutdown_waits_for_an_idle_unload_in_progress() {
         .expect("shutdown finishes once the unload has")
         .expect("no panic");
 }
+
+/// Text that cannot be spoken is refused before a model is loaded for it, so
+/// with idle unload on an empty request does not load a model only to fail.
+#[tokio::test]
+async fn speak_refuses_text_before_loading_a_model() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/openai";
+    {
+        let mut config = daemon.config.write().await;
+        config.update_synthesis_model("kokoro-1".into(), source.into());
+        config.idle_unload.after_secs = 30;
+    }
+    // A load waits for this, so a refusal that returns at once never tried one.
+    let _loading = daemon.idle.loading.lock().await;
+
+    for text in [
+        "",
+        "   ",
+        &"a".repeat(crate::tts::daemon::speech::MAX_TEXT_CHARS + 1),
+    ] {
+        let response = tokio::time::timeout(
+            Duration::from_secs(1),
+            daemon.handle_speak(text.to_string()),
+        )
+        .await
+        .expect("refused without waiting for a load");
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidValue));
+    }
+}
