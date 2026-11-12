@@ -12,6 +12,8 @@ pub mod input;
 pub mod limits;
 pub mod old_data;
 pub mod output;
+#[cfg(target_os = "linux")]
+mod portal;
 pub mod registry;
 pub mod secret_headers;
 pub use super_engine_daemon::resource_management;
