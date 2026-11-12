@@ -3,7 +3,10 @@
 mod preview;
 #[cfg(feature = "wasm-backends")]
 mod realtime;
+pub(crate) mod state;
 mod transcribe;
+
+pub(crate) use state::{Claim, RecordingState, Stopped};
 
 use crate::daemon::model_management::idle::ModelWait;
 use crate::daemon::types::SuperSTTDaemon;
@@ -18,6 +21,14 @@ use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
 use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
 use super_voice_shared::theme::AudioTheme;
 use tokio::time::Instant;
+
+/// How a take records: what ends it, whether its previews are typed, and the
+/// cues it plays. Settled when the request arrives.
+pub(crate) struct TakeSettings {
+    pub(crate) stop_mode: RecordingStopMode,
+    pub(crate) preview_typing: bool,
+    pub(crate) cue_theme: AudioTheme,
+}
 
 /// `client_id` reported on every daemon-mic lifecycle event.
 const CLIENT_ID: &str = "daemon_recorder";
@@ -107,6 +118,36 @@ impl SuperSTTDaemon {
         .await;
     }
 
+    /// Stop the recording on request: a second press of the hotkey, or
+    /// `POST /stt/transcribe/stop`. Cancels one waiting for its model; tells
+    /// one capturing to stop when `manual_stop` (its stop mode) allows it. It
+    /// never starts a recording, whatever happened since the caller looked.
+    pub(crate) fn stop_recording(&self, manual_stop: bool) -> DaemonResponse {
+        const TRANSCRIBING: &str = "Transcription in progress, please wait";
+        if self.recording.is_transcribing() {
+            info!("{TRANSCRIBING}");
+            return DaemonResponse::success().with_message(TRANSCRIBING.to_string());
+        }
+        if !manual_stop && self.recording.is_busy() && !self.recording.is_waiting() {
+            info!("Second press ignored: recording in SilenceOnly mode");
+            return DaemonResponse::success()
+                .with_message("Manual stop not enabled in current mode".to_string());
+        }
+        let message = match self.recording.stop() {
+            Stopped::NothingToStop => "No recording in progress",
+            Stopped::Cancelled => {
+                info!("Cancelled the recording that was waiting for its model to load");
+                DaemonResponse::RECORDING_STOP_SIGNAL_MSG
+            }
+            Stopped::Signalled => {
+                info!("🛑 Stop triggered while recording");
+                DaemonResponse::RECORDING_STOP_SIGNAL_MSG
+            }
+            Stopped::Transcribing => TRANSCRIBING,
+        };
+        DaemonResponse::success().with_message(message.to_string())
+    }
+
     /// Internal record handling implementation
     pub async fn handle_record_internal(
         &self,
@@ -117,31 +158,28 @@ impl SuperSTTDaemon {
         cue_theme: AudioTheme,
         request_language: Option<&str>,
     ) -> DaemonResponse {
-        // Check if already busy - prevent multiple simultaneous recordings
-        {
-            let busy_guard = self.busy.read().await;
-            if *busy_guard {
-                warn!("Recording request rejected - already recording");
-                return DaemonResponse::error_with_code(
-                    ErrorCode::RecordingInProgress,
-                    "Recording already in progress. Please wait for current recording to complete.",
-                );
-            }
-        }
+        // One recording at a time. The claim is this recording's for its whole
+        // take, and dropping it, however the take ends, frees the microphone.
+        let Some((claim, cancelled)) = self.recording.reserve() else {
+            warn!("Recording request rejected - already recording");
+            let message = if self.recording.is_waiting() {
+                "A recording is already waiting for its model to load."
+            } else {
+                "Recording already in progress. Please wait for current recording to complete."
+            };
+            return DaemonResponse::error_with_code(ErrorCode::RecordingInProgress, message);
+        };
 
-        match self.ensure_model_loaded_for_recording().await {
+        match self.wait_for_model(cancelled).await {
             ModelWait::Ready => {}
             ModelWait::Cancelled => {
                 return DaemonResponse::success()
                     .with_message(DaemonResponse::RECORDING_CANCELLED_MSG.to_string())
                     .with_transcription(String::new());
             }
-            // One recording waits for the model at a time, as one records at
-            // a time.
             // A model is selected and failed to load: say that, not "no
             // model loaded", which would send the user to load one.
             ModelWait::LoadFailed(detail) => {
-                self.release_pending_recording();
                 warn!("Recording request rejected - its model failed to load");
                 self.surface_failure(
                     typer,
@@ -154,13 +192,6 @@ impl SuperSTTDaemon {
                     &format!("Could not load the model: {detail}"),
                 );
             }
-            ModelWait::AnotherWaiting => {
-                warn!("Recording request rejected - one is waiting for its model");
-                return DaemonResponse::error_with_code(
-                    ErrorCode::RecordingInProgress,
-                    "A recording is already waiting for its model to load.",
-                );
-            }
         }
 
         // Fail before capture. With no model loaded the cycle can only end in a
@@ -168,7 +199,6 @@ impl SuperSTTDaemon {
         // take — beeps, speech, and all — to learn nothing. In write mode the
         // reason lands in the field they are actually looking at.
         if self.model.read().await.is_none() {
-            self.release_pending_recording();
             warn!("Recording request rejected - no model loaded");
             self.surface_failure(typer, &notice::Failure::no_model_loaded(), write_mode)
                 .await;
@@ -181,11 +211,14 @@ impl SuperSTTDaemon {
         // Wait for recording to complete and return the transcription.
         match self
             .record_and_transcribe(
+                claim,
                 typer,
                 write_mode,
-                stop_mode,
-                preview_typing,
-                cue_theme,
+                TakeSettings {
+                    stop_mode,
+                    preview_typing,
+                    cue_theme,
+                },
                 request_language,
             )
             .await
@@ -205,7 +238,7 @@ impl SuperSTTDaemon {
                 }
             }
             // Capture/transcription failed after the cycle started. `finalize`
-            // already cleared `busy` and emitted `transcribing_stopped`; surface
+            // already freed the microphone and emitted `transcribing_stopped`; surface
             // it as an error so the HTTP layer emits the `error` SSE event
             // instead of a `done` with error text as the transcription.
             Ok(Err(detail)) => {
@@ -213,17 +246,13 @@ impl SuperSTTDaemon {
                 DaemonResponse::error(&detail)
             }
             // Setup failed before capture began: no `recording_started`/state(true)
-            // went out, so just release the busy guard the setup claimed.
-            // Stopped after its model had loaded, before it claimed `busy`.
+            // went out, and the claim was dropped with the cycle.
+            // Stopped after its model had loaded, before it took the microphone.
             Err(e) if e.is::<RecordingCancelled>() => DaemonResponse::success()
                 .with_message(DaemonResponse::RECORDING_CANCELLED_MSG.to_string())
                 .with_transcription(String::new()),
             Err(e) => {
                 error!("🎤 Recording setup failed: {e}");
-                {
-                    let mut guard = self.busy.write().await;
-                    *guard = false;
-                }
                 self.surface_failure(
                     typer,
                     &notice::Failure::could_not_start_recording(&format!("{e:#}")),
@@ -245,27 +274,25 @@ impl SuperSTTDaemon {
     /// # Panics
     ///
     /// Panics if internal locks (e.g., audio theme or buffers) are poisoned.
-    /// Run one record→transcribe cycle. The outer `Result` is a *setup* failure
-    /// (before capture began, busy not yet consumed by a cycle); the inner
+    /// Run one record→transcribe cycle on `claim`, which it frees when the
+    /// cycle ends. The outer `Result` is a *setup* failure
+    /// (before capture began); the inner
     /// `Result` is the cycle outcome — `Ok(text)` on success, `Err(detail)` when
     /// capture or transcription failed after the cycle started. A failure is
     /// never returned as `Ok` success text and is never typed into the user's
     /// window (finalize already reported it via `transcribing_stopped`).
-    pub async fn record_and_transcribe(
+    pub(crate) async fn record_and_transcribe(
         &self,
+        claim: Claim<'_>,
         typer: &mut Typer,
         write_mode: bool,
-        stop_mode: RecordingStopMode,
-        preview_typing: bool,
-        cue_theme: AudioTheme,
+        settings: TakeSettings,
         request_language: Option<&str>,
     ) -> Result<Result<String, String>> {
         info!("Starting direct audio recording in daemon with simplified architecture");
 
-        // Phase 1: spawn the recorder. `busy` is set inside setup.
-        let (session, capture_started) = self
-            .spawn_recorder(write_mode, stop_mode, preview_typing, cue_theme)
-            .await?;
+        // Phase 1: take the microphone and spawn the recorder.
+        let (session, capture_started) = self.spawn_recorder(&claim, settings).await?;
         // Announce capture once the microphone is capturing, not when the
         // recorder is spawned: the start cue plays first, and a widget lit up
         // during it invites speech the take never hears. A recorder that fails
@@ -298,7 +325,7 @@ impl SuperSTTDaemon {
 
         // Phase 3: await the recorder; the mic releases here.
         let full_audio_data = match self
-            .collect_and_clear_preview(session, typer, write_mode)
+            .collect_and_clear_preview(&claim, session, typer, write_mode)
             .await
         {
             Ok(data) => {
@@ -311,8 +338,7 @@ impl SuperSTTDaemon {
                 // surfaced as an inner `Err`, never as success text.
                 self.emit_mic_stopped();
                 warn!("Recording capture failed: {e}");
-                self.finalize_recording_session("", false, Some(e.to_string()))
-                    .await;
+                self.finalize_recording_session(claim, "", false, Some(e.to_string()));
                 self.surface_failure(
                     typer,
                     &notice::Failure::recording_failed(&format!("{e:#}")),
@@ -338,7 +364,7 @@ impl SuperSTTDaemon {
             // begins. `finalize_recording_session` still emits `final_stt` with
             // empty text plus the closing `transcribing_stopped`, which is what
             // the events contract requires (docs/protocol/endpoints/v1/events.md).
-            self.finalize_recording_session("", true, None).await;
+            self.finalize_recording_session(claim, "", true, None);
             return Ok(Ok(String::new()));
         }
 
@@ -364,8 +390,7 @@ impl SuperSTTDaemon {
                     // surfaces as an inner `Err` so the HTTP layer emits the
                     // contract's `error` event.
                     warn!("Final transcription failed: {e}");
-                    self.finalize_recording_session("", false, Some(e.to_string()))
-                        .await;
+                    self.finalize_recording_session(claim, "", false, Some(e.to_string()));
                     // `e.origin` is why the notice can say whether the daemon or
                     // the backend is the one refusing; the chain form is the
                     // reason it shows.
@@ -396,34 +421,22 @@ impl SuperSTTDaemon {
         }
 
         // Phase 6: finalize the cycle.
-        self.finalize_recording_session(&transcription_result, true, None)
-            .await;
+        self.finalize_recording_session(claim, &transcription_result, true, None);
 
         Ok(Ok(transcription_result))
     }
 
-    /// Set up recording state and create audio recorder
+    /// Take the microphone on `claim` and create the audio recorder. Returns
+    /// the recorder and the receiver it stops on, which a stop reaches from
+    /// the moment the microphone is taken, while the recorder is still being
+    /// built.
     pub(super) async fn setup_recording_session(
         &self,
-        _write_mode: bool,
+        claim: &Claim<'_>,
         cue_theme: AudioTheme,
-    ) -> Result<DaemonAudioRecorder> {
-        // Double-check busy state and set atomically
-        {
-            let mut busy_guard = self.busy.write().await;
-            if *busy_guard {
-                error!("Recording already in progress - rejecting duplicate request");
-                return Err(anyhow::anyhow!("Recording already in progress"));
-            }
-            // The reservation a recording that waited for its model holds is
-            // given up here, under the same lock that makes it busy: a stop
-            // reaches one or the other, never neither.
-            if !self.start_reserved_recording() {
-                return Err(RecordingCancelled.into());
-            }
-            // Set busy state to true atomically
-            *busy_guard = true;
-        }
+    ) -> Result<(DaemonAudioRecorder, tokio::sync::broadcast::Receiver<()>)> {
+        // Cancelled by a stop while it waited for its model.
+        let stop = claim.start()?;
 
         // Create audio recorder with this take's cue theme and the current
         // volume. Construction runs the cpal cold-start (default host/output
@@ -443,12 +456,13 @@ impl SuperSTTDaemon {
         // Initialize the recorder for threaded operation
         recorder.prepare_for_threaded_recording();
 
-        Ok(recorder)
+        Ok((recorder, stop))
     }
 
     /// Emit "mic capture ended" on the widget bus the instant audio capture
     /// stops (Phase 3), independent of the transcription that follows so
-    /// widgets drop the live visualization immediately. `busy` stays true.
+    /// widgets drop the live visualization immediately. The recording stays
+    /// under way until it is finalized.
     pub(super) fn emit_mic_stopped(&self) {
         self.events
             .publish_recording_stopped(crate::daemon::events::RecordingStoppedEvent {
@@ -478,19 +492,18 @@ impl SuperSTTDaemon {
             });
     }
 
-    /// Finalize the cycle: clear the busy guard and emit the transcription
-    /// result + the transcribing-stopped lifecycle event. Called exactly
-    /// once per cycle that reached the transcription phase.
-    pub(super) async fn finalize_recording_session(
+    /// Finalize the cycle: free the microphone, then emit the transcription
+    /// result + the transcribing-stopped lifecycle event, so a client that
+    /// reacts to them finds no recording under way. Called exactly once per
+    /// cycle that reached the transcription phase.
+    pub(super) fn finalize_recording_session(
         &self,
+        claim: Claim<'_>,
         final_text: &str,
         transcription_success: bool,
         error: Option<String>,
     ) {
-        {
-            let mut busy_guard = self.busy.write().await;
-            *busy_guard = false;
-        }
+        drop(claim);
 
         // Final transcription text — success only; failures are conveyed by
         // transcribing_stopped's `error`. Widgets need `global_transcriptions`.

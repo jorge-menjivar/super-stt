@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{daemon::types::SuperSTTDaemon, output::keyboard::Simulator, output::typer::Typer};
-use super_voice_shared::models::protocol::{Command, DaemonRequest, DaemonResponse};
+use super_voice_shared::models::protocol::{Command, DaemonRequest, DaemonResponse, ErrorCode};
 use super_voice_shared::theme::AudioTheme;
 
 impl SuperSTTDaemon {
@@ -165,26 +165,19 @@ impl SuperSTTDaemon {
             config.transcription.recording_stop_mode
         };
 
-        // Toggle behaviour: if already busy, stop it (if mode allows)
-        let busy = *self.busy.read().await;
-        if busy {
-            let guard = self.manual_stop_tx.read().await;
-            if guard.is_none() {
-                log::info!("Transcription in progress, please wait");
-                return DaemonResponse::success()
-                    .with_message("Transcription in progress, please wait".to_string());
-            }
-            if !effective_mode.manual_stop_enabled() {
-                log::info!("Second press ignored: recording in SilenceOnly mode");
-                return DaemonResponse::success()
-                    .with_message("Manual stop not enabled in current mode".to_string());
-            }
-            if let Some(tx) = guard.as_ref() {
-                let _ = tx.send(());
-                log::info!("🛑 Stop triggered via shortcut while recording");
-            }
-            return DaemonResponse::success()
-                .with_message(DaemonResponse::RECORDING_STOP_SIGNAL_MSG.to_string());
+        // A second start while one waits for its model is refused, and leaves
+        // it waiting: only a stop cancels it. Refused here, before a keyboard
+        // is built for a recording that will not run.
+        if self.recording.is_waiting() {
+            log::warn!("Recording request rejected - one is waiting for its model");
+            return DaemonResponse::error_with_code(
+                ErrorCode::RecordingInProgress,
+                "A recording is already waiting for its model to load.",
+            );
+        }
+        // Toggle behaviour: if one is recording, stop it (if mode allows)
+        if self.recording.is_busy() {
+            return self.stop_recording(effective_mode.manual_stop_enabled());
         }
         // Only a write-mode recording types: previews, the final transcript and
         // failure notices are all gated on it. Any other recording skips the

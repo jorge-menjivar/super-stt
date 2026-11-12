@@ -38,7 +38,7 @@ impl SuperSTTDaemon {
         // still depends on, the same reason uninstall refuses. The duplicate
         // is harmless until the next refresh.
         if !losers.is_empty() {
-            if self.switch_guard().await.is_some() || self.tts.is_busy() {
+            if self.switch_guard().is_some() || self.tts.is_busy() {
                 log::warn!(
                     "{} duplicate backend director(ies) left for a later refresh: \
                      a backend is busy",
@@ -173,7 +173,9 @@ mod tests {
         write_backend(&loser, "1.0.0");
 
         let daemon = test_daemon().await;
-        *daemon.busy.write().await = true;
+        // A recording under way, for as long as its claim is held.
+        let (recording, _cancelled) = daemon.recording.reserve().expect("free");
+        let _stop = recording.start().expect("not cancelled");
         daemon.config.write().await.backends_dir = Some(root.path().to_string_lossy().into_owned());
 
         daemon.refresh_backends().await;

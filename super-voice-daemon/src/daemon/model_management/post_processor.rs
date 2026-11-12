@@ -121,7 +121,7 @@ impl SuperSTTDaemon {
     /// [`handle_reload_active_model`](SuperSTTDaemon::handle_reload_active_model).
     /// No-op when stage 2 is idle; rejected during an active recording.
     pub async fn handle_reload_post_processor(&self) -> DaemonResponse {
-        if let Some(resp) = self.guard_model_mutation("reload the post-processor").await {
+        if let Some(resp) = self.guard_model_mutation("reload the post-processor") {
             return resp;
         }
         if !self.post_processor_loaded().await {

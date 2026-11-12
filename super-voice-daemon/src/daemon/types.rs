@@ -89,16 +89,6 @@ pub struct PreviewFrame {
 pub type PreviewSlot =
     Arc<tokio::sync::RwLock<Option<(u64, tokio::sync::mpsc::UnboundedSender<PreviewFrame>)>>>;
 
-/// The recording that has not started capturing yet: reserved from when it
-/// begins waiting for its model until it claims `busy`, so a stop always has
-/// one of the two to reach.
-pub type PendingRecording = Arc<std::sync::Mutex<Option<PendingStart>>>;
-
-/// A reserved recording's cancel handle. `None` once it has been cancelled:
-/// the reservation stays, marked, until the recording itself gives it up.
-#[derive(Debug)]
-pub struct PendingStart(pub(crate) Option<tokio::sync::oneshot::Sender<()>>);
-
 #[derive(Clone)]
 pub struct SuperSTTDaemon {
     pub model: SharedLoadedModel,
@@ -120,7 +110,10 @@ pub struct SuperSTTDaemon {
     pub events: Arc<EventBus>,
     pub audio_theme: Arc<RwLock<AudioTheme>>,
     pub volume: Arc<RwLock<u8>>,
-    pub busy: Arc<tokio::sync::RwLock<bool>>,
+    // The microphone recording, if one is under way: waiting for its model,
+    // capturing, or transcribing, and how to stop it. See
+    // `crate::daemon::recording::state`.
+    pub(crate) recording: Arc<crate::daemon::recording::RecordingState>,
     pub download_manager: Arc<DownloadStateManager>,
     // Configuration management
     pub config: Arc<tokio::sync::RwLock<DaemonConfig>>,
@@ -128,8 +121,6 @@ pub struct SuperSTTDaemon {
     pub resource_manager: Arc<ResourceManager>,
     // Preview typing setting (beta feature)
     pub preview_typing_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    // Sender used to signal a running recording to stop early (shortcut or external stop)
-    pub manual_stop_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::broadcast::Sender<()>>>>,
     // Cached keyboard simulator (session persists across recordings, except
     // for backends that go stale while idle — see `Simulator::is_cacheable`)
     pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
@@ -153,10 +144,6 @@ pub struct SuperSTTDaemon {
     // Self-update check state: last completed check + notify-once
     // persistence. See `crate::self_update`.
     pub self_update: Arc<crate::self_update::SelfUpdateChecker>,
-    // The recording waiting for its model to load, if one is: nothing is
-    // capturing yet, so `busy` is false and there is no `manual_stop_tx`. See
-    // `model_management::idle`.
-    pub pending_recording: PendingRecording,
     // The secrets file: the session tokens the daemon has issued and every
     // backend's API keys. One per process, opened at startup; clones share it.
     pub secrets: Secrets,
@@ -194,12 +181,11 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         events: Arc::new(EventBus::new()),
         audio_theme: Arc::new(RwLock::new(AudioTheme::default())),
         volume: Arc::new(RwLock::new(100)),
-        busy: Arc::new(tokio::sync::RwLock::new(false)),
+        recording: Arc::default(),
         download_manager: Arc::new(DownloadStateManager::new()),
         config: Arc::new(tokio::sync::RwLock::new(DaemonConfig::default())),
         resource_manager: Arc::new(ResourceManager::development()),
         preview_typing_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
         simulator: Arc::new(tokio::sync::RwLock::new(None)),
         preview_text: Arc::new(tokio::sync::RwLock::new(None)),
         backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
@@ -217,7 +203,6 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
             crate::output::notification::Notifier::fake(true).0,
         )),
         self_update: Arc::new(crate::self_update::checker()),
-        pending_recording: Arc::default(),
         // In memory: no daemon test reads or writes the user's secrets file.
         secrets: Secrets::in_memory(),
         tts: crate::tts::daemon::types::test_daemon().await,

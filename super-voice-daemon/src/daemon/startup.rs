@@ -130,14 +130,13 @@ impl SuperSTTDaemon {
             events,
             audio_theme: Arc::new(RwLock::new(audio_theme)),
             volume: Arc::new(RwLock::new(volume)),
-            busy: Arc::new(tokio::sync::RwLock::new(false)),
+            recording: Arc::default(),
             download_manager: components.download_manager,
             config,
             resource_manager: components.resource_manager,
             preview_typing_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 preview_typing_enabled,
             )),
-            manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
             simulator: Arc::new(tokio::sync::RwLock::new(None)),
             preview_text: Arc::new(tokio::sync::RwLock::new(None)),
             backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
@@ -147,7 +146,6 @@ impl SuperSTTDaemon {
                 crate::output::notification::Notifier::desktop(),
             )),
             self_update: Arc::new(crate::self_update::checker()),
-            pending_recording: Arc::default(),
             secrets,
             tts,
         };

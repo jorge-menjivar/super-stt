@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
+use crate::daemon::recording::Stopped;
 use crate::daemon::types::test_daemon;
 use super_voice_shared::models::protocol::ErrorCode;
 use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
@@ -40,14 +41,24 @@ fn make_record_request(data: Option<serde_json::Value>) -> DaemonRequest {
     }
 }
 
+/// Put `daemon` mid-take: a recording holds the microphone and is capturing.
+/// Holding the claim keeps it so; the receiver is what its recorder stops on.
+fn capturing(
+    daemon: &SuperSTTDaemon,
+) -> (
+    crate::daemon::recording::Claim<'_>,
+    tokio::sync::broadcast::Receiver<()>,
+) {
+    let (claim, _cancelled) = daemon.recording.reserve().expect("no recording under way");
+    let stop = claim.start().expect("not cancelled");
+    (claim, stop)
+}
+
 #[tokio::test]
 async fn stop_signal_sent_on_second_press_with_default_mode() {
     // Default config mode is SilenceAndManual, which allows manual stop
     let daemon = test_daemon().await;
-    let (tx, mut rx) = tokio::sync::broadcast::channel(1);
-
-    *daemon.busy.write().await = true;
-    *daemon.manual_stop_tx.write().await = Some(tx);
+    let (_claim, mut rx) = capturing(&daemon);
 
     let request = make_record_request(Some(serde_json::json!({
         "write_mode": false,
@@ -69,13 +80,12 @@ async fn guard_model_mutation_flags_recording_in_progress() {
     use super_voice_shared::models::protocol::ErrorCode;
     let daemon = test_daemon().await;
     // Idle: the mutation is allowed.
-    assert!(daemon.guard_model_mutation("switch models").await.is_none());
+    assert!(daemon.guard_model_mutation("switch models").is_none());
     // Recording: the unified guard rejects with the machine-readable
     // RecordingInProgress code, independent of the human `action` wording.
-    *daemon.busy.write().await = true;
+    let _recording = capturing(&daemon);
     let resp = daemon
         .guard_model_mutation("switch models")
-        .await
         .expect("mutation must be rejected while recording");
     assert_eq!(resp.status, "error");
     assert_eq!(resp.error_code, Some(ErrorCode::RecordingInProgress));
@@ -84,7 +94,6 @@ async fn guard_model_mutation_flags_recording_in_progress() {
 #[tokio::test]
 async fn second_press_ignored_in_silence_only_mode() {
     let daemon = test_daemon().await;
-    let (tx, mut rx) = tokio::sync::broadcast::channel(1);
 
     // Set daemon config to SilenceOnly
     {
@@ -93,8 +102,7 @@ async fn second_press_ignored_in_silence_only_mode() {
         config.transcription.recording_stop_mode = RecordingStopMode::SilenceOnly;
     }
 
-    *daemon.busy.write().await = true;
-    *daemon.manual_stop_tx.write().await = Some(tx);
+    let (_claim, mut rx) = capturing(&daemon);
 
     // No stop_mode in request → uses daemon config (SilenceOnly)
     let request = make_record_request(Some(serde_json::json!({
@@ -119,7 +127,6 @@ async fn second_press_ignored_in_silence_only_mode() {
 #[tokio::test]
 async fn per_request_stop_mode_overrides_config() {
     let daemon = test_daemon().await;
-    let (tx, mut rx) = tokio::sync::broadcast::channel(1);
 
     // Daemon config is SilenceOnly (no manual stop)
     {
@@ -128,8 +135,7 @@ async fn per_request_stop_mode_overrides_config() {
         config.transcription.recording_stop_mode = RecordingStopMode::SilenceOnly;
     }
 
-    *daemon.busy.write().await = true;
-    *daemon.manual_stop_tx.write().await = Some(tx);
+    let (_claim, mut rx) = capturing(&daemon);
 
     // But the request explicitly asks for manual_only mode
     let request = make_record_request(Some(serde_json::json!({
@@ -155,9 +161,9 @@ async fn per_request_stop_mode_overrides_config() {
 async fn second_press_during_transcription_returns_wait_message() {
     let daemon = test_daemon().await;
 
-    // Transcribing state: busy=true, manual_stop_tx=None
-    *daemon.busy.write().await = true;
-    // manual_stop_tx is already None by default
+    // Transcribing: the recording holds the microphone, its capture over.
+    let (claim, _stop) = capturing(&daemon);
+    claim.capture_ended();
 
     let request = make_record_request(Some(serde_json::json!({
         "write_mode": false,
@@ -174,11 +180,9 @@ async fn second_press_during_transcription_returns_wait_message() {
 #[tokio::test]
 async fn per_request_silence_only_overrides_manual_config() {
     let daemon = test_daemon().await;
-    let (tx, mut rx) = tokio::sync::broadcast::channel(1);
 
     // Config allows manual stop (default SilenceAndManual)
-    *daemon.busy.write().await = true;
-    *daemon.manual_stop_tx.write().await = Some(tx);
+    let (_claim, mut rx) = capturing(&daemon);
 
     // But request forces SilenceOnly
     let request = make_record_request(Some(serde_json::json!({
@@ -203,11 +207,9 @@ async fn per_request_silence_only_overrides_manual_config() {
 #[tokio::test]
 async fn stop_signal_succeeds_even_with_no_receivers() {
     let daemon = test_daemon().await;
-    let (tx, _rx) = tokio::sync::broadcast::channel::<()>(1);
-    // Drop _rx so there are no receivers
-
-    *daemon.busy.write().await = true;
-    *daemon.manual_stop_tx.write().await = Some(tx);
+    // Drop the receiver so there are none.
+    let (_claim, rx) = capturing(&daemon);
+    drop(rx);
 
     let request = make_record_request(Some(serde_json::json!({
         "write_mode": false,
@@ -238,8 +240,8 @@ async fn handle_status_reports_busy_correctly() {
         "fresh daemon must report busy=false; got {response:?}"
     );
 
-    // Force busy state and confirm the handler tracks it.
-    *daemon.busy.write().await = true;
+    // A recording under way, and the handler tracks it.
+    let (claim, _stop) = capturing(&daemon);
     let response = daemon.handle_status().await;
     assert_eq!(
         response.busy,
@@ -247,44 +249,28 @@ async fn handle_status_reports_busy_correctly() {
         "busy=true must be surfaced by handle_status"
     );
 
-    // Recovery: clearing the flag flips the response field back.
-    *daemon.busy.write().await = false;
+    // Recovery: the recording ending flips the response field back.
+    drop(claim);
     let response = daemon.handle_status().await;
     assert_eq!(response.busy, Some(false));
 }
 
+/// A take that fails frees the microphone with its claim, whatever the
+/// failure: the next recording starts rather than hitting the toggle.
 #[tokio::test]
-async fn busy_reset_after_error_cleanup() {
-    // Verify that the error cleanup pattern in handle_record_internal
-    // correctly resets busy. We can't trigger the full recording
-    // pipeline in CI (requires audio hardware + display server for Typer),
-    // so we simulate the state and verify cleanup.
+async fn a_failed_take_frees_the_microphone() {
     let daemon = test_daemon().await;
+    let (claim, _stop) = capturing(&daemon);
+    assert!(daemon.recording.is_busy());
 
-    // Simulate: setup_recording_session ran and set busy = true,
-    // then record_and_transcribe failed.
-    *daemon.busy.write().await = true;
-    assert!(*daemon.busy.read().await);
+    // The take fails; its claim drops with it.
+    drop(claim);
 
-    // The error path in handle_record_internal does:
-    //   *self.busy.write().await = false;
-    // (on a setup failure, no recording_started event went out, so no state change to undo)
-    // Verify the daemon can recover from this state.
-    {
-        let mut guard = daemon.busy.write().await;
-        *guard = false;
-    }
-
+    assert!(!daemon.recording.is_busy(), "the microphone stayed held");
     assert!(
-        !*daemon.busy.read().await,
-        "busy must be false after error cleanup"
+        daemon.recording.reserve().is_some(),
+        "the next take was refused"
     );
-
-    // And a new recording request should NOT hit the toggle path
-    // (it should try to start, not return "transcription in progress")
-    // We can't fully test starting a recording here, but we verify the
-    // state allows it by checking the guard is clear.
-    assert!(daemon.manual_stop_tx.read().await.is_none());
 }
 
 /// An unknown theme name is a client error: `docs/protocol/endpoints/v1/audio_theme.md`
@@ -2947,7 +2933,7 @@ async fn record_with_no_model_types_a_notice_in_write_mode() {
     assert_eq!(*buf.lock().unwrap(), "[Super Voice: no model loaded]");
     // Capture must never have started.
     assert!(
-        !*daemon.busy.read().await,
+        !daemon.recording.is_busy(),
         "preflight must not leave the daemon busy"
     );
 }
@@ -3017,7 +3003,7 @@ async fn write_method_test_refuses_while_recording() {
     let daemon = test_daemon().await;
     let (sim, buf) = crate::output::keyboard::Simulator::capture();
     *daemon.simulator.write().await = Some(sim);
-    *daemon.busy.write().await = true;
+    let _recording = capturing(&daemon);
 
     let resp = daemon
         .handle_command(make_request("test_write_method"))
@@ -3118,9 +3104,9 @@ async fn idle_unload_leaves_a_model_in_use() {
     assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
 
     daemon.model.backdate(Duration::from_secs(60));
-    *daemon.busy.write().await = true;
+    let recording = capturing(&daemon);
     assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
-    *daemon.busy.write().await = false;
+    drop(recording);
     assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
 
     assert!(daemon.model.read().await.is_some());
@@ -3236,7 +3222,7 @@ async fn start_pending_recording(
     let bg = daemon.clone();
     let recording = tokio::spawn(async move { bg.handle_command(make_request("record")).await });
     for _ in 0..200 {
-        if daemon.recording_is_pending() {
+        if daemon.recording.is_waiting() {
             return recording;
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -3256,7 +3242,7 @@ async fn a_recording_waiting_for_its_model_can_be_cancelled() {
     let recording = start_pending_recording(&daemon).await;
     assert_eq!(daemon.handle_status().await.busy, Some(true));
 
-    assert!(daemon.cancel_pending_recording());
+    assert_eq!(daemon.recording.stop(), Stopped::Cancelled);
 
     let response = recording.await.expect("the recording task ended");
     assert_eq!(response.status, "success");
@@ -3264,8 +3250,7 @@ async fn a_recording_waiting_for_its_model_can_be_cancelled() {
         response.message.as_deref(),
         Some(DaemonResponse::RECORDING_CANCELLED_MSG)
     );
-    assert!(!*daemon.busy.read().await, "nothing was captured");
-    assert!(!daemon.recording_is_pending());
+    assert!(!daemon.recording.is_busy(), "nothing was captured");
 }
 
 /// A second start while one waits for its model is refused, and leaves the
@@ -3280,9 +3265,9 @@ async fn a_second_start_does_not_cancel_a_recording_waiting_for_its_model() {
     let second = daemon.handle_command(make_request("record")).await;
 
     assert_eq!(second.error_code, Some(ErrorCode::RecordingInProgress));
-    assert!(daemon.recording_is_pending());
+    assert!(daemon.recording.is_waiting());
     assert!(!recording.is_finished());
-    assert!(daemon.cancel_pending_recording());
+    assert_eq!(daemon.recording.stop(), Stopped::Cancelled);
     recording.await.expect("the recording task ended");
 }
 
@@ -3301,32 +3286,45 @@ async fn a_recording_waiting_for_its_model_blocks_model_changes() {
 
     assert_eq!(unload.error_code, Some(ErrorCode::RecordingInProgress));
     assert_eq!(reload.error_code, Some(ErrorCode::RecordingInProgress));
-    assert!(daemon.cancel_pending_recording());
+    assert_eq!(daemon.recording.stop(), Stopped::Cancelled);
     recording.await.expect("the recording task ended");
 }
 
-/// A stop that lands after the model has loaded, before the recording claims
-/// `busy`, still cancels it: the reservation is held until that claim.
+/// A stop that lands after the model has loaded, before the recording takes
+/// the microphone, still cancels it: the claim stays its own until then.
 #[tokio::test]
 async fn a_stop_between_the_load_and_capture_cancels_the_recording() {
     use crate::daemon::recording::RecordingCancelled;
-    use crate::daemon::types::PendingStart;
     let daemon = test_daemon().await;
-    let (cancel, _load_finished) = tokio::sync::oneshot::channel();
-    *daemon.pending_recording.lock().unwrap() = Some(PendingStart(Some(cancel)));
-    assert!(daemon.cancel_pending_recording());
+    let (claim, _cancelled) = daemon.recording.reserve().expect("free");
+    assert_eq!(daemon.recording.stop(), Stopped::Cancelled);
     assert!(
-        daemon.recording_is_pending(),
-        "the reservation is its owner's to give up"
+        daemon.recording.is_busy(),
+        "the claim is its owner's to give up"
     );
 
     let setup = daemon
-        .setup_recording_session(false, AudioTheme::Silent)
+        .setup_recording_session(&claim, AudioTheme::Silent)
         .await;
 
     assert!(setup.is_err_and(|e| e.is::<RecordingCancelled>()));
-    assert!(!*daemon.busy.read().await);
-    assert!(!daemon.recording_is_pending());
+    drop(claim);
+    assert!(!daemon.recording.is_busy());
+}
+
+/// A stop never starts a recording: with none under way it says so, where
+/// going through the record toggle would have started one.
+#[tokio::test]
+async fn a_stop_with_no_recording_starts_none() {
+    let daemon = test_daemon().await;
+
+    let response = daemon.stop_recording(true);
+
+    assert_eq!(
+        response.message.as_deref(),
+        Some("No recording in progress")
+    );
+    assert!(!daemon.recording.is_busy());
 }
 
 /// An unload during a load waits for it, then switches the model off, rather
@@ -3411,6 +3409,5 @@ async fn a_recording_whose_model_fails_to_load_says_so() {
         *buf.lock().unwrap(),
         "[Super Voice: could not load the model]"
     );
-    assert!(!daemon.recording_is_pending());
-    assert!(!*daemon.busy.read().await);
+    assert!(!daemon.recording.is_busy());
 }

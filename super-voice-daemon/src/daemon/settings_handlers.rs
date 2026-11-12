@@ -146,7 +146,7 @@ impl SuperSTTDaemon {
     /// configured method so the user can see whether it reaches their focused
     /// window. Contract: `docs/protocol/endpoints/v1/write_method/test.md`.
     pub async fn handle_test_write_method(&self) -> DaemonResponse {
-        if *self.busy.read().await {
+        if self.recording.is_busy() {
             return DaemonResponse::error_with_code(
                 ErrorCode::RecordingInProgress,
                 "recording_in_progress",

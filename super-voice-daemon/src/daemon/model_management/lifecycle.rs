@@ -53,7 +53,7 @@ impl SuperSTTDaemon {
     /// an active recording. A real-time (WebSocket) session holds the `model`
     /// read lock, so the reload's write-lock acquisition serializes behind it.
     pub async fn handle_reload_active_model(&self) -> DaemonResponse {
-        if let Some(resp) = self.guard_model_mutation("reload the model").await {
+        if let Some(resp) = self.guard_model_mutation("reload the model") {
             return resp;
         }
         let current = self
@@ -226,7 +226,7 @@ impl SuperSTTDaemon {
     /// loads still waiting give up. The unload runs as its own task, so a
     /// client that stops waiting for it does not leave it half done.
     pub async fn handle_unload_active_model(&self) -> DaemonResponse {
-        if let Some(resp) = self.switch_guard().await {
+        if let Some(resp) = self.switch_guard() {
             return resp;
         }
         let bg = self.clone();

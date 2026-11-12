@@ -16,10 +16,10 @@ impl SuperSTTDaemon {
     /// separately — they hold the `model` read lock for their duration, so a
     /// mutation's write-lock acquisition already serializes behind them.
     /// Returns `None` when idle.
-    pub(crate) async fn guard_model_mutation(&self, action: &str) -> Option<DaemonResponse> {
+    pub(crate) fn guard_model_mutation(&self, action: &str) -> Option<DaemonResponse> {
         // A recording waiting for its model counts: it starts capturing the
         // moment that load finishes, with whatever model the slot then holds.
-        if *self.busy.read().await || self.recording_is_pending() {
+        if self.recording.is_busy() {
             return Some(DaemonResponse::error_with_code(
                 ErrorCode::RecordingInProgress,
                 &format!("Cannot {action} during active recording. Please wait for it to finish."),
@@ -30,8 +30,8 @@ impl SuperSTTDaemon {
 
     /// Backend-mutation guard (`change the backend`) shared by the
     /// set/clear/unload active-backend commands and the HTTP uninstall handler.
-    pub(crate) async fn switch_guard(&self) -> Option<DaemonResponse> {
-        self.guard_model_mutation("change the backend").await
+    pub(crate) fn switch_guard(&self) -> Option<DaemonResponse> {
+        self.guard_model_mutation("change the backend")
     }
 
     /// `source` (repo id) of the currently selected backend, or `None` when
@@ -76,7 +76,7 @@ impl SuperSTTDaemon {
     /// the loaded model. Does not load a model — only `set_model` can fail at
     /// runtime.
     pub async fn handle_set_active_backend(&self, source: String) -> DaemonResponse {
-        if let Some(resp) = self.switch_guard().await {
+        if let Some(resp) = self.switch_guard() {
             return resp;
         }
         let dir_name = {
@@ -152,7 +152,7 @@ impl SuperSTTDaemon {
 
     /// Clear the active backend: unload any model and return to idle.
     pub async fn handle_clear_active_backend(&self) -> DaemonResponse {
-        if let Some(resp) = self.switch_guard().await {
+        if let Some(resp) = self.switch_guard() {
             return resp;
         }
         let _unloaded = self.unload_current_model().await;
@@ -319,7 +319,7 @@ impl SuperSTTDaemon {
     }
 
     async fn preflight_model_switch(&self, model: &str, source: &str) -> Option<DaemonResponse> {
-        if let Some(resp) = self.guard_model_mutation("switch models").await {
+        if let Some(resp) = self.guard_model_mutation("switch models") {
             warn!("Model switch rejected - recording in progress");
             return Some(resp);
         }

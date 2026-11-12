@@ -145,9 +145,7 @@ impl SuperSTTDaemon {
             // returned, rather than streaming forever.
             if session.start_time.elapsed() > MAX_TAKE {
                 warn!("Recording timeout reached, signalling recorder to stop");
-                if let Some(tx) = self.manual_stop_tx.read().await.as_ref() {
-                    let _ = tx.send(());
-                }
+                self.recording.stop();
                 break;
             }
 

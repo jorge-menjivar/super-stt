@@ -315,7 +315,7 @@ impl SuperSTTDaemon {
 
         // Loading and unloading a backend instance during a recording is the
         // same hazard as switching models mid-recording.
-        if let Some(resp) = self.guard_model_mutation("switch devices").await {
+        if let Some(resp) = self.guard_model_mutation("switch devices") {
             warn!("Device change rejected - recording in progress");
             return resp;
         }

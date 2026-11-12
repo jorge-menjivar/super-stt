@@ -149,7 +149,7 @@ pub(crate) async fn uninstall_backend(
     // `refresh_backends` that follows) under an in-flight session would strand
     // state the session still depends on.
     // Speech counts too: the backend may be the one speaking.
-    if s.daemon.switch_guard().await.is_some() || s.daemon.tts.is_busy() {
+    if s.daemon.switch_guard().is_some() || s.daemon.tts.is_busy() {
         return registry_error(StatusCode::CONFLICT, "backend_busy");
     }
 
