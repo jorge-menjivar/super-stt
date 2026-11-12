@@ -33,6 +33,16 @@ impl SuperTTSDaemon {
         self.idle.touch();
     }
 
+    /// The model the next request loads when it finds none in memory: the
+    /// selected one, when models are unloaded on idle.
+    pub(crate) async fn model_loaded_on_demand(
+        &self,
+    ) -> Option<crate::tts::tts_models::ModelDefinition> {
+        self.config.read().await.idle_unload.after()?;
+        let (name, source) = self.pick_startup_model().await?;
+        self.resolve_definition(&name, &source).await
+    }
+
     /// Load the selected model if it is not in memory, whatever the setting.
     pub(crate) async fn load_selected_model(&self) {
         let _loading = self.idle.loading.lock().await;

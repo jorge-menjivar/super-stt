@@ -2183,3 +2183,33 @@ async fn speak_refuses_text_before_loading_a_model() {
         assert_eq!(response.error_code, Some(ErrorCode::InvalidValue));
     }
 }
+
+/// With idle unload on, the model a request loads on demand is the selected
+/// one, so the voices page can describe it while it is out of memory. With
+/// it off, a model not in memory is not loaded by a request.
+#[tokio::test]
+async fn the_selected_model_is_loaded_on_demand_only_with_idle_unload_on() {
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/kokoro";
+    *daemon.backends.write().await = vec![fixture_backend_local(
+        "kokoro",
+        source,
+        "Kokoro",
+        "kokoro-tiny",
+    )];
+    daemon
+        .config
+        .write()
+        .await
+        .update_synthesis_model("kokoro-tiny".into(), source.into());
+
+    assert!(daemon.model_loaded_on_demand().await.is_none());
+
+    daemon.config.write().await.idle_unload.after_secs = 300;
+    let definition = daemon
+        .model_loaded_on_demand()
+        .await
+        .expect("the selected model");
+    assert_eq!(definition.name, "kokoro-tiny");
+    assert_eq!(definition.source, source);
+}

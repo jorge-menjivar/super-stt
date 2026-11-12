@@ -134,13 +134,24 @@ pub(crate) async fn list_voices(State(s): State<AppState>) -> Response {
     ok(&body)
 }
 
-/// What the loaded model can do with a cloned voice. `None` when nothing is
-/// loaded — the library is still readable, it just cannot be spoken with yet.
+/// What the model that speaks can do with a cloned voice: the loaded one or,
+/// when models are unloaded on idle, the selected one the next request loads.
+/// `None` when there is neither — the library is still readable, it just
+/// cannot be spoken with yet.
 async fn active_model_support(s: &AppState) -> Option<VoiceModelSupport> {
     use super_voice_registry_types::manifest::VoiceKind;
 
-    let guard = s.daemon.model.read().await;
-    let def = &guard.as_ref()?.definition;
+    let loaded = s
+        .daemon
+        .model
+        .read()
+        .await
+        .as_ref()
+        .map(|loaded| loaded.definition.clone());
+    let def = match loaded {
+        Some(def) => def,
+        None => s.daemon.model_loaded_on_demand().await?,
+    };
     Some(VoiceModelSupport {
         name: def.name.clone(),
         source: def.source.clone(),
