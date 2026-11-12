@@ -105,9 +105,10 @@ next load, reloaded, or already on that framework.
 
 The reload, when there is one, completes before the response, and every stage
 performs it the same way: unload, load on the new framework, publish `ready`
-with the resolved `actual_device`. Stage 1 also publishes `switching_device` /
-`loading_model_for_device` on [`/events`](../events.md) along the way; stage
-2's reload reports itself as the plain reload it is. A stage unloads before it
+with the resolved `actual_device`. Each publishes `switching_device` /
+`loading_model_for_device` on [`/events`](../events.md) along the way,
+carrying its `stage`. The new framework is recorded once the model has loaded
+on it. A stage unloads before it
 loads because a backend cannot be instantiated twice for the same model — the
 running instance holds the name its replacement needs.
 

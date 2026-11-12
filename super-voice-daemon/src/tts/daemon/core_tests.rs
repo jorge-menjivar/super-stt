@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
 use crate::tts::daemon::types::test_daemon;
+use super_engine_daemon::stage::StageExt;
 use super_voice_shared::tts::models::protocol::ErrorCode;
 
 fn make_request(command: &str) -> DaemonRequest {
@@ -2123,11 +2124,11 @@ async fn idle_unload_frees_the_model_and_keeps_it_selected() {
         .update_synthesis_model("kokoro-1".into(), source.into());
 
     daemon.model.backdate(Duration::from_secs(10));
-    assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
+    assert!(!daemon.stage().unload_if_idle(Duration::from_secs(30)).await);
     assert!(daemon.model.read().await.is_some());
 
     daemon.model.backdate(Duration::from_secs(60));
-    assert!(daemon.unload_if_idle(Duration::from_secs(30)).await);
+    assert!(daemon.stage().unload_if_idle(Duration::from_secs(30)).await);
 
     assert!(daemon.model.read().await.is_none());
     assert_eq!(
@@ -2265,4 +2266,43 @@ async fn a_speak_whose_model_fails_to_load_says_so() {
     let sent = sent.lock().unwrap();
     assert_eq!(sent.len(), 1, "{sent:?}");
     assert_eq!(sent[0].0, "Could not load the model");
+}
+
+/// A load on demand that fails says synthesis holds no model, as every
+/// stage's failed load does, so no client goes on showing it as loading.
+#[tokio::test]
+async fn a_failed_synthesis_load_says_the_stage_is_empty() {
+    use crate::tts::daemon::events::Topic;
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/kokoro";
+    *daemon.backends.write().await = vec![fixture_backend_local(
+        "kokoro",
+        source,
+        "Kokoro",
+        "kokoro-tiny",
+    )];
+    {
+        let mut config = daemon.config.write().await;
+        config.update_synthesis_model("kokoro-tiny".into(), source.into());
+        config.idle_unload.after_secs = 30;
+    }
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    let loaded = daemon.stage().ensure_loaded().await;
+
+    assert!(loaded.is_err_and(|e| e.starts_with("kokoro-tiny did not load")));
+    let mut statuses = Vec::new();
+    while let Ok(Ok((_topic, event))) =
+        tokio::time::timeout(Duration::from_millis(200), rx.recv_json()).await
+    {
+        statuses.push((event["status"].clone(), event["model_loaded"].clone()));
+    }
+    assert_eq!(
+        statuses,
+        [
+            (serde_json::json!("loading_model"), serde_json::Value::Null),
+            (serde_json::json!("ready"), serde_json::json!(false)),
+        ]
+    );
 }

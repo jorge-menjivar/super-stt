@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::tts::daemon::types::SuperTTSDaemon;
 use crate::tts::tts_models::backends;
-use log::info;
 use std::path::PathBuf;
 
 impl SuperTTSDaemon {
@@ -12,24 +11,12 @@ impl SuperTTSDaemon {
         configured.map_or_else(backends::default_backends_dir, PathBuf::from)
     }
 
-    /// Choose the model to load at startup: the configured preference, but only
-    /// if it is installed. Returns `None` (daemon stays idle)
-    /// when there is no preference or it can't be loaded — the daemon never
-    /// auto-picks an arbitrary model, since loading one can pull gigabytes.
-    pub async fn pick_startup_model(&self) -> Option<(String, String)> {
-        self.selected_model()
-            .await
-            .map_err(|why| {
-                if let Some(why) = why {
-                    info!("{why}");
-                }
-            })
-            .ok()
-    }
-
-    /// [`pick_startup_model`](Self::pick_startup_model) without its log
-    /// line, for checks that run on every request. The error is why there is
-    /// no model to load, when there is one worth logging.
+    /// The model synthesis runs, if one is selected and installed. Otherwise
+    /// why not, when that is worth logging. Quiet: it runs on every request
+    /// that loads on demand.
+    ///
+    /// The daemon never picks a model of its own, since loading one can pull
+    /// gigabytes: with nothing selected the stage stays empty.
     pub(crate) async fn selected_model(&self) -> Result<(String, String), Option<String>> {
         let (pref_model, pref_source) = {
             let c = self.config.read().await;

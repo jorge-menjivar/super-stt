@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::backends;
 use log::info;
@@ -55,58 +56,55 @@ impl SuperSTTDaemon {
         *self.all_backends.write().await = winners;
     }
 
-    /// Choose the model to load at startup: the configured preference, but only
-    /// if it is installed. Returns `None` (daemon stays idle) when there is no
-    /// preference or it can't be found — the daemon never auto-picks an
-    /// arbitrary model, since loading one can pull gigabytes.
-    pub async fn pick_startup_model(&self) -> Option<(String, String)> {
-        self.selected_model()
-            .await
-            .map_err(|why| {
-                if let Some(why) = why {
-                    info!("{why}");
-                }
-            })
-            .ok()
-    }
-
-    /// [`pick_startup_model`](Self::pick_startup_model) without its log
-    /// line, for checks that run on every request. The error is why there is
-    /// no model to load, when there is one worth logging.
-    pub(crate) async fn selected_model(&self) -> Result<(String, String), Option<String>> {
+    /// The model `stage` runs: switched on, and pointed at a model that is
+    /// installed. Otherwise why not, when that is worth logging. Quiet: it
+    /// runs on every request that loads on demand.
+    ///
+    /// The daemon never picks a model of its own, since loading one can pull
+    /// gigabytes: with nothing selected the stage stays empty.
+    pub(crate) async fn selected_model(
+        &self,
+        stage: PipelineStage,
+    ) -> Result<(String, String), Option<String>> {
         let (enabled, pref_model, pref_source) = {
             let c = self.config.read().await;
-            (
-                c.transcription.enabled,
-                c.transcription.preferred_model.clone(),
-                c.transcription.preferred_source.clone(),
-            )
+            match stage {
+                PipelineStage::Transcription => (
+                    c.transcription.enabled,
+                    c.transcription.preferred_model.clone(),
+                    c.transcription.preferred_source.clone(),
+                ),
+                PipelineStage::PostProcessor => (
+                    c.post_processor.enabled,
+                    c.post_processor.model.clone(),
+                    c.post_processor.source.clone(),
+                ),
+            }
         };
         if pref_model.is_empty() {
             return Err(None);
         }
-        // The stage remembers its model across an unload now, so the selection
-        // alone no longer means "load this". The flag is what says so — the
-        // same gate `post_processor.is_active()` puts on stage 2's startup
-        // load. Checked after the empty case, so an idle daemon does not log a
-        // line naming no model.
+        let position = stage.position();
+        // A stage remembers its model across an unload, so the selection
+        // alone does not mean "load this": the flag does. Checked after the
+        // empty case, so an idle daemon does not log a line naming no model.
         if !enabled {
             return Err(Some(format!(
-                "Stage 1 is switched off; staying idle with {pref_model} still selected"
+                "Stage {position} is switched off; staying idle with {pref_model} still selected"
             )));
         }
         // A config predating `preferred_source` names a model but not the
         // backend serving it. Resolve it the same way the wire path does — from
-        // the selected backend — rather than scanning for the first backend
-        // that serves the name: two backends may serve the same name, and the
-        // scan order is `read_dir` order, so the daemon could come up on a
-        // different engine than the one the user chose. With no selection
-        // recorded either, stay idle and let the user pick.
+        // the backend selected for the stage — rather than scanning for the
+        // first backend that serves the name: two backends may serve the same
+        // name, and the scan order is `read_dir` order, so the daemon could
+        // come up on a different engine than the one the user chose. With no
+        // backend selected either, stay idle and let the user pick.
         let pref_source = if pref_source.is_empty() {
-            let Some(resolved) = self.active_backend_source().await else {
+            let Some(resolved) = self.stage_source(stage).await else {
                 return Err(Some(format!(
-                    "Startup model {pref_model} names no source and no backend is selected; \
-                     staying idle"
+                    "Stage {position} model {pref_model} names no source and no backend is \
+                     selected; staying idle"
                 )));
             };
             resolved

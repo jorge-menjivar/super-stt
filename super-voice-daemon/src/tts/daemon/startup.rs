@@ -5,17 +5,15 @@
 //! just the daemon struct, its type aliases, and runtime accessors.
 
 use crate::config::DaemonConfig;
-use crate::tts::daemon::types::{LoadTurn, LoadedModel, Shared, SuperTTSDaemon, normalize_device};
+use crate::tts::daemon::types::{Shared, SuperTTSDaemon};
 use crate::tts::download_progress::DownloadStateManager;
 use crate::tts::tts_models::backends;
-use anyhow::Result;
-use log::{info, warn};
 use std::sync::Arc;
 
 impl SuperTTSDaemon {
     /// Text to speech's part of the daemon, built on the handles it shares
-    /// with speech to text. Starts nothing: [`post_init`](Self::post_init)
-    /// does, once the daemon is assembled.
+    /// with speech to text. Starts nothing: the daemon's startup loads every
+    /// stage of both features once it is assembled.
     #[must_use]
     pub fn new(shared: Shared, config: &DaemonConfig) -> Self {
         let active_backend = config.synthesis.active_backend.clone();
@@ -32,7 +30,6 @@ impl SuperTTSDaemon {
             events: Arc::clone(&shared.events),
             download_manager: Arc::new(DownloadStateManager::new()),
             // Empty until a model loads.
-            actual_device: Arc::new(tokio::sync::RwLock::new(String::new())),
             config: shared.config,
             resource_manager: shared.resource_manager,
             backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
@@ -48,43 +45,6 @@ impl SuperTTSDaemon {
             ),
             voices,
             secrets: shared.secrets,
-        }
-    }
-
-    /// Perform post-construction startup, once the daemon's refresh has read
-    /// this feature's backends: apply any temporary session-level device
-    /// override, then kick off background loading of the startup model (if
-    /// one is configured).
-    pub async fn post_init(&self) {
-        // Load the configured startup model — if any — in the **background** so
-        // the HTTP listener can come up immediately. A model load may download
-        // gigabytes and bind a GPU; blocking startup on it would leave clients
-        // unable to connect (and unable to pick a lighter model) until it
-        // finishes. Clients watch the `daemon_status_changed` SSE topic for the
-        // `ready` transition. With no configured preference the daemon stays
-        // idle until the user selects a model — it never auto-pulls a model.
-        // Nor does it load one here when models are unloaded on idle: the
-        // first request that speaks does.
-        self.spawn_idle_unload();
-        if self.config.read().await.idle_unload.after().is_some() {
-            info!("Models are unloaded when idle; the synthesis model loads on first use");
-        } else if let Some((name, source)) = self.pick_startup_model().await {
-            let bg = self.clone();
-            tokio::spawn(async move {
-                // A model picked before this load's turn replaces it.
-                let Some(turn) = bg.model.begin_load().await else {
-                    info!("Startup model {name} was replaced by a newer load");
-                    return;
-                };
-                if let Err(e) =
-                    Self::load_initial_model_and_broadcast(&bg, turn, name.clone(), source).await
-                {
-                    warn!("Failed to load startup model {name}: {e}; daemon is idle");
-                    bg.download_manager.clear_download(());
-                }
-            });
-        } else {
-            info!("No startup model configured; daemon is idle until one is selected");
         }
     }
 
@@ -105,7 +65,7 @@ impl SuperTTSDaemon {
     /// Persisting is deliberately left to the caller. Keeping this free of
     /// disk I/O is what lets it be unit-tested without writing over the user's
     /// real config.
-    async fn adopt_active_backend_for(&self, source: &str) -> bool {
+    pub(in crate::tts::daemon) async fn adopt_active_backend_for(&self, source: &str) -> bool {
         if self.active_backend.read().await.is_some() {
             return false;
         }
@@ -122,51 +82,6 @@ impl SuperTTSDaemon {
         *self.active_backend.write().await = Some(dir.clone());
         self.config.write().await.synthesis.active_backend = Some(dir);
         true
-    }
-
-    /// Load `name` from `source` into the synthesis slot on `turn`, and
-    /// announce it. Shared by the start-up load and the load on demand.
-    pub(in crate::tts::daemon) async fn load_initial_model_and_broadcast(
-        daemon: &SuperTTSDaemon,
-        turn: LoadTurn<'_>,
-        name: String,
-        source: String,
-    ) -> Result<()> {
-        daemon.broadcast_model_loading_status(&name);
-
-        // The persisted model comes back on its own framework if it has one,
-        // else the best its installed build runs.
-        let chosen = daemon
-            .config
-            .read()
-            .await
-            .model_device(&source, &name)
-            .map(ToString::to_string);
-        let (instance, definition) = daemon
-            .instantiate_backend(&turn, &name, &source, chosen.as_deref())
-            .await?;
-
-        info!("model {name} loaded successfully");
-
-        if daemon.adopt_active_backend_for(&source).await
-            && let Err(e) = daemon.persist_config().await
-        {
-            warn!("Failed to persist active_backend after startup load: {e}");
-        }
-
-        // Capture the device label before moving `instance` into the shared
-        // `LoadedModel` — `ready` event consumers (e.g. the settings app's
-        // current_device tracking) only update when `actual_device` is present.
-        let actual_device = normalize_device(&instance.device());
-        *daemon.actual_device.write().await = actual_device.clone();
-        turn.install(LoadedModel::new(definition, instance)).await;
-
-        // Announce the active model the same way a user-initiated switch does
-        // (`model_switched` + `ready`). The startup load formerly emitted only
-        // `ready`, so a settings app reconnecting after a daemon restart never
-        // learned which model became active and kept showing "no model loaded".
-        daemon.broadcast_model_active(&name, &source, &actual_device);
-        Ok(())
     }
 }
 

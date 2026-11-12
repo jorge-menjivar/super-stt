@@ -13,22 +13,21 @@
 //! same `{ device, resolved_accel, available_devices }` body so a client never
 //! has to know which case it hit.
 
-use crate::tts::daemon::types::{LoadTurn, SuperTTSDaemon, normalize_device};
+use crate::tts::daemon::types::{SuperTTSDaemon, normalize_device};
 use crate::tts::tts_models::ModelDefinition;
 use crate::tts::tts_models::backends;
-use crate::tts::tts_models::synthesize::Synthesize;
-use log::{error, info, warn};
+use log::{info, warn};
 pub(crate) use super_engine_daemon::devices::{
-    backend_available_devices, backend_frameworks, host_available_devices, model_available_devices,
-    parse_device_preference,
+    backend_available_devices, backend_frameworks, model_available_devices, parse_device_preference,
 };
 use super_engine_daemon::devices::{
     build_installed, device_rejection, device_switch_message, effective_framework,
     switch_is_satisfied,
 };
+use super_engine_daemon::stage::{DeviceSwitch, ModelId, StageExt};
 use super_voice_registry_types::manifest::Device;
 use super_voice_shared::tts::models::protocol::{
-    Command, DaemonResponse, DaemonStatusEvent, ErrorCode, StageModelDevice,
+    Command, DaemonResponse, ErrorCode, StageModelDevice,
 };
 
 /// The model a per-model device command resolved to: its definition, and the
@@ -72,281 +71,6 @@ impl InstallContext {
 }
 
 impl SuperTTSDaemon {
-    /// Move a loaded model from `from`, the framework it is running on, onto
-    /// `device`: announce, unload, load, and on failure load it again on
-    /// `fallback`, the framework its setting loads it on. The model's choice
-    /// is recorded once the load succeeded, so a failed switch leaves it as
-    /// it was.
-    ///
-    /// The two differ when the model is still running on a build that an
-    /// install has since replaced: it cannot be loaded on that framework again.
-    async fn reload_onto_device(
-        &self,
-        model: &str,
-        source: &str,
-        device: &str,
-        from: &str,
-        fallback: &str,
-        mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-    ) -> DaemonResponse {
-        // Broadcast device switching status
-        self.prepare_device_switch(from, device, model).await;
-        // The model is taken out, and its backend stopped, once it is this
-        // load's turn. The turn holds the slot through the recovery below, so
-        // no other load lands in between.
-        let Some(turn) = self.model.begin_load().await else {
-            return super::model_management::superseded("device switch", model);
-        };
-
-        // Try to reload model with the requested device, but cancel if shutdown occurs
-        let load_result = tokio::select! {
-            result = self.load_model_with_target_device(&turn, model, source, device) => {
-                result
-            }
-            _ = shutdown_rx.recv() => {
-                warn!("Device switch cancelled due to shutdown");
-                return DaemonResponse::error("Device switch cancelled due to shutdown");
-            }
-        };
-
-        match load_result {
-            Ok(model_instance) => {
-                self.handle_device_switch_success(turn, model_instance, device, model, source, from)
-                    .await
-            }
-            Err(e) => {
-                self.handle_device_switch_failure(turn, e, device, model, source, fallback)
-                    .await
-            }
-        }
-    }
-
-    /// Prepare for device switch by broadcasting status. The model is taken
-    /// out on the reload's turn.
-    async fn prepare_device_switch(&self, from_device: &str, to_device: &str, model: &str) {
-        // Stage `actual_device` at the target for the duration of the switch,
-        // so `get_device` does not keep reporting the device the model just
-        // left while its replacement is still loading. `finalize_loaded_model`
-        // overwrites this with the accelerator the load really landed on, and
-        // the recovery path with the one it reverted to, so the optimistic
-        // value never outlives the switch.
-        {
-            let mut w = self.actual_device.write().await;
-            *w = to_device.to_string();
-        }
-
-        // Broadcast device switching status to settings subscribers
-        self.events
-            .publish_synthesis_status(DaemonStatusEvent::SwitchingDevice {
-                from_device: from_device.to_string(),
-                target_device: to_device.to_string(),
-                model: model.to_string(),
-            });
-    }
-
-    /// Handle successful device switch
-    async fn handle_device_switch_success(
-        &self,
-        turn: LoadTurn<'_>,
-        model_instance: Box<dyn Synthesize>,
-        device: &str,
-        model_to_reload: &str,
-        source: &str,
-        from: &str,
-    ) -> DaemonResponse {
-        // Store the reloaded model. The backend serving it can be uninstalled
-        // concurrently with the switch, so `resolve_definition` may now return
-        // `None` — fail the request gracefully (leaving the daemon idle) rather
-        // than panicking on the capture thread.
-        let Some(definition) = self.resolve_definition(model_to_reload, source).await else {
-            error!(
-                "Backend serving {model_to_reload} ({source}) disappeared during the device \
-                 switch; cannot finalize the reloaded model — leaving the daemon idle"
-            );
-            return DaemonResponse::error(&format!(
-                "Model {model_to_reload} is no longer available (its backend may have been \
-                 uninstalled during the device switch)"
-            ));
-        };
-        let actual_device = self
-            .finalize_loaded_model(turn, definition, model_instance)
-            .await;
-
-        // Record the preference only now: a switch that failed to load must
-        // leave the stored device as it was, or a daemon restart would put the
-        // model back on a device it has already proven it cannot run on.
-        self.record_model_device(source, model_to_reload, device)
-            .await;
-
-        let success_message = device_switch_message(device, &actual_device);
-
-        info!("Device switch completed: {from} -> {device} (actual: {actual_device})");
-
-        // Broadcast ready status with new device
-        self.events
-            .publish_synthesis_status(DaemonStatusEvent::Ready {
-                model_loaded: true,
-                model_name: Some(model_to_reload.to_string()),
-                actual_device: Some(actual_device.clone()),
-                preferred_device: Some(device.to_string()),
-            });
-
-        self.device_switch_response(source, model_to_reload, device, success_message)
-            .await
-    }
-
-    /// Handle failed device switch with recovery attempt: load the model
-    /// again on `fallback`, the framework its setting loads it on.
-    async fn handle_device_switch_failure(
-        &self,
-        turn: LoadTurn<'_>,
-        error: anyhow::Error,
-        device: &str,
-        model_to_reload: &str,
-        source: &str,
-        fallback: &str,
-    ) -> DaemonResponse {
-        error!("Failed to reload model on new device: {error}");
-
-        // Broadcast error status
-        self.events
-            .publish_synthesis_status(DaemonStatusEvent::DeviceSwitchError {
-                error: error.to_string(),
-                failed_device: device.to_string(),
-                model: model_to_reload.to_string(),
-            });
-
-        // Check if shutdown is in progress before attempting recovery
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        if let Ok(()) = shutdown_rx.try_recv() {
-            warn!("Shutdown in progress, skipping device switch recovery");
-            return DaemonResponse::error(&format!(
-                "Device switch failed: {error}. Recovery skipped due to shutdown."
-            ));
-        }
-
-        // Try to recover on the framework the model's setting loads it on
-        warn!("Attempting to recover by reloading {model_to_reload} on {fallback}, its setting");
-
-        match self
-            .load_model_with_target_device(&turn, model_to_reload, source, fallback)
-            .await
-        {
-            Ok(model_instance) => {
-                let Some(definition) = self.resolve_definition(model_to_reload, source).await
-                else {
-                    error!(
-                        "Backend serving {model_to_reload} ({source}) disappeared during \
-                         device-switch recovery; cannot finalize — leaving the daemon idle"
-                    );
-                    return DaemonResponse::error(&format!(
-                        "Device switch failed: {error}. Recovery could not finalize because \
-                         model {model_to_reload} is no longer available."
-                    ));
-                };
-                // Install the recovered model and record its actual device.
-                // The model's stored choice was never changed: it is stored
-                // only after a load succeeds, so there is nothing to revert.
-                let recovery_actual_device = self
-                    .finalize_loaded_model(turn, definition, model_instance)
-                    .await;
-
-                warn!(
-                    "Recovery successful - reloaded on {fallback} (actual: {recovery_actual_device})"
-                );
-
-                // Broadcast ready status after successful recovery
-                self.events
-                    .publish_synthesis_status(DaemonStatusEvent::Ready {
-                        model_loaded: true,
-                        model_name: Some(model_to_reload.to_string()),
-                        actual_device: Some(recovery_actual_device.clone()),
-                        preferred_device: Some(fallback.to_string()),
-                    });
-
-                DaemonResponse::error(&format!(
-                    "Failed to switch to device '{device}': {error}. Reverted to previous device '{recovery_actual_device}'."
-                ))
-            }
-            Err(recovery_e) => {
-                error!("Recovery failed: {recovery_e}");
-                DaemonResponse::error(&format!(
-                    "Device switch failed: {error}. Recovery also failed: {recovery_e}. Daemon is now in no-model state."
-                ))
-            }
-        }
-    }
-
-    /// Record `device` as `(source, model)`'s own framework, and persist it. A
-    /// persist failure is logged, not returned: the in-memory config already
-    /// holds the choice, so the daemon behaves as asked until it restarts, and
-    /// failing the request would claim the switch did not happen when the
-    /// model has already moved.
-    async fn record_model_device(&self, source: &str, model: &str, device: &str) {
-        self.config
-            .write()
-            .await
-            .update_model_device(source, model, Some(device.to_string()));
-        if let Err(e) = self.persist_config().await {
-            warn!("Failed to persist config after device change: {e}");
-        }
-    }
-
-    /// The success body a completed switch answers with: the model's device
-    /// body. A switch whose backend vanished mid-flight answers with the
-    /// host's frameworks rather than failing: the model did load, and a
-    /// slightly wider list beats reporting a failure that did not happen.
-    async fn device_switch_response(
-        &self,
-        source: &str,
-        model: &str,
-        device: &str,
-        message: String,
-    ) -> DaemonResponse {
-        if let Some(target) = self.device_target(model, source).await {
-            return self.model_device_response(&target, message).await;
-        }
-        let resolved_accel = self.resolved_accel(device).await;
-        let available_devices = self.probe_available_devices().await;
-        DaemonResponse::success()
-            .with_device(device.to_string())
-            .with_resolved_accel(resolved_accel)
-            .with_available_devices(available_devices)
-            .with_message(message)
-    }
-
-    /// Probe the host's device availability fresh, off the async runtime.
-    ///
-    /// Used when a switch's backend vanished and its model's own list cannot
-    /// be read. Probed rather than cached
-    /// because a driver can be installed under a running daemon, and a stale
-    /// "no GPU here" would outlive the machine it was true of.
-    async fn probe_available_devices(&self) -> Vec<String> {
-        host_available_devices(&probe_host().await)
-    }
-
-    /// The documented `resolved_accel` rule: `"cpu"` needs no resolution — it
-    /// is always resolved. A `"gpu"` preference resolves only once a *local*
-    /// model has actually loaded onto it (an online model has nothing to
-    /// resolve locally either), reported via `self.actual_device`; until then
-    /// it is `None`, so a client is never told a device resolved before an
-    /// actual load event confirmed it.
-    async fn resolved_accel(&self, preferred_device: &str) -> Option<String> {
-        if preferred_device == "cpu" {
-            return Some("cpu".to_string());
-        }
-        let local_model_loaded = self
-            .model
-            .read()
-            .await
-            .as_ref()
-            .is_some_and(|loaded| !loaded.definition.is_online());
-        if !local_model_loaded {
-            return None;
-        }
-        Some(self.actual_device.read().await.clone())
-    }
-
     /// Route the per-model device commands to their handlers. Keeps the
     /// destructuring out of the giant `handle_command` match.
     ///
@@ -448,14 +172,6 @@ impl SuperTTSDaemon {
     ) -> DaemonResponse {
         info!("Device change requested for {model}: {device}");
 
-        // A reload started now would race the exit; refuse before touching
-        // anything.
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        if let Ok(()) = shutdown_rx.try_recv() {
-            warn!("Device change rejected - shutdown in progress");
-            return DaemonResponse::error("Device change rejected due to shutdown in progress");
-        }
-
         // Validate and normalize (`cuda`/`metal` → `gpu`) in one step, so
         // everything downstream stores and threads `cpu`/`gpu` rather than the
         // raw input the client sent. Emit the documented `400 invalid_device`
@@ -511,7 +227,6 @@ impl SuperTTSDaemon {
             .await;
         let current = self.effective_device(&target).await.unwrap_or_default();
         let name = target.definition.name.clone();
-        let source = target.definition.source.clone();
 
         let Some(actual) = running_on else {
             self.store_model_device(&target, &device).await;
@@ -543,9 +258,52 @@ impl SuperTTSDaemon {
         // as switching models mid-utterance: the utterance stops.
         self.stop_speech_for("switch devices").await;
 
-        info!("Starting device switch for {name} from {actual} to {device}");
-        self.reload_onto_device(&name, &source, &device, &actual, &current, shutdown_rx)
-            .await
+        self.switch_device(&target, &device, &current).await
+    }
+
+    /// Move the loaded model to `device`, as every stage does it: see
+    /// [`StageExt::switch_device`]. `fallback` is the framework its setting
+    /// loads it on, where a failed switch puts it back.
+    async fn switch_device(
+        &self,
+        target: &DeviceTarget,
+        device: &str,
+        fallback: &str,
+    ) -> DaemonResponse {
+        let name = &target.definition.name;
+        let model = ModelId::new(name.clone(), target.definition.source.clone());
+        let switched = self
+            .stage()
+            .switch_device(model, device.to_string(), fallback.to_string())
+            .await;
+        match switched {
+            // Unloaded since the check: the choice is its next load's.
+            DeviceSwitch::Recorded => {
+                self.model_device_response(
+                    target,
+                    format!("Device for {name} set to {device}. Its next load will use it."),
+                )
+                .await
+            }
+            DeviceSwitch::Switched { device: actual } => {
+                self.model_device_response(target, device_switch_message(device, &actual))
+                    .await
+            }
+            DeviceSwitch::Recovered {
+                error,
+                device: actual,
+            } => DaemonResponse::error(&format!(
+                "Failed to switch to device '{device}': {error:#}. Reverted to previous device '{actual}'."
+            )),
+            DeviceSwitch::Failed { error, recovery } => DaemonResponse::error(&format!(
+                "Device switch failed: {error:#}. Recovery also failed: {recovery:#}. Stage 1 is now idle."
+            )),
+            DeviceSwitch::Superseded => super::model_management::superseded("device switch"),
+            DeviceSwitch::Cancelled => {
+                warn!("Device switch cancelled due to shutdown");
+                DaemonResponse::error("Device switch cancelled due to shutdown")
+            }
+        }
     }
 
     /// Resolve `model` against the active backend.
@@ -607,8 +365,14 @@ impl SuperTTSDaemon {
     /// Record the target's device and persist it, for the paths that store
     /// without reloading (an unloaded model, or one already on the device).
     async fn store_model_device(&self, target: &DeviceTarget, device: &str) {
-        self.record_model_device(&target.definition.source, &target.definition.name, device)
-            .await;
+        self.config.write().await.update_model_device(
+            &target.definition.source,
+            &target.definition.name,
+            Some(device.to_string()),
+        );
+        if let Err(e) = self.persist_config().await {
+            warn!("Failed to persist config after device change: {e}");
+        }
     }
 
     /// The accelerator `(source, model)` is running on right now, or `None`

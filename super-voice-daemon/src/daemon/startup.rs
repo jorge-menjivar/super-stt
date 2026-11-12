@@ -5,11 +5,8 @@
 //! just the daemon struct, its type aliases, and runtime accessors.
 
 use crate::config::DaemonConfig;
-use crate::daemon::device_management::PipelineStage;
 use crate::daemon::events::EventBus;
-use crate::daemon::types::{
-    LoadTurn, LoadedModel, SharedLoadedModel, SuperSTTDaemon, normalize_device,
-};
+use crate::daemon::types::{SharedLoadedModel, SuperSTTDaemon};
 use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
 use crate::resource_management::ResourceManager;
@@ -163,66 +160,32 @@ impl SuperSTTDaemon {
         config
     }
 
-    /// Perform post-construction startup: discover backends, apply any
-    /// temporary session-level device override, then kick off background
-    /// loading of the startup model (if one is configured).
+    /// Perform post-construction startup: discover backends, then kick off
+    /// the background load of every stage's selected model.
     async fn post_init(&self) {
         self.move_old_data().await;
         // Discover installed backends, for both features: the folder is read
         // once.
         self.refresh_backends().await;
-        // Text to speech loads its startup model in the background, beside
-        // this one's.
-        self.tts.post_init().await;
 
-        // Load the configured startup model — if any — in the **background** so
-        // the HTTP listener can come up immediately. A model load may download
-        // gigabytes and bind a GPU; blocking startup on it would leave clients
-        // unable to connect (and unable to pick a lighter model) until it
-        // finishes. Clients watch the `daemon_status_changed` SSE topic for the
-        // `ready` transition. With no configured preference the daemon stays
-        // idle until the user selects a model — it never auto-pulls a model.
-        // Nor does it load one here when models are unloaded on idle: the
-        // first request that needs it does.
-        self.spawn_idle_unload();
-        if self.config.read().await.idle_unload.after().is_some() {
-            info!("Models are unloaded when idle; the transcription model loads on first use");
-        } else if let Some((name, source)) = self.pick_startup_model().await {
-            let bg = self.clone();
-            tokio::spawn(async move {
-                // A model picked before this load's turn replaces it.
-                let Some(turn) = bg.model.begin_load().await else {
-                    info!("Startup model {name} was replaced by a newer load");
-                    return;
-                };
-                if let Err(e) =
-                    Self::load_initial_model_and_broadcast(&bg, turn, name.clone(), source).await
-                {
-                    warn!("Failed to load startup model {name}: {e}; daemon is idle");
-                    bg.download_manager
-                        .clear_download(PipelineStage::Transcription.position());
-                }
-            });
-        } else {
-            info!("No startup model configured; daemon is idle until one is selected");
-        }
-
-        // The post-processor loads in the background too, and independently of
-        // the transcription model: it is a separate selection, so a
-        // transcription model that fails to load must not cost the user their
-        // post-processor (or the reverse). A failure here is logged and
-        // nothing else — post-processing is best-effort, so an unloaded
-        // processor simply means transcripts pass through unchanged.
-        if self.config.read().await.post_processor.is_active() {
-            let bg = self.clone();
-            tokio::spawn(async move {
-                if let Err(e) = bg.load_configured_post_processor().await {
-                    warn!("Failed to load the post-processor: {e}; transcripts are not processed");
-                    bg.download_manager
-                        .clear_download(PipelineStage::PostProcessor.position());
-                }
-            });
-        }
+        // Every stage of both features loads its selected model in the
+        // **background**, so the HTTP listener comes up at once: a load may
+        // download gigabytes and bind a GPU, and blocking startup on it would
+        // leave clients unable to connect (or to pick a lighter model) until
+        // it finishes. Clients watch `daemon_status_changed` for each stage's
+        // `ready`. A stage with nothing selected stays empty — the daemon
+        // never pulls a model of its own — and one whose model is unloaded
+        // when idle is left to the first request that needs it. Each stage
+        // loads apart from the others, so one failing costs no other its
+        // model.
+        let stages = self.all_stages();
+        stages.spawn_idle_unload({
+            let mut shutdown = self.shutdown_tx.subscribe();
+            async move {
+                let _ = shutdown.recv().await;
+            }
+        });
+        stages.load_at_startup().await;
 
         // Periodic self-update check: first ~60s after start (don't compete
         // with model load), then daily. POST /v1/update/check bypasses the
@@ -305,7 +268,7 @@ impl SuperSTTDaemon {
     /// Persisting is deliberately left to the caller. Keeping this free of
     /// disk I/O is what lets it be unit-tested without writing over the user's
     /// real config.
-    async fn adopt_active_backend_for(&self, source: &str) -> bool {
+    pub(in crate::daemon) async fn adopt_active_backend_for(&self, source: &str) -> bool {
         if self.active_backend.read().await.is_some() {
             return false;
         }
@@ -322,58 +285,6 @@ impl SuperSTTDaemon {
         *self.active_backend.write().await = Some(dir.clone());
         self.config.write().await.transcription.active_backend = Some(dir);
         true
-    }
-
-    /// Load `name` from `source` into the transcription slot on `turn`, and
-    /// announce it. Shared by the start-up load and the load on demand.
-    pub(in crate::daemon) async fn load_initial_model_and_broadcast(
-        daemon: &SuperSTTDaemon,
-        turn: LoadTurn<'_>,
-        name: String,
-        source: String,
-    ) -> Result<()> {
-        daemon.broadcast_model_loading_status(&name, PipelineStage::Transcription);
-
-        let chosen = daemon
-            .config
-            .read()
-            .await
-            .model_device(&source, &name)
-            .map(ToString::to_string);
-        let (instance, definition) = daemon
-            .instantiate_backend(
-                &turn,
-                &name,
-                &source,
-                chosen.as_deref(),
-                PipelineStage::Transcription,
-            )
-            .await?;
-
-        info!("model {name} loaded successfully");
-
-        if daemon.adopt_active_backend_for(&source).await
-            && let Err(e) = daemon.persist_config().await
-        {
-            warn!("Failed to persist active_backend after startup load: {e}");
-        }
-
-        // Capture the device label before moving `instance` into the shared
-        // `LoadedModel` — `ready` event consumers (e.g. the settings app's
-        // current_device tracking) only update when `actual_device` is present.
-        let actual_device = normalize_device(&instance.device());
-        turn.install(LoadedModel {
-            definition,
-            instance,
-        })
-        .await;
-
-        // Announce the active model the same way a user-initiated switch does
-        // (`model_switched` + `ready`). The startup load formerly emitted only
-        // `ready`, so a settings app reconnecting after a daemon restart never
-        // learned which model became active and kept showing "no model loaded".
-        daemon.broadcast_model_active(&name, &source, &actual_device, PipelineStage::Transcription);
-        Ok(())
     }
 }
 

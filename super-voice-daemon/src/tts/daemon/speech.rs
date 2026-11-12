@@ -40,6 +40,7 @@ use crate::tts::audio::playback::{DeviceFormat, Playback, mixer};
 use crate::tts::daemon::types::SharedLoadedModel;
 use crate::tts::text::chunk::{ChunkPolicy, Chunker};
 use crate::tts::tts_models::v1::{SynthesisSink, SynthesizeRequest};
+use super_engine_daemon::stage::StageExt;
 
 /// Longest `text` accepted when the model declares no `max_input_chars`.
 ///
@@ -1495,7 +1496,7 @@ impl crate::tts::daemon::types::SuperTTSDaemon {
         // A model is selected and failed to load: the notice says that, not
         // "no model loaded", which would send the user to load one. The answer
         // keeps the code a missing model gets.
-        if let Err(detail) = self.ensure_model_loaded().await {
+        if let Err(detail) = self.stage().ensure_loaded().await {
             let method = crate::tts::output::notification::method_for_speech(
                 self.config.read().await.notification_method,
             );
@@ -1572,7 +1573,7 @@ impl crate::tts::daemon::types::SuperTTSDaemon {
     /// See [`SpeakError`].
     pub(crate) async fn begin_speech(&self) -> Result<SpeakSession, SpeakError> {
         // A load that fails is logged; the session reports the missing model.
-        let _ = self.ensure_model_loaded().await;
+        let _ = self.stage().ensure_loaded().await;
         let (voice, language) = self.stored_defaults().await;
         let options = SpeakOptions {
             voice: voice.as_deref(),

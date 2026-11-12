@@ -170,7 +170,7 @@ impl SuperSTTDaemon {
             return DaemonResponse::error_with_code(ErrorCode::RecordingInProgress, message);
         };
 
-        match self.wait_for_model(cancelled).await {
+        match self.wait_for_pipeline(cancelled).await {
             ModelWait::Ready => {}
             ModelWait::Cancelled => {
                 return DaemonResponse::success()

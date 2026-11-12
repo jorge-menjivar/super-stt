@@ -269,18 +269,15 @@ impl SuperSTTDaemon {
     pub async fn handle_set_idle_unload(&self, after_secs: u64) -> DaemonResponse {
         // Counted from now, not from a last use that predates the setting, and
         // reset before the idle check can read the new time.
-        self.model.touch();
-        self.tts.model.touch();
+        let stages = self.all_stages();
+        stages.touch();
         let persist = self
             .set_config_field(|c| c.idle_unload.after_secs = after_secs)
             .await;
         self.publish_shared_setting_changed("idle_unload");
         let message = if after_secs == 0 {
-            let bg = self.clone();
-            tokio::spawn(async move {
-                // Each logs its own failure; nobody is waiting on this.
-                let _ = tokio::join!(bg.load_selected_model(), bg.tts.load_selected_model());
-            });
+            // Each logs its own failure; nobody is waiting on this.
+            tokio::spawn(async move { stages.load_selected().await });
             "Models stay loaded".to_string()
         } else {
             format!("Models are unloaded after {after_secs}s idle")

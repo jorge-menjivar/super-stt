@@ -129,6 +129,27 @@ impl AppModel {
                 }
                 None
             }
+            // Stage 2 moves to another device the way stage 1 does, and
+            // reports each step on its own stage. Its card shows the load, and
+            // the `ready` that ends the switch re-reads its block; the device
+            // state below is stage 1's, so none of this touches it.
+            DaemonStatusEvent::LoadingModelForDevice { model, stage, .. }
+                if is_post_processing(stage) =>
+            {
+                self.set_model_loading(
+                    model,
+                    "Loading model...".to_string(),
+                    Stage::PostProcessing,
+                );
+                None
+            }
+            DaemonStatusEvent::DeviceSwitchError { error, stage, .. }
+                if is_post_processing(stage) =>
+            {
+                warn!("The post-processor's device switch failed: {error}");
+                None
+            }
+            DaemonStatusEvent::SwitchingDevice { stage, .. } if is_post_processing(stage) => None,
             DaemonStatusEvent::DeviceSwitchError { error, .. } => {
                 Some(self.handle_daemon_device_error(&error))
             }

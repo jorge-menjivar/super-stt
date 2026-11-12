@@ -110,10 +110,7 @@ pub struct SuperTTSDaemon {
     /// fan out to `GET /events` subscribers through it.
     pub events: Arc<EventBus>,
     pub download_manager: Arc<DownloadStateManager>,
-    // The framework the loaded model actually runs on (it may have fallen
-    // back), empty until one loads. What a model is set to run on is its own
-    // `config.model_device(source, model)`, read by every load path.
-    pub actual_device: Arc<tokio::sync::RwLock<String>>,
+
     // Configuration management
     pub config: Arc<tokio::sync::RwLock<DaemonConfig>>,
     // Resource management for connection and rate limiting
@@ -174,7 +171,6 @@ pub(crate) async fn test_daemon() -> SuperTTSDaemon {
         shutdown_tx,
         events: Arc::new(EventBus::new()),
         download_manager: Arc::new(DownloadStateManager::new()),
-        actual_device: Arc::new(tokio::sync::RwLock::new(String::new())),
         config: Arc::new(tokio::sync::RwLock::new(DaemonConfig::default())),
         resource_manager: Arc::new(ResourceManager::development()),
         backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
