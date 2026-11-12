@@ -117,9 +117,17 @@ impl AppModel {
                 ..
             } => {
                 self.handle_daemon_ready(actual_device.as_deref(), model_loaded);
-                // An unload this app did not ask for, such as the daemon's
-                // own of an idle model: re-read what is loaded.
-                (!model_loaded).then(|| self.fetch_current_model())
+                if !model_loaded {
+                    // An unload this app may not have asked for, such as the
+                    // daemon's own of an idle model. The event says nothing is
+                    // loaded, so clear the model here and let the event outdate
+                    // any snapshot still in flight. Re-reading instead would
+                    // also reset the card, wiping the Loading of a load the
+                    // user started while the unload finished.
+                    self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
+                    self.clear_loaded_model();
+                }
+                None
             }
             DaemonStatusEvent::DeviceSwitchError { error, .. } => {
                 Some(self.handle_daemon_device_error(&error))
