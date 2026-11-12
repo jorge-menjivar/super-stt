@@ -348,9 +348,9 @@ async fn open_session() -> Result<portal::Session, Error> {
     )
 )]
 pub async fn take_desktop_keys(ids: &[ShortcutId]) -> Vec<ShortcutId> {
-    let mut taken = Vec::new();
     #[cfg(target_os = "linux")]
     if on_gnome() {
+        let mut taken = Vec::new();
         for &id in ids {
             match gnome::take(id).await {
                 Ok(true) => {
@@ -361,10 +361,11 @@ pub async fn take_desktop_keys(ids: &[ShortcutId]) -> Vec<ShortcutId> {
                 Err(e) => warn!("Could not take shortcut {id}'s keys from GNOME: {e:#}"),
             }
         }
+        return taken;
     }
     #[cfg(not(target_os = "linux"))]
     let _ = ids;
-    taken
+    Vec::new()
 }
 
 /// On GNOME, give the keys of `ids` back to GNOME's input-source switching.
@@ -379,9 +380,9 @@ pub async fn take_desktop_keys(ids: &[ShortcutId]) -> Vec<ShortcutId> {
     )
 )]
 pub async fn give_back_desktop_keys(ids: &[ShortcutId]) -> Vec<ShortcutId> {
-    let mut given = Vec::new();
     #[cfg(target_os = "linux")]
     if on_gnome() {
+        let mut given = Vec::new();
         for &id in ids {
             match gnome::give_back(id).await {
                 Ok(()) => {
@@ -391,10 +392,11 @@ pub async fn give_back_desktop_keys(ids: &[ShortcutId]) -> Vec<ShortcutId> {
                 Err(e) => warn!("Could not give shortcut {id}'s keys back to GNOME: {e:#}"),
             }
         }
+        return given;
     }
     #[cfg(not(target_os = "linux"))]
     let _ = ids;
-    given
+    Vec::new()
 }
 
 /// Have KDE Plasma's shortcut service forget shortcut `id`.
