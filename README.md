@@ -64,7 +64,7 @@ Press **Super+Space**, speak, and your words are typed into whatever app is focu
 
 ### Read text aloud
 
-Select text in any app and press **Super+Shift+Space** to hear it read aloud with your text to speech model. Press it again to stop. To read what you copy instead, set **Read from** to **Clipboard** in **Text to speech → Read aloud**. Bind the shortcut in your desktop's keyboard settings to `voice speak --read`.
+Select text in any app and press **Super+Shift+Space** to hear it read aloud with your text to speech model. Press it again to stop. To read what you copy instead, set **Read from** to **Clipboard** in **Text to speech → Read aloud**. Add it from the app's **Shortcuts** page, on COSMIC or on a desktop with the GlobalShortcuts portal, such as KDE Plasma, GNOME or Hyprland. On any other, such as Sway, the page shows the command to bind yourself: `voice speak --read`.
 
 It reads the text through Wayland's data-control protocol, so the compositor must offer it. COSMIC, KDE Plasma and wlroots compositors such as Sway and Hyprland do. GNOME does not.
 

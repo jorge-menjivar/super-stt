@@ -62,6 +62,19 @@ pub const DICTATE: Shortcut = Shortcut {
     marker: &["record"],
 };
 
+/// Super+Shift+Space reads aloud the selected or copied text, whichever the
+/// read method says. COSMIC binds nothing to it.
+pub const READ_ALOUD: Shortcut = Shortcut {
+    modifiers: &["Super", "Shift"],
+    key: "space",
+    description: "Super Voice: read aloud",
+    args: "speak --read",
+    marker: &["speak", "--read"],
+};
+
+/// Every shortcut, in the order they are listed.
+pub const SHORTCUTS: [Shortcut; 2] = [DICTATE, READ_ALOUD];
+
 /// COSMIC's custom-shortcuts file, under `$XDG_CONFIG_HOME`.
 #[must_use]
 pub fn file() -> Option<PathBuf> {
@@ -376,16 +389,6 @@ pub fn remove(shortcut: &Shortcut) -> std::io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A second shortcut, on Super+Shift+Space, whose marker has two words:
-    /// the rules must keep two of Super Voice's shortcuts in one file apart.
-    const READ_ALOUD: Shortcut = Shortcut {
-        modifiers: &["Super", "Shift"],
-        key: "space",
-        description: "Super Voice: read aloud",
-        args: "speak --read",
-        marker: &["speak", "--read"],
-    };
 
     const RECORD_CMD: &str = "/usr/local/bin/voice record --write";
     const SPEAK_CMD: &str = "/usr/local/bin/voice speak --read";

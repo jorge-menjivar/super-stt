@@ -5,9 +5,10 @@ one, and removing one. The daemon owns them, so every client sees the same
 answer, and a client that cannot write desktop settings, like a sandboxed app,
 can still add one.
 
-| `id`      | Does                                  | Its keys    | What it runs           |
-|-----------|---------------------------------------|-------------|------------------------|
-| `dictate` | Record, transcribe, and type the text | Super+Space | `voice record --write` |
+| `id`         | Does                                   | Its keys          | What it runs           |
+|--------------|----------------------------------------|-------------------|------------------------|
+| `dictate`    | Record, transcribe, and type the text  | Super+Space       | `voice record --write` |
+| `read_aloud` | Read the selected or copied text aloud | Super+Shift+Space | `voice speak --read`   |
 
 How the daemon puts a shortcut on the desktop is the `method`:
 
@@ -40,8 +41,9 @@ the desktop names Super Voice in its dialog and its shortcut settings.
    and may put it on other keys than it asked for. `keys` are the desktop's
    description of the keys it is on, like `Meta+Space`, and empty when it does
    not say.
-2. On Hyprland nothing is bound until the user binds `super-voice-app:dictate`
-   to keys in its config, with `global`.
+2. On Hyprland nothing is bound until the user binds
+   `super-voice-app:dictate` or `super-voice-app:read_aloud` to keys in its
+   config, with `global`.
 
 ## Auth
 
@@ -64,7 +66,8 @@ Authorization: Bearer …64hex…
   "status": "success",
   "method": "cosmic",
   "shortcuts": [
-    { "id": "dictate", "state": "installed", "keys": "Super+Space", "command": "voice record --write" }
+    { "id": "dictate",    "state": "installed", "keys": "Super+Space",       "command": "voice record --write" },
+    { "id": "read_aloud", "state": "missing",   "keys": "Super+Shift+Space", "command": "voice speak --read" }
   ]
 }
 ```

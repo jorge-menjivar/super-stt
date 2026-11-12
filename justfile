@@ -1272,6 +1272,7 @@ install-daemon:
     echo ""
     echo "🚀 Ready to use!"
     echo "-- voice record --write         # Record, transcribe, and type result"
+    echo "-- voice speak --read           # Speak the selected or copied text"
     echo ""
     echo "Add keyboard shortcuts from the Shortcuts page in the Super Voice app."
 

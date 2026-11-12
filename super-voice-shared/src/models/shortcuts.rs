@@ -14,15 +14,18 @@ use super_engine_protocol::wire_enum_strings;
 pub enum ShortcutId {
     /// Record, transcribe, and type what was said: `voice record --write`.
     Dictate,
+    /// Read the selected or copied text aloud: `voice speak --read`.
+    ReadAloud,
 }
 
 wire_enum_strings!(ShortcutId {
     Dictate => "dictate",
+    ReadAloud => "read_aloud",
 });
 
 impl ShortcutId {
     /// Every shortcut, in the order a list shows them.
-    pub const ALL: [Self; 1] = [Self::Dictate];
+    pub const ALL: [Self; 2] = [Self::Dictate, Self::ReadAloud];
 }
 
 /// How the daemon puts shortcuts on this desktop.
@@ -74,10 +77,10 @@ pub struct Shortcut {
     /// The keys, as people write them. `installed`: the keys it is on, which
     /// may be others than its own if the user rebound it. Otherwise the keys
     /// it would take, or that another shortcut holds.
-    #[cfg_attr(feature = "openapi", schema(example = "Super+Space"))]
+    #[cfg_attr(feature = "openapi", schema(example = "Super+Shift+Space"))]
     pub keys: String,
     /// What the shortcut runs, for binding it by hand.
-    #[cfg_attr(feature = "openapi", schema(example = "voice record --write"))]
+    #[cfg_attr(feature = "openapi", schema(example = "voice speak --read"))]
     pub command: String,
 }
 

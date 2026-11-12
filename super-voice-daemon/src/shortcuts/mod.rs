@@ -201,6 +201,7 @@ fn method_for(desktop: Option<&str>, portal: bool) -> ShortcutMethod {
 fn cosmic(id: ShortcutId) -> &'static cosmic_shortcuts::Shortcut {
     match id {
         ShortcutId::Dictate => &cosmic_shortcuts::DICTATE,
+        ShortcutId::ReadAloud => &cosmic_shortcuts::READ_ALOUD,
     }
 }
 
@@ -346,37 +347,43 @@ mod tests {
     }
 
     /// On COSMIC each shortcut reads from the file: set up on its keys,
-    /// missing, or blocked. Elsewhere it is the user's to bind.
+    /// missing, or blocked. Elsewhere both are the user's to bind.
     #[test]
     fn the_list_says_where_each_stands() {
-        let installed = r#"{ (modifiers: [Super], key: "space", description: Some("Super Voice")): Spawn("/usr/local/bin/voice record --write"), }"#;
-        let taken = r#"{ (modifiers: [Super], key: "space"): Spawn("x"), }"#;
-        let state = |method, file: &str| {
-            let list = list_from(method, file, &[]);
-            assert_eq!(list.method, method);
-            let [dictate] = list.shortcuts.as_slice() else {
-                panic!("one shortcut: {list:?}");
-            };
-            assert_eq!(dictate.id, ShortcutId::Dictate);
-            assert_eq!(dictate.command, "voice record --write");
-            (dictate.state, dictate.keys.clone())
+        let file = r#"{ (modifiers: [Super], key: "space", description: Some("Super Voice")): Spawn("/usr/local/bin/voice record --write"), (modifiers: [Super, Shift], key: "space"): Spawn("x"), }"#;
+        let list = list_from(ShortcutMethod::Cosmic, file, &[]);
+        assert_eq!(list.method, ShortcutMethod::Cosmic);
+        let [dictate, read] = list.shortcuts.as_slice() else {
+            panic!("two shortcuts: {list:?}");
         };
-        let on = |state: ShortcutState| (state, "Super+Space".to_string());
         assert_eq!(
-            state(ShortcutMethod::Cosmic, installed),
-            on(ShortcutState::Installed)
+            (dictate.id, dictate.state, dictate.keys.as_str()),
+            (ShortcutId::Dictate, ShortcutState::Installed, "Super+Space")
         );
         assert_eq!(
-            state(ShortcutMethod::Cosmic, taken),
-            on(ShortcutState::Taken)
+            (read.id, read.state, read.keys.as_str()),
+            (
+                ShortcutId::ReadAloud,
+                ShortcutState::Taken,
+                "Super+Shift+Space"
+            )
         );
-        assert_eq!(
-            state(ShortcutMethod::Cosmic, ""),
-            on(ShortcutState::Missing)
+        assert_eq!(read.command, "voice speak --read");
+
+        let missing = list_from(ShortcutMethod::Cosmic, "", &[]);
+        assert!(
+            missing
+                .shortcuts
+                .iter()
+                .all(|s| s.state == ShortcutState::Missing)
         );
-        assert_eq!(
-            state(ShortcutMethod::Manual, installed),
-            on(ShortcutState::Manual)
+
+        let manual = list_from(ShortcutMethod::Manual, file, &[]);
+        assert!(
+            manual
+                .shortcuts
+                .iter()
+                .all(|s| s.state == ShortcutState::Manual)
         );
     }
 
@@ -385,32 +392,29 @@ mod tests {
     #[test]
     fn the_portal_list_is_what_the_desktop_bound() {
         let bound = [Bound {
-            id: ShortcutId::Dictate,
-            keys: "Meta+Space".to_string(),
+            id: ShortcutId::ReadAloud,
+            keys: "Meta+Shift+Space".to_string(),
         }];
-        let state = |bound: &[Bound]| {
-            let list = list_from(ShortcutMethod::Portal, "", bound);
-            let [dictate] = list.shortcuts.as_slice() else {
-                panic!("one shortcut: {list:?}");
-            };
-            (dictate.state, dictate.keys.clone())
+        let list = list_from(ShortcutMethod::Portal, "", &bound);
+        let [dictate, read] = list.shortcuts.as_slice() else {
+            panic!("two shortcuts: {list:?}");
         };
         assert_eq!(
-            state(&bound),
-            (ShortcutState::Installed, "Meta+Space".to_string())
+            (dictate.state, dictate.keys.as_str()),
+            (ShortcutState::Missing, "Super+Space")
         );
         assert_eq!(
-            state(&[]),
-            (ShortcutState::Missing, "Super+Space".to_string())
+            (read.state, read.keys.as_str()),
+            (ShortcutState::Installed, "Meta+Shift+Space")
         );
     }
 
     #[test]
-    fn a_set_gains_and_loses_one() {
-        use ShortcutId::Dictate;
-        assert_eq!(with(&[], Dictate, true), [Dictate]);
-        assert_eq!(with(&[Dictate], Dictate, true), [Dictate]);
-        assert_eq!(with(&[Dictate], Dictate, false), []);
-        assert_eq!(with(&[], Dictate, false), []);
+    fn a_set_keeps_the_list_order() {
+        use ShortcutId::{Dictate, ReadAloud};
+        assert_eq!(with(&[ReadAloud], Dictate, true), [Dictate, ReadAloud]);
+        assert_eq!(with(&[Dictate, ReadAloud], Dictate, false), [ReadAloud]);
+        assert_eq!(with(&[], ReadAloud, false), []);
+        assert_eq!(with(&[ReadAloud], ReadAloud, true), [ReadAloud]);
     }
 }

@@ -21,6 +21,10 @@ fn name(id: ShortcutId) -> (String, String) {
             crate::fl!("shortcut-dictate"),
             crate::fl!("shortcut-dictate-description"),
         ),
+        ShortcutId::ReadAloud => (
+            crate::fl!("shortcut-read-aloud"),
+            crate::fl!("shortcut-read-aloud-description"),
+        ),
     }
 }
 

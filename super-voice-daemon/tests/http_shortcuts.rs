@@ -66,56 +66,58 @@ fn pair(id: &str, state: &str) -> (String, String) {
     (id.to_string(), state.to_string())
 }
 
-/// One of the user's own shortcuts, which adding and removing Super Voice's
-/// must leave alone.
-const THEIRS: &str = r#"{ (modifiers: [Ctrl, Alt], key: "t", description: Some("Terminal")): Spawn("cosmic-term"), }"#;
-
 /// On COSMIC, a shortcut is added to the file, adding it again changes
-/// nothing, and removing it takes it out. The user's own is left alone
-/// throughout.
+/// nothing, and removing it takes it out. The other is left alone throughout.
 #[tokio::test]
-async fn cosmic_shortcuts_are_added_and_removed() {
-    let (daemon, token) = start("shortcuts-cosmic", "COSMIC", Some(THEIRS)).await;
+async fn cosmic_shortcuts_are_added_and_removed_one_at_a_time() {
+    let (daemon, token) = start("shortcuts-cosmic", "COSMIC", None).await;
     let file = shortcuts_file(&daemon.home().config);
 
     let (status, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
     assert_eq!(status, StatusCode::OK, "{list}");
     assert_eq!(list["method"], "cosmic");
-    assert_eq!(states(&list), [pair("dictate", "missing")]);
+    assert_eq!(
+        states(&list),
+        [pair("dictate", "missing"), pair("read_aloud", "missing")]
+    );
 
-    let (status, list) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
+    let (status, list) = call(&daemon, &token, Method::POST, "/shortcuts/read_aloud").await;
     assert_eq!(status, StatusCode::OK, "{list}");
-    assert_eq!(states(&list), [pair("dictate", "installed")]);
-    assert_eq!(list["shortcuts"][0]["keys"], "Super+Space");
+    assert_eq!(
+        states(&list),
+        [pair("dictate", "missing"), pair("read_aloud", "installed")]
+    );
+    assert_eq!(list["shortcuts"][1]["keys"], "Super+Shift+Space");
     let written = std::fs::read_to_string(&file).expect("the file was written");
-    assert!(written.contains("voice record --write"), "{written}");
-    assert!(written.contains(r#"Spawn("cosmic-term")"#), "{written}");
+    assert!(written.contains("voice speak --read"), "{written}");
 
-    let (status, again) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
+    let (status, again) = call(&daemon, &token, Method::POST, "/shortcuts/read_aloud").await;
     assert_eq!(status, StatusCode::OK, "{again}");
     assert_eq!(std::fs::read_to_string(&file).expect("file"), written);
 
-    let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/dictate").await;
+    let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/read_aloud").await;
     assert_eq!(status, StatusCode::OK, "{list}");
-    assert_eq!(states(&list), [pair("dictate", "missing")]);
+    assert_eq!(
+        states(&list),
+        [pair("dictate", "missing"), pair("read_aloud", "missing")]
+    );
     let left = std::fs::read_to_string(&file).expect("file");
-    assert!(!left.contains("voice record --write"), "{left}");
-    assert!(left.contains(r#"Spawn("cosmic-term")"#), "{left}");
+    assert!(!left.contains("voice speak --read"), "{left}");
 
-    let (status, _) = call(&daemon, &token, Method::DELETE, "/shortcuts/dictate").await;
+    let (status, _) = call(&daemon, &token, Method::DELETE, "/shortcuts/read_aloud").await;
     assert_eq!(status, StatusCode::OK, "removing it again changes nothing");
 }
 
 /// A shortcut whose keys another shortcut holds is never added over it.
 #[tokio::test]
 async fn cosmic_never_adds_over_taken_keys() {
-    let taken = r#"{ (modifiers: [Super], key: "space", description: Some("Launcher")): Spawn("cosmic-launcher"), }"#;
+    let taken = r#"{ (modifiers: [Super, Shift], key: "space", description: Some("Screenshot")): Spawn("cosmic-screenshot"), }"#;
     let (daemon, token) = start("shortcuts-taken", "COSMIC", Some(taken)).await;
 
     let (_, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
-    assert_eq!(states(&list), [pair("dictate", "taken")]);
+    assert_eq!(states(&list)[1], pair("read_aloud", "taken"));
 
-    let (status, body) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
+    let (status, body) = call(&daemon, &token, Method::POST, "/shortcuts/read_aloud").await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error_code"], "shortcut_keys_taken", "{body}");
     let file = std::fs::read_to_string(shortcuts_file(&daemon.home().config)).expect("file");
@@ -130,7 +132,10 @@ async fn other_desktops_are_left_to_the_user() {
 
     let (_, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
     assert_eq!(list["method"], "manual");
-    assert_eq!(states(&list), [pair("dictate", "manual")]);
+    assert_eq!(
+        states(&list),
+        [pair("dictate", "manual"), pair("read_aloud", "manual")]
+    );
     assert_eq!(list["shortcuts"][0]["command"], "voice record --write");
 
     let (status, body) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
