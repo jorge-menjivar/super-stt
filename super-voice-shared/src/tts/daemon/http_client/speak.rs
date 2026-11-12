@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Client half of `POST /v1/tts/speak` and `POST /v1/tts/speak/stop`: text to
-//! speech's own endpoints, on the daemon's one transport.
+//! Client half of `POST /v1/tts/speak`, `POST /v1/tts/speak/read` and
+//! `POST /v1/tts/speak/stop`: text to speech's own endpoints, on the daemon's
+//! one transport.
 //!
 //! Speaking is fire-and-forget by design: the daemon answers `202` as soon as
 //! the utterance is queued and keeps playing after the connection closes, so
@@ -42,6 +43,23 @@ pub async fn speak(socket_path: PathBuf, token: &str, text: &str) -> HttpResult<
         token,
         "/tts/speak",
         &serde_json::json!({ "text": text }),
+    )
+    .await
+}
+
+/// `POST /tts/speak/read` — speak the selected or the copied text, whichever
+/// the user's read method names. The daemon reads it from the screen, so the
+/// request carries no text. See `docs/protocol/endpoints/v1/tts/speak/read.md`.
+///
+/// # Errors
+/// Returns an error if the daemon HTTP listener isn't reachable or the
+/// response can't be parsed.
+pub async fn speak_read(socket_path: PathBuf, token: &str) -> HttpResult<DaemonResponse> {
+    transport::post_json(
+        socket_path,
+        token,
+        "/tts/speak/read",
+        &serde_json::json!({}),
     )
     .await
 }

@@ -36,6 +36,9 @@ pub enum ErrorCode {
     /// not the build installed. The request succeeds once that build is
     /// installed (`POST /v1/registry/backend/install` with its `accel`).
     BuildNotInstalled,
+    /// `POST /tts/speak/read` found no text where the read method looks:
+    /// nothing selected, or nothing copied. The request succeeds once there is.
+    NothingToRead,
 
     // --- 400 Bad Request: the client gave the daemon something it couldn't
     // use. ---
@@ -79,7 +82,8 @@ impl ErrorCode {
             | Self::DownloadInProgress
             | Self::NoSwitchInProgress
             | Self::ModelNotLoaded
-            | Self::BuildNotInstalled => 409,
+            | Self::BuildNotInstalled
+            | Self::NothingToRead => 409,
             Self::InvalidModel
             | Self::InvalidBackend
             | Self::CudaUnavailable

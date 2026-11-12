@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `POST /v1/speak` and `POST /v1/speak/stop` — synthesize text and play it.
+//! `POST /v1/speak`, `POST /v1/speak/read` and `POST /v1/speak/stop` —
+//! synthesize text and play it.
 //!
-//! Contract: `docs/protocol/endpoints/v1/speak.md` and
-//! `docs/protocol/endpoints/v1/speak/stop.md`.
+//! Contract: `docs/protocol/endpoints/v1/tts/speak.md`,
+//! `docs/protocol/endpoints/v1/tts/speak/read.md` and
+//! `docs/protocol/endpoints/v1/tts/speak/stop.md`.
 //!
 //! The endpoint is deliberately thin: it validates the envelope, hands the body
 //! to the command dispatcher, and maps the result. Everything that decides how
@@ -262,8 +264,55 @@ pub(crate) async fn speak_stop(State(state): State<AppState>) -> Response {
     })
 }
 
+#[utoipa::path(
+    post,
+    path = "/speak/read",
+    tag = "speak",
+    summary = "Speak the selected or copied text",
+    description = "\
+Reads text from the screen and speaks it like `POST /speak`. Where it reads from is \
+the user's read method, `GET /settings/read_method`: `selection`, the highlighted \
+text, or `clipboard`, the text last copied. The request has no body. Which text is \
+read is the user's choice, like the voice.
+
+This is what a read-aloud keyboard shortcut runs, so nobody is looking at the \
+response. Every refusal is also shown as a desktop notification, unless the \
+notification setting is `off`: nothing to read, too much to read, the text could not \
+be read, and every failure `POST /speak` itself notifies.
+
+The text is read through Wayland's data-control protocol, so the daemon's session \
+needs a compositor that offers it. Elsewhere every request fails with `500`.
+
+It is not a toggle. Like `POST /speak`, it interrupts whatever is playing. A \
+shortcut that should stop the speech on a second press checks `GET /status` first \
+and calls `POST /speak/stop` instead.",
+    security(("session_token" = ["speak"])),
+    responses(
+        (status = 202, description = "Read, queued, and playing out. `utterance_id` names it.", body = UtteranceAccepted),
+        (status = 400, description = "More text than one utterance may be (`text_too_long`).", body = ErrorEnvelope),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `speak` scope.", body = ErrorEnvelope),
+        (status = 409, description = "Nothing selected or copied (`nothing_to_read`), or no model is loaded (`model_not_loaded`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+        (status = 500, description = "The text could not be read, the backend failed, or the output device could not be opened. `message` carries the reason.", body = ErrorEnvelope),
+    ),
+)]
+/// `POST /v1/speak/read` — speak the text the read method names.
+pub(crate) async fn speak_read(State(state): State<AppState>) -> Response {
+    let response = state.daemon.handle_speak_read().await;
+    if response.status != "success" {
+        return json_response(&response).into_response();
+    }
+    let accepted = UtteranceAccepted {
+        status: "success",
+        utterance_id: response.utterance_id.unwrap_or_default(),
+    };
+    (StatusCode::ACCEPTED, axum::Json(accepted)).into_response()
+}
+
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(speak))
+        .routes(routes!(speak_read))
         .routes(routes!(speak_stop))
 }

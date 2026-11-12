@@ -6,8 +6,8 @@ use serde_json::json;
 
 use super::fake_daemon::{FakeDaemon, Reply};
 use crate::daemon::client::v1::settings::{
-    audio_theme, idle_unload, language, notification_method, preview_typing, recording_stop_mode,
-    update_beta_optin, update_check_enabled, volume, write_method,
+    audio_theme, idle_unload, language, notification_method, preview_typing, read_method,
+    recording_stop_mode, update_beta_optin, update_check_enabled, volume, write_method,
 };
 use crate::state::AudioTheme;
 
@@ -61,6 +61,9 @@ async fn each_generated_setter_posts_the_key_its_endpoint_reads() {
     idle_unload::set_idle_unload(300)
         .await
         .expect("idle unload set");
+    read_method::set_read_method("clipboard".to_string())
+        .await
+        .expect("read method set");
 
     let sent: Vec<(String, serde_json::Value)> = daemon
         .requests()
@@ -94,6 +97,10 @@ async fn each_generated_setter_posts_the_key_its_endpoint_reads() {
                 "/settings/idle_unload".to_string(),
                 json!({ "after_secs": 300 })
             ),
+            (
+                "/settings/read_method".to_string(),
+                json!({ "method": "clipboard" })
+            ),
         ]
     );
 }
@@ -104,7 +111,7 @@ async fn each_generated_setter_posts_the_key_its_endpoint_reads() {
 #[tokio::test]
 async fn a_getter_whose_field_is_absent_falls_back_to_the_daemons_default() {
     let daemon = FakeDaemon::start().await;
-    for _ in 0..6 {
+    for _ in 0..7 {
         daemon.reply(Reply::json(&json!({ "status": "success" })));
     }
 
@@ -137,6 +144,10 @@ async fn a_getter_whose_field_is_absent_falls_back_to_the_daemons_default() {
         !preview_typing::get_preview_typing()
             .await
             .expect("preview typing")
+    );
+    assert_eq!(
+        read_method::get_read_method().await.expect("read method"),
+        "selection"
     );
 }
 

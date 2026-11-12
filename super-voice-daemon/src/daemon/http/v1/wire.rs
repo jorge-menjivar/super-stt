@@ -122,6 +122,24 @@ impl FromDaemon for WriteMethodState {
     }
 }
 
+/// Where the read-aloud shortcut takes its text from.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct ReadMethodState {
+    #[schema(example = "success")]
+    status: &'static str,
+    #[schema(example = "selection")]
+    read_method: String,
+}
+
+impl FromDaemon for ReadMethodState {
+    fn from_daemon(resp: DaemonResponse) -> Self {
+        Self {
+            status: "success",
+            read_method: resp.read_method.unwrap_or_default(),
+        }
+    }
+}
+
 /// The outcome of writing sample text with the configured method.
 #[derive(Serialize, ToSchema)]
 pub(crate) struct WriteMethodTest {

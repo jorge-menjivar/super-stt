@@ -5,14 +5,14 @@
 
 use crate::daemon::client::{
     get_current_audio_theme, get_idle_unload, get_notification_method, get_preview_typing,
-    get_recording_stop_mode, get_update_check_enabled, get_update_status, get_volume,
-    get_write_method, list_backends, ping_daemon,
+    get_read_method, get_recording_stop_mode, get_update_check_enabled, get_update_status,
+    get_volume, get_write_method, list_backends, ping_daemon,
 };
 use crate::state::AudioTheme;
 use crate::ui::messages::{
     BackendMessage, DaemonMessage, IdleUnloadMessage, Message, ModelsPageMessage,
-    NotificationMethodMessage, PreviewTypingMessage, RecordingStopModeMessage, UpdateMessage,
-    WriteMethodMessage,
+    NotificationMethodMessage, PreviewTypingMessage, ReadMethodMessage, RecordingStopModeMessage,
+    UpdateMessage, WriteMethodMessage,
 };
 use cosmic::prelude::*;
 use log::warn;
@@ -142,6 +142,17 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
                     ))
                 }
             }
+        }),
+        Task::perform(get_read_method(), |result| {
+            use super_voice_shared::models::read_method::ReadMethod;
+            let method = match result {
+                Ok(method) => method.parse::<ReadMethod>().unwrap_or_default(),
+                Err(e) => {
+                    log::warn!("Failed to load the read method: {e}");
+                    ReadMethod::default()
+                }
+            };
+            cosmic::Action::App(Message::ReadMethod(ReadMethodMessage::Loaded(method)))
         }),
         Task::perform(get_write_method(), |result| {
             use super_voice_shared::models::write_method::WriteMethod;

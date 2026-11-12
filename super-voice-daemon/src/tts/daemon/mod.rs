@@ -10,6 +10,7 @@ pub(crate) mod language;
 pub mod language_handlers;
 pub mod model_management;
 pub mod pipeline_handlers;
+pub mod read_handlers;
 pub mod speech;
 pub mod startup;
 pub mod status_handlers;

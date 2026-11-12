@@ -149,6 +149,7 @@ impl AppModel {
             stage_catalog: crate::state::stage_catalog::StageCatalog::default(),
             recording_stop_mode:
                 super_voice_shared::models::recording_stop_mode::RecordingStopMode::default(),
+            read_method: super_voice_shared::models::read_method::ReadMethod::default(),
             write_method: super_voice_shared::models::write_method::WriteMethod::default(),
             write_method_test_text: String::new(),
             resolved_write_method: None,

@@ -107,9 +107,12 @@
 # notification bubbles, and the XDG portal write method all speak it, and
 # macOS has no session bus for any of them. `enigo` builds on both platforms
 # but reaches the keyboard differently — see the workspace entry for why the
-# `wayland` feature is named here rather than there.
+# `wayland` feature is named here rather than there. `wl-clipboard-rs` reads
+# the selection and the clipboard that `POST /tts/speak/read` speaks, through
+# Wayland's data-control protocol (tts/input/screen_text.rs).
 [target.'cfg(target_os = "linux")'.dependencies]
     enigo = { workspace = true, features = ["wayland"] }
+    wl-clipboard-rs = "0.9.5"
     zbus.workspace = true
 
 # macOS dependencies.

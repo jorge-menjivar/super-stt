@@ -149,6 +149,10 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write_method: Option<String>,
 
+    // Where the read-aloud shortcut reads from
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_method: Option<String>,
+
     /// The concrete backend a `POST /write_method/test` actually typed
     /// through — never `auto`. Differs from `write_method` whenever the
     /// configured value is `auto`, which is the only way a client can learn
@@ -489,6 +493,12 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_recording_stop_mode(mut self, mode: String) -> Self {
         self.recording_stop_mode = Some(mode);
+        self
+    }
+
+    #[must_use]
+    pub fn with_read_method(mut self, method: String) -> Self {
+        self.read_method = Some(method);
         self
     }
 

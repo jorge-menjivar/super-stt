@@ -129,6 +129,7 @@ knowing them means most paths can be guessed rather than looked up:
 | Path | Methods | Scope | Reference |
 |---|---|---|---|
 | `/v1/tts/speak` | `POST` | `speak` | [tts/speak.md](./endpoints/v1/tts/speak.md) |
+| `/v1/tts/speak/read` | `POST` | `speak` | [tts/speak/read.md](./endpoints/v1/tts/speak/read.md) |
 | `/v1/tts/speak/stop` | `POST` | `speak` | [tts/speak/stop.md](./endpoints/v1/tts/speak/stop.md) |
 | `/v1/tts/speak/stream` | `GET` (WebSocket) | `speak` | [tts/speak/stream.md](./endpoints/v1/tts/speak/stream.md) |
 | `/v1/tts/voice/list` | `GET` | `voices` | [tts/voice.md](./endpoints/v1/tts/voice.md#get-ttsvoicelist) |
@@ -209,6 +210,7 @@ path needs the `settings` scope:
 | `/v1/settings/language/list` | `GET` | `settings` | [settings/language/list.md](./endpoints/v1/settings/language/list.md) |
 | `/v1/settings/notification_method` | `GET`, `POST` | `settings` | [settings/notification_method.md](./endpoints/v1/settings/notification_method.md) |
 | `/v1/settings/preview_typing` | `GET`, `POST` | `settings` | [settings/preview_typing.md](./endpoints/v1/settings/preview_typing.md) |
+| `/v1/settings/read_method` | `GET`, `POST` | `settings` | [settings/read_method.md](./endpoints/v1/settings/read_method.md) |
 | `/v1/settings/recording_stop_mode` | `GET`, `POST` | `settings` | [settings/recording_stop_mode.md](./endpoints/v1/settings/recording_stop_mode.md) |
 | `/v1/settings/update_beta_optin` | `GET`, `POST` | `settings` | [settings/update_beta_optin.md](./endpoints/v1/settings/update_beta_optin.md) |
 | `/v1/settings/update_check_enabled` | `GET`, `POST` | `settings` | [settings/update_check_enabled.md](./endpoints/v1/settings/update_check_enabled.md) |

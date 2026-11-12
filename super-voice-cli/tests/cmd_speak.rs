@@ -7,6 +7,8 @@
 //!
 //! - `speak`      → `POST /v1/tts/speak`      : text from arguments or from stdin.
 //! - `speak stop` → `POST /v1/tts/speak/stop` : idempotent against an idle daemon.
+//! - `speak --read` → `GET /v1/status`, then `POST /v1/tts/speak/read`: says
+//!   when the daemon has no Wayland session to read from.
 //!
 //! `ping`, `status` and `logout` are the daemon's, and `cmd_basic.rs` covers them.
 //!
@@ -167,4 +169,34 @@ fn speak_stop_is_idempotent_when_idle() {
              stdout=`{stdout}` stderr=`{stderr}`"
         );
     }
+}
+
+/// `speak --read` asks the daemon whether anything is speaking, then asks it
+/// to read and speak. A daemon with no Wayland session has nothing to read
+/// from, and the CLI must say why rather than speak nothing or wait forever.
+/// The real selection needs a compositor; this covers the path up to it.
+///
+/// The daemon also gets no session bus, so the notice it raises for the
+/// failure cannot pop up on the desktop of whoever runs the suite.
+#[cfg(target_os = "linux")]
+#[test]
+fn speak_read_says_when_the_daemon_cannot_read() {
+    let daemon = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime to wait on the daemon")
+        .block_on(
+            TestDaemon::build(&SUPER_VOICE, locate_daemon_bin(), "cli-speak-read")
+                .without("WAYLAND_SOCKET")
+                .env("WAYLAND_DISPLAY", "/nonexistent/wayland-socket")
+                .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/bus")
+                .start(),
+        );
+    let (code, stdout, stderr) = run_cli(&daemon, &["speak", "--read"]);
+    let combined = format!("{stdout}\n{stderr}");
+    assert_ne!(code, 0, "nothing read is a failure; got `{combined}`");
+    assert!(
+        combined.contains("could_not_read"),
+        "the CLI must pass on why the daemon could not read; got `{combined}`"
+    );
 }

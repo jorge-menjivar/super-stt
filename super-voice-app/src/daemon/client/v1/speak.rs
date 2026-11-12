@@ -57,6 +57,18 @@ pub async fn speak_command(text: String) -> HttpResult<Option<String>> {
     .await
 }
 
+/// `POST /tts/speak/read` — read the selected or copied text, whichever the
+/// read method names, and speak it. What the read-aloud shortcut does, so the
+/// Read aloud tab's test is the shortcut's own request.
+pub async fn speak_read_command() -> HttpResult<Option<String>> {
+    with_settings_token(|socket, token| async move {
+        let reply: SpeakReply =
+            transport::post_json(socket, &token, "/tts/speak/read", &serde_json::json!({})).await?;
+        Ok(reply.require_success("speak_read_command")?.utterance_id)
+    })
+    .await
+}
+
 /// Select `voice` for the synthesis `model`, then speak `text` in it.
 ///
 /// The Voices tab's preview: a cloned voice is only judgeable by ear, and the

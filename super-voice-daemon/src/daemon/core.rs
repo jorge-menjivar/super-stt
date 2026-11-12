@@ -99,6 +99,8 @@ impl SuperSTTDaemon {
             Command::SetWriteMethod { method } => self.handle_set_write_method(method).await,
             Command::GetWriteMethod => self.handle_get_write_method().await,
             Command::TestWriteMethod => self.handle_test_write_method().await,
+            Command::SetReadMethod { method } => self.handle_set_read_method(method).await,
+            Command::GetReadMethod => self.handle_get_read_method().await,
             Command::SetNotificationMethod { method } => {
                 self.handle_set_notification_method(method).await
             }

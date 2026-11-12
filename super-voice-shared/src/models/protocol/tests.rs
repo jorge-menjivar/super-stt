@@ -237,6 +237,26 @@ fn set_recording_stop_mode_parses() {
 }
 
 #[test]
+fn set_read_method_parses() {
+    use crate::models::read_method::ReadMethod;
+    let request = make_request("set_read_method", Some(json!({ "method": "clipboard" })));
+    let command = Command::try_from(request).expect("command should parse");
+    match command {
+        Command::SetReadMethod { method } => assert_eq!(method, ReadMethod::Clipboard),
+        _ => panic!("expected Command::SetReadMethod"),
+    }
+}
+
+/// An unknown method is refused rather than stored as the default.
+#[test]
+fn set_read_method_invalid_is_rejected() {
+    for data in [json!({ "method": "screen" }), json!({})] {
+        let request = make_request("set_read_method", Some(data.clone()));
+        assert!(Command::try_from(request).is_err(), "{data}");
+    }
+}
+
+#[test]
 fn list_backends_parses() {
     let request = make_request("list_backends", None);
     let command = Command::try_from(request).expect("command should parse");
