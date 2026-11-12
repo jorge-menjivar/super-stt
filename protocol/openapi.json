@@ -2674,6 +2674,142 @@
         ]
       }
     },
+    "/v1/settings/read_method": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read where the read-aloud shortcut reads from (scope: settings)",
+        "description": "Answers with `selection` or `clipboard`: where `POST /tts/speak/read` takes the text it speaks from.",
+        "operationId": "get_read_method",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadMethodState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Choose where the read-aloud shortcut reads from (scope: settings)",
+        "description": "Sets where `POST /tts/speak/read` takes the text it speaks from: `selection`, the highlighted text, or `clipboard`, the text last copied. Text to speech's counterpart to `/settings/write_method`.",
+        "operationId": "set_read_method",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetReadMethodBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadMethodState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/settings/recording_stop_mode": {
       "get": {
         "tags": [
@@ -8422,6 +8558,95 @@
         ]
       }
     },
+    "/v1/tts/speak/read": {
+      "post": {
+        "tags": [
+          "speak"
+        ],
+        "summary": "Speak the selected or copied text (scope: speak)",
+        "description": "Reads text from the screen and speaks it like `POST /speak`. Where it reads from is the user's read method, `GET /settings/read_method`: `selection`, the highlighted text, or `clipboard`, the text last copied. The request has no body. Which text is read is the user's choice, like the voice.\n\nThis is what a read-aloud keyboard shortcut runs, so nobody is looking at the response. Every refusal is also shown as a desktop notification, unless the notification setting is `off`: nothing to read, too much to read, the text could not be read, and every failure `POST /speak` itself notifies.\n\nThe text is read through Wayland's data-control protocol, so the daemon's session needs a compositor that offers it. Elsewhere every request fails with `500`.\n\nIt is not a toggle. Like `POST /speak`, it interrupts whatever is playing. A shortcut that should stop the speech on a second press checks `GET /status` first and calls `POST /speak/stop` instead.",
+        "operationId": "tts_speak_read",
+        "responses": {
+          "202": {
+            "description": "Read, queued, and playing out. `utterance_id` names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UtteranceAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "More text than one utterance may be (`text_too_long`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TtsErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `speak` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TtsErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Nothing selected or copied (`nothing_to_read`), or no model is loaded (`model_not_loaded`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TtsErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TtsErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The text could not be read, the backend failed, or the output device could not be opened. `message` carries the reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TtsErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "speak"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/tts/speak/stop": {
       "post": {
         "tags": [
@@ -10965,6 +11190,24 @@
           }
         }
       },
+      "ReadMethodState": {
+        "type": "object",
+        "description": "Where the read-aloud shortcut takes its text from.",
+        "required": [
+          "status",
+          "read_method"
+        ],
+        "properties": {
+          "read_method": {
+            "type": "string",
+            "example": "selection"
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          }
+        }
+      },
       "Reason": {
         "type": "object",
         "description": "The `data` object of a [`ReasonEnvelope`].",
@@ -11517,6 +11760,19 @@
           "method": {
             "type": "string",
             "description": "One of the accepted `snake_case` method tokens. An unknown token is a `400`."
+          }
+        }
+      },
+      "SetReadMethodBody": {
+        "type": "object",
+        "description": "Choose where the read-aloud shortcut reads from",
+        "required": [
+          "method"
+        ],
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "`selection` or `clipboard`. An unknown token is a `400`."
           }
         }
       },
@@ -12104,6 +12360,7 @@
           "no_switch_in_progress",
           "model_not_loaded",
           "build_not_installed",
+          "nothing_to_read",
           "invalid_model",
           "invalid_backend",
           "cuda_unavailable",
