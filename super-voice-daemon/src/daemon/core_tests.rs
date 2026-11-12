@@ -3272,6 +3272,25 @@ async fn a_second_start_does_not_cancel_a_recording_waiting_for_its_model() {
     recording.await.expect("the recording task ended");
 }
 
+/// A recording waiting for its model blocks model changes as a capturing one
+/// does: an unload or a switch would otherwise take the model it is about to
+/// record with.
+#[tokio::test]
+async fn a_recording_waiting_for_its_model_blocks_model_changes() {
+    let daemon = daemon_loading_on_demand().await;
+    let idle = std::sync::Arc::clone(&daemon.idle);
+    let _held = idle.loading.lock().await;
+    let recording = start_pending_recording(&daemon).await;
+
+    let unload = daemon.handle_unload_active_model().await;
+    let reload = daemon.handle_reload_active_model().await;
+
+    assert_eq!(unload.error_code, Some(ErrorCode::RecordingInProgress));
+    assert_eq!(reload.error_code, Some(ErrorCode::RecordingInProgress));
+    assert!(daemon.cancel_pending_recording());
+    recording.await.expect("the recording task ended");
+}
+
 /// A stop that lands after the model has loaded, before the recording claims
 /// `busy`, still cancels it: the reservation is held until that claim.
 #[tokio::test]
