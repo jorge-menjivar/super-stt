@@ -35,6 +35,8 @@ pub const BOOKS: &[u8] = include_bytes!("../../resources/icons/phosphor/books.sv
 pub const X: &[u8] = include_bytes!("../../resources/icons/phosphor/x.svg");
 pub const CIRCLE_NOTCH: &[u8] = include_bytes!("../../resources/icons/phosphor/circle-notch.svg");
 pub const CARET_RIGHT: &[u8] = include_bytes!("../../resources/icons/phosphor/caret-right.svg");
+/// The Shortcuts page, which only Linux has.
+#[cfg(target_os = "linux")]
 pub const KEYBOARD: &[u8] = include_bytes!("../../resources/icons/phosphor/keyboard.svg");
 
 /// The Super Voice app logo, full-color artwork. Not a Phosphor glyph, so it

@@ -42,8 +42,8 @@ fn build_nav() -> nav_bar::Model {
         .data::<Section>(Section::TextToSpeech)
         .icon(icons::phosphor(icons::SPEAKER_HIGH));
 
-    // COSMIC's shortcuts, which only a Linux desktop has. macOS's shortcut is
-    // the `voice hotkey` agent's.
+    // The Shortcuts page: only a Linux desktop takes shortcuts from the
+    // daemon. macOS's shortcut is the `voice hotkey` agent's.
     #[cfg(target_os = "linux")]
     nav.insert()
         .text(crate::fl!("shortcuts"))

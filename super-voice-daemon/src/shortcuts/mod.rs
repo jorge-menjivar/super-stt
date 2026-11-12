@@ -66,12 +66,27 @@ pub struct Shortcuts {
 }
 
 impl Shortcuts {
-    /// How the daemon puts shortcuts on the desktop it runs in.
+    /// How the daemon puts shortcuts on the desktop it runs in. Only a Linux
+    /// desktop takes them from the daemon: anywhere else it is `manual`.
+    // `allow`, not `expect`: clippy 1.98 files these under `unused_async_trait_impl`
+    // and later releases under `unused_async`, so either `expect` goes unfulfilled
+    // on some toolchain.
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(
+            clippy::unused_async,
+            clippy::unused_async_trait_impl,
+            reason = "detecting COSMIC and the portal is Linux's: elsewhere there is nothing to await"
+        )
+    )]
     pub async fn method(&self) -> ShortcutMethod {
         if let Some(method) = self.method.get() {
             return *method;
         }
+        #[cfg(target_os = "linux")]
         let method = detect_method().await;
+        #[cfg(not(target_os = "linux"))]
+        let method = ShortcutMethod::Manual;
         if method == ShortcutMethod::Manual {
             log::debug!("Keyboard shortcuts: manual");
         } else if self.method.set(method).is_ok() {
@@ -100,6 +115,17 @@ impl Shortcuts {
     }
 
     /// The shortcuts bound through the portal now: none without a session.
+    // `allow`, not `expect`: clippy 1.98 files these under `unused_async_trait_impl`
+    // and later releases under `unused_async`, so either `expect` goes unfulfilled
+    // on some toolchain.
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(
+            clippy::unused_async,
+            clippy::unused_async_trait_impl,
+            reason = "the portal session it awaits is Linux's"
+        )
+    )]
     async fn bound(&self) -> Vec<Bound> {
         #[cfg(target_os = "linux")]
         if let Some(session) = self.session.lock().await.as_ref() {
@@ -120,29 +146,28 @@ impl Shortcuts {
     /// [`Error::Refused`] when the user turned every one down,
     /// [`Error::Write`] when the portal failed, and [`Error::Unsupported`]
     /// where there is no portal.
+    // `allow`, not `expect`: clippy 1.98 files these under `unused_async_trait_impl`
+    // and later releases under `unused_async`, so either `expect` goes unfulfilled
+    // on some toolchain.
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(
+            clippy::unused_async,
+            clippy::unused_async_trait_impl,
+            reason = "the portal session it awaits is Linux's"
+        )
+    )]
     pub async fn bind(&self, set: &[ShortcutId]) -> Result<Vec<Bound>, Error> {
         #[cfg(target_os = "linux")]
         {
-            let mut held = self.session.lock().await;
-            if let Some(old) = held.take() {
-                old.close().await;
+            let bound = self.bind_in_new_session(set).await;
+            // KDE keeps every shortcut ever bound in its settings, keys and
+            // all, since the portal cannot unbind one: it is told to forget
+            // the ones no session holds now.
+            if is_kde(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref()) {
+                portal::forget_unbound_on_kde();
             }
-            if set.is_empty() {
-                return Ok(Vec::new());
-            }
-            // A connection of the session's own: the app id registered on it
-            // is the portal's first call there.
-            let conn = async { zbus::connection::Builder::session()?.build().await }
-                .await
-                .map_err(|e: zbus::Error| Error::Write(e.to_string()))?;
-            match portal::Session::bind(conn, set, run).await {
-                Ok((session, bound)) => {
-                    *held = Some(session);
-                    Ok(bound)
-                }
-                Err(portal::BindError::Cancelled) => Err(Error::Refused),
-                Err(portal::BindError::Failed(e)) => Err(Error::Write(format!("{e:#}"))),
-            }
+            bound
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -150,10 +175,38 @@ impl Shortcuts {
             Err(Error::Unsupported)
         }
     }
+
+    /// [`Shortcuts::bind`]'s portal work: close the session held, and bind
+    /// `set` in a new one unless it is empty.
+    #[cfg(target_os = "linux")]
+    async fn bind_in_new_session(&self, set: &[ShortcutId]) -> Result<Vec<Bound>, Error> {
+        let mut held = self.session.lock().await;
+        if let Some(old) = held.take() {
+            old.close().await;
+        }
+        if set.is_empty() {
+            return Ok(Vec::new());
+        }
+        // A connection of the session's own: the app id registered on it is
+        // the portal's first call there.
+        let conn = async { zbus::connection::Builder::session()?.build().await }
+            .await
+            .map_err(|e: zbus::Error| Error::Write(e.to_string()))?;
+        match portal::Session::bind(conn, set, run).await {
+            Ok((session, bound)) => {
+                *held = Some(session);
+                Ok(bound)
+            }
+            Err(portal::BindError::Cancelled) => Err(Error::Refused),
+            Err(portal::BindError::Failed(e)) => Err(Error::Write(format!("{e:#}"))),
+        }
+    }
 }
 
-/// [`Shortcuts::method`]: COSMIC by its name in `XDG_CURRENT_DESKTOP`, then
-/// the portal when the desktop offers `GlobalShortcuts`.
+/// [`Shortcuts::method`] on Linux: COSMIC by its name in
+/// `XDG_CURRENT_DESKTOP`, then the portal when the desktop offers
+/// `GlobalShortcuts`.
+#[cfg(target_os = "linux")]
 async fn detect_method() -> ShortcutMethod {
     let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
     if is_cosmic(desktop.as_deref()) {
@@ -174,19 +227,28 @@ async fn portal_available() -> bool {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-async fn portal_available() -> bool {
-    false
+/// Whether `XDG_CURRENT_DESKTOP`, a `:`-separated list, names `name`.
+#[cfg(target_os = "linux")]
+fn names(desktop: Option<&str>, name: &str) -> bool {
+    desktop.is_some_and(|desktop| desktop.split(':').any(|d| d.eq_ignore_ascii_case(name)))
 }
 
-/// Whether `XDG_CURRENT_DESKTOP`, a `:`-separated list, names COSMIC.
+/// Whether `XDG_CURRENT_DESKTOP` names COSMIC.
+#[cfg(target_os = "linux")]
 fn is_cosmic(desktop: Option<&str>) -> bool {
-    desktop.is_some_and(|desktop| desktop.split(':').any(|d| d.eq_ignore_ascii_case("COSMIC")))
+    names(desktop, "COSMIC")
+}
+
+/// Whether `XDG_CURRENT_DESKTOP` names KDE Plasma.
+#[cfg(target_os = "linux")]
+fn is_kde(desktop: Option<&str>) -> bool {
+    names(desktop, "KDE")
 }
 
 /// The method for an `XDG_CURRENT_DESKTOP`, given whether the desktop offers
 /// the `GlobalShortcuts` portal. COSMIC's own file comes first: COSMIC has no
 /// such portal, but another desktop's backend for it may be installed.
+#[cfg(target_os = "linux")]
 fn method_for(desktop: Option<&str>, portal: bool) -> ShortcutMethod {
     if is_cosmic(desktop) {
         ShortcutMethod::Cosmic
@@ -325,6 +387,7 @@ pub fn with(set: &[ShortcutId], id: ShortcutId, present: bool) -> Vec<ShortcutId
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn cosmic_is_found_in_a_desktop_list() {
         assert_eq!(method_for(Some("COSMIC"), false), ShortcutMethod::Cosmic);
@@ -339,6 +402,16 @@ mod tests {
 
     /// The portal is used wherever the desktop offers it, except on COSMIC,
     /// whose own file comes first.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn kde_is_found_in_a_desktop_list() {
+        assert!(is_kde(Some("KDE")));
+        assert!(is_kde(Some("kde:wayland")));
+        assert!(!is_kde(Some("COSMIC")));
+        assert!(!is_kde(None));
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn the_portal_is_used_where_it_is_offered() {
         assert_eq!(method_for(Some("KDE"), true), ShortcutMethod::Portal);

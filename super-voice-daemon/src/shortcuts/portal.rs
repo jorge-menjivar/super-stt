@@ -246,6 +246,51 @@ impl Session {
     }
 }
 
+/// KDE's shortcut service, which holds each app's global shortcuts.
+const KGLOBALACCEL_BUS: &str = "org.kde.kglobalaccel";
+const KGLOBALACCEL_COMPONENT_IFACE: &str = "org.kde.kglobalaccel.Component";
+
+/// How long KDE's portal is given to let go of a closed session's shortcuts
+/// before KDE is told to forget the ones no session holds.
+const KDE_SETTLE: Duration = Duration::from_millis(500);
+
+/// KDE's object for [`APP_ID`]'s shortcuts: `/component/super_voice_app`.
+/// KDE names it after the app id, with each character other than a letter, a
+/// digit or `_` made a `_`.
+fn kde_component_path() -> String {
+    let name: String = APP_ID
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    format!("/component/{name}")
+}
+
+/// Have KDE forget Super Voice's shortcuts that no session holds, shortly,
+/// in the background. KDE keeps every shortcut ever bound in its settings,
+/// keys and all, since the portal cannot unbind one: without this, one the
+/// user removed stays listed there, holding its keys. Ones still bound keep
+/// their keys, including keys the user changed in KDE's settings.
+pub fn forget_unbound_on_kde() {
+    tokio::spawn(async {
+        tokio::time::sleep(KDE_SETTLE).await;
+        let forgot = async {
+            let conn = zbus::Connection::session().await?;
+            let component = zbus::Proxy::new(
+                &conn,
+                KGLOBALACCEL_BUS,
+                kde_component_path(),
+                KGLOBALACCEL_COMPONENT_IFACE,
+            )
+            .await?;
+            component.call::<_, _, bool>("cleanUp", &()).await
+        };
+        match forgot.await {
+            Ok(removed) => debug!("KDE shortcuts: cleaned up (any removed: {removed})"),
+            Err(e) => debug!("KDE shortcuts: could not clean up: {e}"),
+        }
+    });
+}
+
 /// Register [`APP_ID`] as who `conn` calls the portal for. Must come before
 /// any other portal call on it.
 async fn register(conn: &zbus::Connection) {
@@ -395,6 +440,12 @@ mod tests {
             args[1].1.get("description"),
             Some(&Value::from("Read aloud"))
         );
+    }
+
+    /// KDE's object for the app's shortcuts, as KDE names it.
+    #[test]
+    fn the_kde_component_is_named_after_the_app_id() {
+        assert_eq!(kde_component_path(), "/component/super_voice_app");
     }
 
     #[test]

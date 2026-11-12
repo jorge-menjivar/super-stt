@@ -44,6 +44,10 @@ the desktop names Super Voice in its dialog and its shortcut settings.
 2. On Hyprland nothing is bound until the user binds
    `super-voice-app:dictate` or `super-voice-app:read_aloud` to keys in its
    config, with `global`.
+3. The portal cannot unbind a shortcut, and a desktop may keep a removed one
+   in its own settings, keys and all. On KDE Plasma the daemon then tells
+   KDE's shortcut service to forget the shortcuts no session holds, so a
+   removed one leaves KDE's settings and frees its keys. GNOME keeps it.
 
 ## Auth
 

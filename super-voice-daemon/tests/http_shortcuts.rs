@@ -4,7 +4,8 @@
 //! `XDG_CONFIG_HOME`, and refusing what it cannot do.
 //!
 //! The desktop is set with `XDG_CURRENT_DESKTOP`, so these run the same on a
-//! machine with no COSMIC, CI included. The session bus is one that is not
+//! machine with no COSMIC, CI included. The COSMIC ones are Linux's alone:
+//! anywhere else the daemon is `manual`. The session bus is one that is not
 //! there, so no daemon here finds the desktop's own portal: the portal's
 //! tests are `shortcuts_portal.rs`, against a fake one.
 
@@ -68,6 +69,7 @@ fn pair(id: &str, state: &str) -> (String, String) {
 
 /// On COSMIC, a shortcut is added to the file, adding it again changes
 /// nothing, and removing it takes it out. The other is left alone throughout.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn cosmic_shortcuts_are_added_and_removed_one_at_a_time() {
     let (daemon, token) = start("shortcuts-cosmic", "COSMIC", None).await;
@@ -109,6 +111,7 @@ async fn cosmic_shortcuts_are_added_and_removed_one_at_a_time() {
 }
 
 /// A shortcut whose keys another shortcut holds is never added over it.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn cosmic_never_adds_over_taken_keys() {
     let taken = r#"{ (modifiers: [Super, Shift], key: "space", description: Some("Screenshot")): Spawn("cosmic-screenshot"), }"#;

@@ -108,6 +108,9 @@ struct Calls {
     bound: HashMap<String, Vec<String>>,
     /// Answer a bind as the user saying no in the dialog.
     refuse: bool,
+    /// How many times KDE's shortcut service was told to forget the
+    /// shortcuts no session holds.
+    cleaned_up: usize,
 }
 
 type Shared = Arc<Mutex<Calls>>;
@@ -312,17 +315,37 @@ impl FakeSession {
     }
 }
 
-/// The fake portal, serving on `bus` as the portal's own name.
+/// KDE's shortcut service's object for Super Voice's shortcuts.
+struct KdeComponent(Shared);
+
+#[zbus::interface(name = "org.kde.kglobalaccel.Component")]
+impl KdeComponent {
+    #[zbus(name = "cleanUp")]
+    fn clean_up(&self) -> bool {
+        self.0.lock().unwrap().cleaned_up += 1;
+        true
+    }
+}
+
+/// The fake portal, serving on `bus` as the portal's own name, beside KDE's
+/// shortcut service, as on KDE Plasma.
 async fn fake_portal(bus: &Bus) -> (zbus::Connection, Shared) {
     let calls = Shared::default();
     let conn = zbus::connection::Builder::address(bus.address.as_str())
         .expect("address")
         .name("org.freedesktop.portal.Desktop")
         .expect("name")
+        .name("org.kde.kglobalaccel")
+        .expect("kglobalaccel name")
         .serve_at(PORTAL_PATH, Registry(Arc::clone(&calls)))
         .expect("registry")
         .serve_at(PORTAL_PATH, GlobalShortcuts(Arc::clone(&calls)))
         .expect("global shortcuts")
+        .serve_at(
+            "/component/super_voice_app",
+            KdeComponent(Arc::clone(&calls)),
+        )
+        .expect("kglobalaccel component")
         .build()
         .await
         .expect("serve the fake portal");
@@ -477,8 +500,18 @@ async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
     assert!(config.contains(r#""read_aloud""#), "{config}");
     assert!(!config.contains(r#""dictate""#), "{config}");
 
+    let cleaned_before = calls.lock().unwrap().cleaned_up;
     let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/read_aloud").await;
     assert_eq!(status, StatusCode::OK, "{list}");
+    // KDE keeps a removed shortcut in its settings unless told to forget it.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while calls.lock().unwrap().cleaned_up == cleaned_before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "KDE was never told to forget the removed shortcut"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let calls = calls.lock().unwrap();
     assert_eq!(
         calls.closed.len(),
