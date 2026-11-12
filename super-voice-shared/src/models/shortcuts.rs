@@ -92,6 +92,12 @@ pub struct ShortcutList {
     #[cfg_attr(feature = "openapi", schema(example = "success"))]
     pub status: String,
     pub method: ShortcutMethod,
+    /// Whether `DELETE /shortcuts/{id}` takes a shortcut off the desktop, so
+    /// a client offers to remove one: on COSMIC, and through the portal on
+    /// KDE Plasma. Through the portal elsewhere it only stops Super Voice
+    /// binding it, and the desktop keeps it until the user removes it in its
+    /// own settings.
+    pub removable: bool,
     /// Every shortcut, in [`ShortcutId::ALL`]'s order.
     pub shortcuts: Vec<Shortcut>,
 }

@@ -78,6 +78,7 @@ async fn cosmic_shortcuts_are_added_and_removed_one_at_a_time() {
     let (status, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
     assert_eq!(status, StatusCode::OK, "{list}");
     assert_eq!(list["method"], "cosmic");
+    assert_eq!(list["removable"], true);
     assert_eq!(
         states(&list),
         [pair("dictate", "missing"), pair("read_aloud", "missing")]
@@ -135,6 +136,7 @@ async fn other_desktops_are_left_to_the_user() {
 
     let (_, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
     assert_eq!(list["method"], "manual");
+    assert_eq!(list["removable"], false);
     assert_eq!(
         states(&list),
         [pair("dictate", "manual"), pair("read_aloud", "manual")]

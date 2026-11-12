@@ -10,7 +10,10 @@
 //! 2. A desktop with the `GlobalShortcuts` portal, such as KDE Plasma, GNOME
 //!    or Hyprland: the daemon binds it in a portal session it holds
 //!    ([`portal`]), and runs the same `voice` when it is pressed. The ones
-//!    the user added are in the config, and bound again at every start.
+//!    the user added are in the config, and bound again at every start. The
+//!    portal cannot unbind one: on KDE Plasma, KDE's shortcut service is told
+//!    to forget it, and elsewhere the user removes it in the desktop's
+//!    settings.
 //! 3. Anything else: the user binds the command in the desktop's settings.
 //!
 //! Contract: `docs/protocol/endpoints/v1/shortcuts.md`.
@@ -111,7 +114,8 @@ impl Shortcuts {
             String::new()
         };
         let bound = self.bound().await;
-        list_from(method, &cosmic_file, &bound)
+        let removable = removable(method, desktop().as_deref());
+        list_from(method, removable, &cosmic_file, &bound)
     }
 
     /// The shortcuts bound through the portal now: none without a session.
@@ -179,6 +183,61 @@ impl Shortcuts {
         }
     }
 
+    /// [`Shortcuts::bind`] `set`, which the user just added `id` to. Answers
+    /// what the desktop bound, without `id` when the user turned it down.
+    ///
+    /// KDE Plasma takes its dialog's Cancel as binding the shortcut with no
+    /// keys, where it does nothing. So on KDE one bound with none is turned
+    /// down: it is bound no more, and KDE is told to forget it, so adding it
+    /// again asks again.
+    ///
+    /// # Errors
+    ///
+    /// As [`Shortcuts::bind`], and [`Error::Write`] when KDE could not be
+    /// told to forget one turned down.
+    pub async fn bind_added(
+        &self,
+        set: &[ShortcutId],
+        id: ShortcutId,
+    ) -> Result<Vec<Bound>, Error> {
+        let bound = self.bind(set).await?;
+        #[cfg(target_os = "linux")]
+        if on_kde() && bound.iter().any(|b| b.id == id && b.keys.is_empty()) {
+            info!("KDE bound shortcut {id} with no keys: the user turned it down");
+            let bound = self.bind(&with(set, id, false)).await?;
+            forget_on_kde(id).await?;
+            return Ok(bound);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = id;
+        Ok(bound)
+    }
+
+    /// [`Shortcuts::bind`] `set`, which the user just took `id` out of.
+    ///
+    /// On KDE Plasma, KDE's shortcut service is told to forget `id` too, so
+    /// it leaves KDE's settings and frees its keys. Elsewhere the desktop
+    /// keeps it in its settings until the user removes it there.
+    ///
+    /// # Errors
+    ///
+    /// As [`Shortcuts::bind`], and [`Error::Write`] when KDE could not be
+    /// told to forget it.
+    pub async fn bind_removed(
+        &self,
+        set: &[ShortcutId],
+        id: ShortcutId,
+    ) -> Result<Vec<Bound>, Error> {
+        let bound = self.bind(set).await?;
+        #[cfg(target_os = "linux")]
+        if on_kde() {
+            forget_on_kde(id).await?;
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = id;
+        Ok(bound)
+    }
+
     /// Bind the shortcuts `saved` at a start, and answer the ones kept: one
     /// the user removed in the desktop's settings is not, so the page offers
     /// to add it again.
@@ -211,18 +270,18 @@ impl Shortcuts {
                 old.close().await;
             }
             let session = open_session().await?;
-            let asked =
-                if lists_kept_shortcuts(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref()) {
-                    match session.list().await {
-                        Ok(listed) => still_kept(saved, &listed),
-                        Err(e) => {
-                            warn!("Could not ask which shortcuts the desktop kept: {e:#}");
-                            saved.to_vec()
-                        }
+            // Only KDE Plasma lists, before a bind, the shortcuts it kept.
+            let asked = if on_kde() {
+                match session.list().await {
+                    Ok(listed) => still_kept(saved, &listed),
+                    Err(e) => {
+                        warn!("Could not ask which shortcuts the desktop kept: {e:#}");
+                        saved.to_vec()
                     }
-                } else {
-                    saved.to_vec()
-                };
+                }
+            } else {
+                saved.to_vec()
+            };
             if asked.is_empty() {
                 session.close().await;
                 return Ok(asked);
@@ -269,6 +328,24 @@ async fn open_session() -> Result<portal::Session, Error> {
         .map_err(|e| Error::Write(format!("{e:#}")))
 }
 
+/// Have KDE Plasma's shortcut service forget shortcut `id`.
+#[cfg(target_os = "linux")]
+async fn forget_on_kde(id: ShortcutId) -> Result<(), Error> {
+    let forgot = async {
+        let conn = zbus::Connection::session().await?;
+        portal::forget_on_kde(&conn, id).await
+    };
+    match forgot.await {
+        Ok(had) => {
+            info!("KDE forgot shortcut {id} (it had it: {had})");
+            Ok(())
+        }
+        Err(e) => Err(Error::Write(format!(
+            "could not have KDE forget shortcut {id}: {e:#}"
+        ))),
+    }
+}
+
 /// The ones of `saved` the desktop still lists.
 #[cfg(target_os = "linux")]
 fn still_kept(saved: &[ShortcutId], listed: &[Bound]) -> Vec<ShortcutId> {
@@ -303,8 +380,12 @@ async fn portal_available() -> bool {
     }
 }
 
+/// The desktop the daemon runs in: `XDG_CURRENT_DESKTOP`.
+fn desktop() -> Option<String> {
+    std::env::var("XDG_CURRENT_DESKTOP").ok()
+}
+
 /// Whether `XDG_CURRENT_DESKTOP`, a `:`-separated list, names `name`.
-#[cfg(target_os = "linux")]
 fn names(desktop: Option<&str>, name: &str) -> bool {
     desktop.is_some_and(|desktop| desktop.split(':').any(|d| d.eq_ignore_ascii_case(name)))
 }
@@ -315,12 +396,35 @@ fn is_cosmic(desktop: Option<&str>) -> bool {
     names(desktop, "COSMIC")
 }
 
-/// Whether the desktop lists, in a new session and before anything is bound
-/// in it, the shortcuts it kept from the app's sessions before. KDE Plasma
-/// does. GNOME lists nothing until a bind, and Hyprland keeps nothing.
-#[cfg(target_os = "linux")]
-fn lists_kept_shortcuts(desktop: Option<&str>) -> bool {
+/// Whether `XDG_CURRENT_DESKTOP` names KDE Plasma, whose portal differs from
+/// the others in three ways the daemon minds:
+///
+/// 1. It lists, in a new session and before anything is bound in it, the
+///    shortcuts it kept from the app's sessions before. GNOME lists nothing
+///    until a bind, and Hyprland keeps nothing.
+/// 2. KDE's shortcut service forgets a shortcut when asked, which the portal
+///    cannot.
+/// 3. Its dialog's Cancel binds the shortcut with no keys.
+fn is_kde(desktop: Option<&str>) -> bool {
     names(desktop, "KDE")
+}
+
+/// Whether the daemon runs on KDE Plasma.
+#[cfg(target_os = "linux")]
+fn on_kde() -> bool {
+    is_kde(desktop().as_deref())
+}
+
+/// Whether `DELETE /shortcuts/{id}` takes a shortcut off the desktop by
+/// `method`: COSMIC's file the daemon writes itself, and KDE Plasma's
+/// shortcut service forgets one when asked. Through the portal elsewhere the
+/// desktop keeps it until the user removes it in its own settings.
+fn removable(method: ShortcutMethod, desktop: Option<&str>) -> bool {
+    match method {
+        ShortcutMethod::Cosmic => true,
+        ShortcutMethod::Portal => is_kde(desktop),
+        ShortcutMethod::Manual => false,
+    }
 }
 
 /// The method for an `XDG_CURRENT_DESKTOP`, given whether the desktop offers
@@ -379,10 +483,16 @@ pub fn run(id: ShortcutId) {
     });
 }
 
-/// Every shortcut and where it stands, given the method, COSMIC's shortcuts
-/// file's text for COSMIC, and what the portal has bound for the portal.
+/// Every shortcut and where it stands, given the method, whether `DELETE`
+/// takes one off the desktop, COSMIC's shortcuts file's text for COSMIC, and
+/// what the portal has bound for the portal.
 #[must_use]
-pub fn list_from(method: ShortcutMethod, cosmic_file: &str, bound: &[Bound]) -> ShortcutList {
+pub fn list_from(
+    method: ShortcutMethod,
+    removable: bool,
+    cosmic_file: &str,
+    bound: &[Bound],
+) -> ShortcutList {
     let shortcuts = ShortcutId::ALL
         .into_iter()
         .map(|id| {
@@ -410,6 +520,7 @@ pub fn list_from(method: ShortcutMethod, cosmic_file: &str, bound: &[Bound]) -> 
     ShortcutList {
         status: "success".to_string(),
         method,
+        removable,
         shortcuts,
     }
 }
@@ -478,17 +589,24 @@ mod tests {
         assert_eq!(method_for(None, false), ShortcutMethod::Manual);
     }
 
-    /// The portal is used wherever the desktop offers it, except on COSMIC,
-    /// whose own file comes first.
-    /// Only KDE Plasma says, before a bind, which shortcuts it kept.
-    #[cfg(target_os = "linux")]
     #[test]
-    fn only_kde_lists_the_shortcuts_it_kept() {
-        assert!(lists_kept_shortcuts(Some("KDE")));
-        assert!(lists_kept_shortcuts(Some("kde:wayland")));
-        assert!(!lists_kept_shortcuts(Some("GNOME")));
-        assert!(!lists_kept_shortcuts(Some("Hyprland")));
-        assert!(!lists_kept_shortcuts(None));
+    fn kde_is_found_in_a_desktop_list() {
+        assert!(is_kde(Some("KDE")));
+        assert!(is_kde(Some("kde:wayland")));
+        assert!(!is_kde(Some("GNOME")));
+        assert!(!is_kde(Some("Hyprland")));
+        assert!(!is_kde(None));
+    }
+
+    /// The daemon takes a shortcut off COSMIC, and off KDE Plasma through
+    /// its shortcut service. Through the portal elsewhere it cannot.
+    #[test]
+    fn only_cosmic_and_kde_shortcuts_are_removable() {
+        assert!(removable(ShortcutMethod::Cosmic, Some("COSMIC")));
+        assert!(removable(ShortcutMethod::Portal, Some("KDE")));
+        assert!(!removable(ShortcutMethod::Portal, Some("GNOME")));
+        assert!(!removable(ShortcutMethod::Portal, Some("Hyprland")));
+        assert!(!removable(ShortcutMethod::Manual, Some("KDE")));
     }
 
     /// A saved shortcut the desktop no longer lists was removed in its
@@ -505,6 +623,8 @@ mod tests {
         assert_eq!(still_kept(&[Dictate], &[]), []);
     }
 
+    /// The portal is used wherever the desktop offers it, except on COSMIC,
+    /// whose own file comes first.
     #[cfg(target_os = "linux")]
     #[test]
     fn the_portal_is_used_where_it_is_offered() {
@@ -518,8 +638,9 @@ mod tests {
     #[test]
     fn the_list_says_where_each_stands() {
         let file = r#"{ (modifiers: [Super], key: "space", description: Some("Super Voice")): Spawn("/usr/local/bin/voice record --write"), (modifiers: [Super, Shift], key: "space"): Spawn("x"), }"#;
-        let list = list_from(ShortcutMethod::Cosmic, file, &[]);
+        let list = list_from(ShortcutMethod::Cosmic, true, file, &[]);
         assert_eq!(list.method, ShortcutMethod::Cosmic);
+        assert!(list.removable);
         let [dictate, read] = list.shortcuts.as_slice() else {
             panic!("two shortcuts: {list:?}");
         };
@@ -537,7 +658,7 @@ mod tests {
         );
         assert_eq!(read.command, "voice speak --read");
 
-        let missing = list_from(ShortcutMethod::Cosmic, "", &[]);
+        let missing = list_from(ShortcutMethod::Cosmic, true, "", &[]);
         assert!(
             missing
                 .shortcuts
@@ -545,7 +666,7 @@ mod tests {
                 .all(|s| s.state == ShortcutState::Missing)
         );
 
-        let manual = list_from(ShortcutMethod::Manual, file, &[]);
+        let manual = list_from(ShortcutMethod::Manual, false, file, &[]);
         assert!(
             manual
                 .shortcuts
@@ -562,7 +683,7 @@ mod tests {
             id: ShortcutId::ReadAloud,
             keys: "Meta+Shift+Space".to_string(),
         }];
-        let list = list_from(ShortcutMethod::Portal, "", &bound);
+        let list = list_from(ShortcutMethod::Portal, false, "", &bound);
         let [dictate, read] = list.shortcuts.as_slice() else {
             panic!("two shortcuts: {list:?}");
         };

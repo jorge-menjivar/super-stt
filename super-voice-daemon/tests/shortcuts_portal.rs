@@ -2,7 +2,8 @@
 //! `/v1/shortcuts` through the `GlobalShortcuts` portal, end to end: a real
 //! daemon on a desktop that is not COSMIC, and a fake portal on a session bus
 //! of their own, which records each call and answers it the way the portal
-//! does.
+//! does. Beside it is a fake of KDE Plasma's shortcut service, which the
+//! daemon asks on KDE to forget a shortcut.
 //!
 //! The bus is a `dbus-daemon` with a config of the test's own and no service
 //! directories, so no call can start a real service on it.
@@ -107,8 +108,17 @@ struct Calls {
     /// What each session has bound.
     bound: HashMap<String, Vec<String>>,
     /// Answer a bind as the user saying no in the dialog, with this response
-    /// code: KDE answers its Cancel with 1, GNOME with 2.
+    /// code: the portal's own for a cancel is 1, and GNOME answers its Cancel
+    /// with 2.
     refuse: Option<u32>,
+    /// Answer a bind as KDE answers its dialog's Cancel: each shortcut the
+    /// desktop did not have yet is bound, with no keys.
+    cancel_binds_no_keys: bool,
+    /// The shortcuts the desktop holds with no keys.
+    no_keys: Vec<String>,
+    /// Each shortcut KDE's shortcut service was told to forget: the app id
+    /// it is under, and its id.
+    forgotten: Vec<(String, String)>,
     /// The shortcuts the desktop keeps across sessions, as KDE Plasma and
     /// GNOME do: each one ever bound, until the user removes it in the
     /// desktop's settings.
@@ -163,15 +173,21 @@ async fn respond(
     .expect("emit Response");
 }
 
-/// A `shortcuts` result: each id, with the keys the fake desktop gave it.
-fn described(ids: &[String]) -> Value<'static> {
+/// A `shortcuts` result: each id, with the keys the fake desktop gave it,
+/// none for the ones in `no_keys`.
+fn described(ids: &[String], no_keys: &[String]) -> Value<'static> {
     let list: Vec<(String, HashMap<String, Value<'static>>)> = ids
         .iter()
         .map(|id| {
+            let keys = if no_keys.contains(id) {
+                ""
+            } else {
+                keys_for(id)
+            };
             let mut properties = HashMap::new();
             properties.insert(
                 "trigger_description".to_string(),
-                Value::from(keys_for(id).to_string()),
+                Value::from(keys.to_string()),
             );
             (id.clone(), properties)
         })
@@ -243,7 +259,7 @@ impl GlobalShortcuts {
             .map(|(id, properties)| (id.clone(), option(properties, "preferred_trigger")))
             .collect();
         let ids: Vec<String> = asked.iter().map(|(id, _)| id.clone()).collect();
-        let refuse = {
+        let (refuse, no_keys) = {
             let mut calls = self.0.lock().unwrap();
             calls.binds.push((session.clone(), asked));
             if calls.refuse.is_none() {
@@ -251,16 +267,19 @@ impl GlobalShortcuts {
                 for id in &ids {
                     if !calls.kept.contains(id) {
                         calls.kept.push(id.clone());
+                        if calls.cancel_binds_no_keys {
+                            calls.no_keys.push(id.clone());
+                        }
                     }
                 }
             }
-            calls.refuse
+            (calls.refuse, calls.no_keys.clone())
         };
         if let Some(code) = refuse {
             respond(conn, &header, request.clone(), code, HashMap::new()).await;
         } else {
             let mut results = HashMap::new();
-            results.insert("shortcuts".to_string(), described(&ids));
+            results.insert("shortcuts".to_string(), described(&ids, &no_keys));
             respond(conn, &header, request.clone(), 0, results).await;
         }
         Ok(OwnedObjectPath::try_from(request).expect("path"))
@@ -280,16 +299,17 @@ impl GlobalShortcuts {
         );
         // A session lists what it bound, or, before it binds anything, what
         // the desktop kept from sessions before it.
-        let ids = {
+        let (ids, no_keys) = {
             let calls = self.0.lock().unwrap();
-            calls
+            let ids = calls
                 .bound
                 .get(session_handle.as_str())
                 .cloned()
-                .unwrap_or_else(|| calls.kept.clone())
+                .unwrap_or_else(|| calls.kept.clone());
+            (ids, calls.no_keys.clone())
         };
         let mut results = HashMap::new();
-        results.insert("shortcuts".to_string(), described(&ids));
+        results.insert("shortcuts".to_string(), described(&ids, &no_keys));
         respond(conn, &header, request.clone(), 0, results).await;
         Ok(OwnedObjectPath::try_from(request).expect("path"))
     }
@@ -324,17 +344,39 @@ impl FakeSession {
     }
 }
 
-/// The fake portal, serving on `bus` as the portal's own name.
+/// KDE Plasma's shortcut service, which keeps every app's shortcuts.
+struct KGlobalAccel(Shared);
+
+#[zbus::interface(name = "org.kde.KGlobalAccel")]
+impl KGlobalAccel {
+    /// Lower-case, as KDE names it, not zbus's `Unregister`.
+    #[zbus(name = "unregister")]
+    fn unregister(&self, component: String, shortcut: String) -> bool {
+        let mut calls = self.0.lock().unwrap();
+        let had = calls.kept.contains(&shortcut);
+        calls.kept.retain(|id| *id != shortcut);
+        calls.no_keys.retain(|id| *id != shortcut);
+        calls.forgotten.push((component, shortcut));
+        had
+    }
+}
+
+/// The fake portal, serving on `bus` as the portal's own name, beside KDE's
+/// shortcut service.
 async fn fake_portal(bus: &Bus) -> (zbus::Connection, Shared) {
     let calls = Shared::default();
     let conn = zbus::connection::Builder::address(bus.address.as_str())
         .expect("address")
         .name("org.freedesktop.portal.Desktop")
         .expect("name")
+        .name("org.kde.kglobalaccel")
+        .expect("kglobalaccel name")
         .serve_at(PORTAL_PATH, Registry(Arc::clone(&calls)))
         .expect("registry")
         .serve_at(PORTAL_PATH, GlobalShortcuts(Arc::clone(&calls)))
         .expect("global shortcuts")
+        .serve_at("/kglobalaccel", KGlobalAccel(Arc::clone(&calls)))
+        .expect("kglobalaccel")
         .build()
         .await
         .expect("serve the fake portal");
@@ -346,8 +388,18 @@ async fn fake_portal(bus: &Bus) -> (zbus::Connection, Shared) {
 /// A daemon on KDE, on `bus`, with a token for it with the `settings` scope.
 /// `config`, when given, is its config file before it starts.
 async fn start(label: &str, bus: &Bus, config: Option<&str>) -> (TestDaemon, String) {
+    start_on("KDE", label, bus, config).await
+}
+
+/// [`start`], on `desktop`.
+async fn start_on(
+    desktop: &str,
+    label: &str,
+    bus: &Bus,
+    config: Option<&str>,
+) -> (TestDaemon, String) {
     let builder = common::daemon(label)
-        .env("XDG_CURRENT_DESKTOP", "KDE")
+        .env("XDG_CURRENT_DESKTOP", desktop)
         .env("DBUS_SESSION_BUS_ADDRESS", &bus.address);
     if let Some(content) = config {
         let path = config_file(&builder.home().config);
@@ -410,11 +462,16 @@ fn pair(id: &str, keys: &str) -> (String, String) {
     (id.to_string(), keys.to_string())
 }
 
+/// The shortcuts KDE's shortcut service was told to forget.
+fn forgotten(calls: &Shared) -> Vec<(String, String)> {
+    calls.lock().unwrap().forgotten.clone()
+}
+
 // ---------- the tests --------------------------------------------------------
 
 /// Each shortcut added is bound in a new session with the ones before it,
 /// under the app's id, and one removed is left out of the next. What is bound
-/// is kept in the config.
+/// is kept in the config. On KDE, KDE's shortcut service forgets one removed.
 #[tokio::test]
 async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
     let home = tempfile::tempdir().expect("tempdir");
@@ -425,6 +482,7 @@ async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
     let (status, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
     assert_eq!(status, StatusCode::OK, "{list}");
     assert_eq!(list["method"], "portal");
+    assert_eq!(list["removable"], true, "KDE forgets one when asked");
     assert_eq!(
         states(&list),
         [
@@ -485,6 +543,8 @@ async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
         ]
     );
     assert_eq!(last_bind(&calls), [pair("read_aloud", "LOGO+SHIFT+space")]);
+    assert_eq!(forgotten(&calls), [pair("super-voice-app", "dictate")]);
+    assert_eq!(calls.lock().unwrap().kept, ["read_aloud"]);
     let config = std::fs::read_to_string(config_file(&daemon.home().config)).expect("config");
     assert!(config.contains(r#""read_aloud""#), "{config}");
     assert!(!config.contains(r#""dictate""#), "{config}");
@@ -492,6 +552,7 @@ async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
     let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/read_aloud").await;
     assert_eq!(status, StatusCode::OK, "{list}");
     let calls = calls.lock().unwrap();
+    assert!(calls.kept.is_empty(), "KDE has none left: {:?}", calls.kept);
     assert_eq!(
         calls.closed.len(),
         calls.sessions.len(),
@@ -500,28 +561,81 @@ async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
     assert_eq!(calls.sessions.len(), 3, "and none is opened for nothing");
 }
 
+/// How a desktop answers its dialog's Cancel.
+#[derive(Debug, Clone, Copy)]
+enum Cancel {
+    /// The bind ends with this response code: the portal's own for a cancel
+    /// is 1, and GNOME answers 2.
+    Code(u32),
+    /// KDE binds the shortcut, with no keys.
+    BindsNoKeys,
+}
+
 /// A shortcut the user turns down in the desktop's dialog is refused, and not
-/// kept, however the desktop answers the Cancel: KDE as cancelled, GNOME as
-/// ended another way.
+/// kept, however the desktop answers the Cancel. KDE, which binds it with no
+/// keys, is told to forget it, so adding it again asks again.
 #[tokio::test]
 async fn a_shortcut_the_user_turns_down_is_not_kept() {
-    for (desktop, code) in [("kde", 1), ("gnome", 2)] {
+    for cancel in [Cancel::Code(1), Cancel::Code(2), Cancel::BindsNoKeys] {
         let home = tempfile::tempdir().expect("tempdir");
         let bus = Bus::start(home.path());
         let (_portal, calls) = fake_portal(&bus).await;
-        calls.lock().unwrap().refuse = Some(code);
-        let (daemon, token) = start(&format!("shortcuts-refused-{desktop}"), &bus, None).await;
+        match cancel {
+            Cancel::Code(code) => calls.lock().unwrap().refuse = Some(code),
+            Cancel::BindsNoKeys => calls.lock().unwrap().cancel_binds_no_keys = true,
+        }
+        let label = match cancel {
+            Cancel::Code(code) => format!("shortcuts-refused-{code}"),
+            Cancel::BindsNoKeys => "shortcuts-refused-no-keys".to_string(),
+        };
+        let (daemon, token) = start(&label, &bus, None).await;
 
         let (status, body) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
-        assert_eq!(status, StatusCode::CONFLICT, "{desktop}: {body}");
-        assert_eq!(body["error_code"], "shortcut_refused", "{desktop}: {body}");
+        assert_eq!(status, StatusCode::CONFLICT, "{cancel:?}: {body}");
+        assert_eq!(body["error_code"], "shortcut_refused", "{cancel:?}: {body}");
 
         let (_, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
-        assert_eq!(states(&list)[0], row("dictate", "missing", "Super+Space"));
+        assert_eq!(
+            states(&list)[0],
+            row("dictate", "missing", "Super+Space"),
+            "{cancel:?}"
+        );
         let config =
             std::fs::read_to_string(config_file(&daemon.home().config)).unwrap_or_default();
-        assert!(!config.contains(r#""dictate""#), "{desktop}: {config}");
+        assert!(!config.contains(r#""dictate""#), "{cancel:?}: {config}");
+
+        if let Cancel::BindsNoKeys = cancel {
+            let calls = calls.lock().unwrap();
+            assert_eq!(calls.forgotten, [pair("super-voice-app", "dictate")]);
+            assert!(calls.kept.is_empty(), "KDE forgot it: {:?}", calls.kept);
+            assert_eq!(
+                calls.closed.len(),
+                calls.sessions.len(),
+                "the session that bound it with no keys is closed"
+            );
+        }
     }
+}
+
+/// Off KDE, the daemon cannot take a shortcut off the desktop: the list says
+/// so, and removing one only stops Super Voice binding it.
+#[tokio::test]
+async fn off_kde_removing_is_left_to_the_desktop() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let bus = Bus::start(home.path());
+    let (_portal, calls) = fake_portal(&bus).await;
+    let (daemon, token) = start_on("GNOME", "shortcuts-portal-gnome", &bus, None).await;
+
+    let (status, list) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["removable"], false, "{list}");
+
+    let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/dictate").await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(states(&list)[0], row("dictate", "missing", "Super+Space"));
+    let calls = calls.lock().unwrap();
+    assert!(calls.forgotten.is_empty(), "{:?}", calls.forgotten);
+    assert_eq!(calls.kept, ["dictate"], "the desktop keeps it");
 }
 
 /// A daemon binds the shortcuts in its config as it starts, with no client

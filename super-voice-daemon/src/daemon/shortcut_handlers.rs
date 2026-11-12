@@ -55,14 +55,20 @@ impl SuperSTTDaemon {
     }
 
     /// Bind the portal's shortcuts again with `id` added or taken out, and
-    /// keep what the desktop bound in the config.
+    /// keep what the desktop bound in the config. On KDE Plasma, one taken
+    /// out leaves KDE's settings too.
     ///
     /// A bind replaces every shortcut, so one that fails would leave none:
     /// the ones held before are bound again then.
     async fn change_portal_shortcut(&self, id: ShortcutId, add: bool) -> Result<(), Error> {
         let before = self.config.read().await.shortcuts.portal.clone();
         let wanted = shortcuts::with(&before, id, add);
-        let bound = match self.shortcuts.bind(&wanted).await {
+        let changed = if add {
+            self.shortcuts.bind_added(&wanted, id).await
+        } else {
+            self.shortcuts.bind_removed(&wanted, id).await
+        };
+        let bound = match changed {
             Ok(bound) => bound,
             Err(e) => {
                 if let Err(again) = self.shortcuts.bind(&before).await {

@@ -11,6 +11,7 @@ shortcut-missing = { $keys } is not set up.
 shortcut-read-aloud = Read aloud
 shortcut-read-aloud-description = Reads the selected or copied text aloud.
 shortcut-set-up = Set up in COSMIC's keyboard settings.
+shortcut-set-up-desktop = Set up in your desktop's keyboard settings.
 shortcut-taken = { $keys } is used by another shortcut. Bind another key to: { $command }
 shortcuts = Shortcuts
 shortcuts-load-failed = Couldn't read the shortcuts: { $error }

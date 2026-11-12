@@ -12,6 +12,7 @@ fn list(read_aloud: &str) -> serde_json::Value {
     json!({
         "status": "success",
         "method": "cosmic",
+        "removable": true,
         "shortcuts": [
             { "id": "dictate", "state": "installed", "keys": "Super+Space", "command": "voice record --write" },
             { "id": "read_aloud", "state": read_aloud, "keys": "Super+Shift+Space", "command": "voice speak --read" },
@@ -29,6 +30,7 @@ async fn each_call_reaches_its_route_and_reads_the_list() {
 
     let listed = list_shortcuts().await.expect("listed");
     assert_eq!(listed.method, ShortcutMethod::Cosmic);
+    assert!(listed.removable);
     assert_eq!(listed.shortcuts[1].state, ShortcutState::Missing);
 
     let added = add_shortcut(ShortcutId::ReadAloud).await.expect("added");

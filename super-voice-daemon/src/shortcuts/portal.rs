@@ -14,6 +14,10 @@
 //! removed in KDE's settings, and is not bound again. GNOME lists nothing
 //! until a bind.
 //!
+//! KDE's settings cannot remove a shortcut while a session holds it: they
+//! hide it until they reload, and it keeps working. So on KDE the daemon
+//! removes one itself, through KDE's shortcut service ([`forget_on_kde`]).
+//!
 //! The portal asks who is calling by app id, and the daemon, a service the
 //! host runs, has none. So it first registers the app's, [`APP_ID`], on the
 //! connection, and the desktop names Super Voice in its dialog and in its
@@ -260,6 +264,40 @@ impl Session {
             debug!("GlobalShortcuts portal: closing {}: {e}", self.handle);
         }
     }
+}
+
+/// KDE Plasma's shortcut service, which keeps every app's global shortcuts.
+const KGLOBALACCEL_BUS: &str = "org.kde.kglobalaccel";
+const KGLOBALACCEL_PATH: &str = "/kglobalaccel";
+const KGLOBALACCEL_IFACE: &str = "org.kde.KGlobalAccel";
+
+/// Have KDE Plasma's shortcut service forget shortcut `id`, so it leaves
+/// KDE's settings and frees its keys. Answers whether KDE had it.
+///
+/// The portal cannot unbind a shortcut, and KDE's own settings cannot remove
+/// one a session holds. KDE files the portal's shortcuts under the app id
+/// they were bound for, [`APP_ID`].
+///
+/// # Errors
+///
+/// When KDE's shortcut service cannot be reached.
+pub async fn forget_on_kde(conn: &zbus::Connection, id: ShortcutId) -> Result<bool> {
+    let kglobalaccel = zbus::Proxy::new(
+        conn,
+        KGLOBALACCEL_BUS,
+        KGLOBALACCEL_PATH,
+        KGLOBALACCEL_IFACE,
+    )
+    .await
+    .context("Failed to create KGlobalAccel proxy")?;
+    let had = tokio::time::timeout(
+        Duration::from_secs(TIMEOUT_SECS),
+        kglobalaccel.call::<_, _, bool>("unregister", &(APP_ID, id.as_wire_str())),
+    )
+    .await
+    .context("KDE's shortcut service did not answer")?
+    .context("KDE's shortcut service could not forget the shortcut")?;
+    Ok(had)
 }
 
 /// Register [`APP_ID`] as who `conn` calls the portal for. Must come before

@@ -18,6 +18,10 @@ How the daemon puts a shortcut on the desktop is the `method`:
 | `portal`  | One with the `GlobalShortcuts` portal, such as KDE Plasma, GNOME or Hyprland | Binds it in a portal session it holds, and runs the command when it is pressed. |
 | `manual`  | Any other                                   | Nothing. The user binds `command` in the desktop's own keyboard settings.                             |
 
+`removable` says whether `DELETE /shortcuts/{id}` takes a shortcut off the
+desktop, so a client offers to remove one. It is true on COSMIC, and through the
+portal on KDE Plasma. Through the portal elsewhere it is false: see below.
+
 Each shortcut's `state`:
 
 | `state`     | Meaning                                                                                   |
@@ -40,14 +44,20 @@ the desktop names Super Voice in its dialog and its shortcut settings.
 1. The desktop may ask the user before it binds one, in a dialog of its own,
    and may put it on other keys than it asked for. `keys` are the desktop's
    description of the keys it is on, like `Meta+Space`, and empty when it does
-   not say.
+   not say. KDE Plasma takes its dialog's Cancel as binding the shortcut with
+   no keys, so on KDE one bound with none is `shortcut_refused`, and KDE is
+   told to forget it.
 2. On Hyprland nothing is bound until the user binds
    `super-voice-app:dictate` or `super-voice-app:read_aloud` to keys in its
    config, with `global`.
 3. The portal cannot unbind a shortcut, and the desktop keeps one in its own
-   settings, keys and all, until the user removes it there. So a shortcut is
-   changed or removed in the desktop's settings. `DELETE` only stops Super
-   Voice binding it.
+   settings, keys and all, until the user removes it there.
+   1. On KDE Plasma, `DELETE` also tells KDE's shortcut service to forget it,
+      so it leaves KDE's settings and frees its keys. KDE's own settings
+      cannot remove a shortcut while the daemon holds it: they hide it until
+      they reload, and it keeps working.
+   2. Elsewhere a shortcut is changed or removed in the desktop's settings,
+      and `removable` is false. `DELETE` only stops Super Voice binding it.
 4. At each start the daemon binds the saved shortcuts again, and forgets one
    the user removed in the desktop's settings, so `GET /shortcuts` lists it
    as `missing` again:
@@ -78,6 +88,7 @@ Authorization: Bearer …64hex…
 {
   "status": "success",
   "method": "cosmic",
+  "removable": true,
   "shortcuts": [
     { "id": "dictate",    "state": "installed", "keys": "Super+Space",       "command": "voice record --write" },
     { "id": "read_aloud", "state": "missing",   "keys": "Super+Shift+Space", "command": "voice speak --read" }
@@ -113,7 +124,9 @@ Remove the shortcut, from whatever keys it is on. Removing one that is not set
 up changes nothing and succeeds. Answers the whole list.
 
 On COSMIC, removing `dictate` hands Super+Space back to COSMIC's own binding for
-it, switching the input source.
+it, switching the input source. Through the portal on KDE Plasma, KDE's shortcut
+service forgets it. Through the portal elsewhere, it only stops Super Voice
+binding it: the desktop keeps it until the user removes it in its own settings.
 
 **Errors:**
 
