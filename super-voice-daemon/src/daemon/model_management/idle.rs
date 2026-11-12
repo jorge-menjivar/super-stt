@@ -56,10 +56,11 @@ impl SuperSTTDaemon {
     }
 
     /// Whether a request finding no model in memory would load one: models
-    /// are unloaded when idle, and one is selected.
+    /// are unloaded when idle, and one is selected. Quiet: it runs on every
+    /// recording.
     pub(crate) async fn loads_on_demand(&self) -> bool {
         self.config.read().await.idle_unload.after().is_some()
-            && self.pick_startup_model().await.is_some()
+            && self.selected_model().await.is_ok()
     }
 
     /// [`ensure_model_loaded`](Self::ensure_model_loaded) for a recording,

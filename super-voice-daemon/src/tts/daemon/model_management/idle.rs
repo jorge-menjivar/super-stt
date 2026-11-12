@@ -39,12 +39,13 @@ impl SuperTTSDaemon {
     }
 
     /// The model the next request loads when it finds none in memory: the
-    /// selected one, when models are unloaded on idle.
+    /// selected one, when models are unloaded on idle. Quiet: the voices page
+    /// reads it on every listing.
     pub(crate) async fn model_loaded_on_demand(
         &self,
     ) -> Option<crate::tts::tts_models::ModelDefinition> {
         self.config.read().await.idle_unload.after()?;
-        let (name, source) = self.pick_startup_model().await?;
+        let (name, source) = self.selected_model().await.ok()?;
         self.resolve_definition(&name, &source).await
     }
 
