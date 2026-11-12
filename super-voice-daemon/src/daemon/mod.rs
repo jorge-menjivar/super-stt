@@ -16,6 +16,7 @@ pub mod post_processor_handlers;
 pub mod recording;
 pub mod self_update_handlers;
 pub mod settings_handlers;
+pub mod shortcut_handlers;
 pub mod startup;
 pub mod status_handlers;
 #[cfg(test)]

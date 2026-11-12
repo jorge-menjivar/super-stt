@@ -11,6 +11,7 @@ mod models_page;
 mod recording;
 mod settings;
 mod shell;
+mod shortcuts;
 mod speech;
 mod stage;
 pub(in crate::core::app) mod tasks;

@@ -160,6 +160,8 @@ pub struct AppModel {
     // Recording stop mode
     pub recording_stop_mode: super_voice_shared::models::recording_stop_mode::RecordingStopMode,
 
+    /// The Shortcuts page: where each shortcut stands.
+    pub shortcuts: crate::state::shortcuts::ShortcutsState,
     /// Where the read-aloud shortcut reads from: the selected text or the
     /// clipboard.
     pub read_method: super_voice_shared::models::read_method::ReadMethod,
@@ -546,6 +548,13 @@ impl AppModel {
             ]),
             // The library can change from another client, and the loaded
             // model decides what the tab offers.
+            // Someone may have changed the shortcuts in the desktop's settings.
+            crate::state::Page::Shortcuts => Task::batch([
+                Task::done(cosmic::Action::App(Message::Shortcuts(
+                    crate::ui::messages::ShortcutsMessage::Refresh,
+                ))),
+                self.update_title(),
+            ]),
             crate::state::Page::Voices => Task::batch([
                 Task::done(cosmic::Action::App(Message::Voices(
                     crate::ui::messages::VoicesMessage::Refresh,

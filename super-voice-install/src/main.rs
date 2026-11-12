@@ -2,7 +2,7 @@
 //! `super-voice-install`: installs and updates Super Voice. The installer is
 //! `super_engine_installer`'s; what is here is what makes it Super Voice's:
 //! its two apps, what Super STT and Super TTS installs left to retire, and
-//! the `Super+Space` shortcut.
+//! its COSMIC shortcuts.
 
 mod shortcut;
 

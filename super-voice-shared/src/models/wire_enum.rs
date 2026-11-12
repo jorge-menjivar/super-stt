@@ -8,6 +8,7 @@ use crate::models::notification_method::NotificationMethod;
 use crate::models::protocol::PreviewSource;
 use crate::models::read_method::ReadMethod;
 use crate::models::recording_stop_mode::RecordingStopMode;
+use crate::models::shortcuts::{ShortcutId, ShortcutMethod, ShortcutState};
 use crate::models::write_method::WriteMethod;
 
 /// Assert the forms this macro generates all agree, for one enum.
@@ -67,6 +68,9 @@ fn every_wire_enum_agrees_with_its_table() {
     assert_wire_forms_agree!(NotificationMethod);
     assert_wire_forms_agree!(PreviewSource);
     assert_wire_forms_agree!(ReadMethod);
+    assert_wire_forms_agree!(ShortcutId);
+    assert_wire_forms_agree!(ShortcutMethod);
+    assert_wire_forms_agree!(ShortcutState);
 }
 
 /// An unrecognized token is refused rather than silently defaulted, so a
@@ -129,4 +133,7 @@ fn every_wire_enum_publishes_exactly_its_tokens() {
     assert_schema_matches_table!(NotificationMethod);
     assert_schema_matches_table!(PreviewSource);
     assert_schema_matches_table!(ReadMethod);
+    assert_schema_matches_table!(ShortcutId);
+    assert_schema_matches_table!(ShortcutMethod);
+    assert_schema_matches_table!(ShortcutState);
 }

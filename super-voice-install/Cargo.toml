@@ -8,10 +8,11 @@
     license = "GPL-3.0-only"
 
 [dependencies]
-    dirs.workspace = true
     log.workspace = true
     super-engine-installer.workspace = true
     super-voice-registry-types = { path = "../super-voice-registry-types" }
+    # The COSMIC shortcuts' rules, shared with the settings app's Shortcuts page.
+    super-voice-shared = { path = "../super-voice-shared" }
 
 # The end-to-end test builds a release tarball and serves it from a mocked
 # GitHub.

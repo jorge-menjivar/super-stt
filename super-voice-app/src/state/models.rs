@@ -58,6 +58,8 @@ pub enum Page {
     /// Reading text on the screen aloud: where the shortcut reads from, and a
     /// test that reads it now.
     ReadAloud,
+    /// Super Voice's keyboard shortcuts, and adding each one that is missing.
+    Shortcuts,
 }
 
 /// An entry in the nav rail: a page of its own, or a feature whose pages are
@@ -68,6 +70,7 @@ pub enum Section {
     Library,
     SpeechToText,
     TextToSpeech,
+    Shortcuts,
     Customization,
     Connection,
     Updates,
@@ -80,6 +83,7 @@ impl Section {
         match self {
             Self::SpeechToText => crate::fl!("speech-to-text"),
             Self::TextToSpeech => crate::fl!("text-to-speech"),
+            Self::Shortcuts => crate::fl!("shortcuts"),
             Self::Models => crate::fl!("models"),
             Self::Library => crate::fl!("library"),
             Self::Customization => crate::fl!("customization"),
@@ -100,6 +104,7 @@ impl Section {
                 &[Page::Speech, Page::Voices, Page::ReadAloud]
             }
             Self::TextToSpeech => &[Page::Speech, Page::Voices],
+            Self::Shortcuts => &[Page::Shortcuts],
             Self::Customization => &[Page::Customization],
             Self::Connection => &[Page::Connection],
             Self::Updates => &[Page::Updates],
@@ -114,6 +119,7 @@ impl Section {
             Page::Library => Self::Library,
             Page::Recording | Page::InputSimulation | Page::Contexts => Self::SpeechToText,
             Page::Speech | Page::Voices | Page::ReadAloud => Self::TextToSpeech,
+            Page::Shortcuts => Self::Shortcuts,
             Page::Customization => Self::Customization,
             Page::Connection => Self::Connection,
             Page::Updates => Self::Updates,
@@ -134,6 +140,7 @@ impl Page {
             Self::Speech => crate::fl!("speech-page"),
             Self::Voices => crate::fl!("voices"),
             Self::ReadAloud => crate::fl!("read-aloud-page"),
+            Self::Shortcuts => crate::fl!("shortcuts"),
             Self::Customization => crate::fl!("customization"),
             Self::Connection => crate::fl!("connection"),
             Self::Updates => crate::fl!("updates"),
@@ -201,6 +208,8 @@ pub enum ErrorScope {
     Voices,
     /// The Read aloud tab: a failed read method save, or a failed read test.
     ReadAloud,
+    /// The Shortcuts page: a shortcut that could not be added.
+    Shortcuts,
     /// The Contexts page: a failed list fetch, activate, or delete. A failed
     /// *save* is not here — it belongs in the editor that caused it, beside the
     /// field the user has to fix.
@@ -262,6 +271,7 @@ mod section_tests {
             Section::Library,
             Section::SpeechToText,
             Section::TextToSpeech,
+            Section::Shortcuts,
             Section::Customization,
             Section::Connection,
             Section::Updates,
@@ -275,7 +285,7 @@ mod section_tests {
             }
         }
         // Read aloud is Linux only.
-        let pages = if cfg!(target_os = "linux") { 11 } else { 10 };
+        let pages = if cfg!(target_os = "linux") { 12 } else { 11 };
         assert_eq!(seen.len(), pages, "every page is in a section");
     }
 }

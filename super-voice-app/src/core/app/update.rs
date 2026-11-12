@@ -28,6 +28,7 @@ impl AppModel {
             Message::PreviewTyping(m) => self.handle_preview_typing_messages(m),
             Message::RecordingStopMode(m) => self.handle_recording_stop_mode_messages(m),
             Message::WriteMethod(m) => self.handle_write_method_messages(m),
+            Message::Shortcuts(m) => self.handle_shortcuts_messages(m),
             Message::ReadMethod(m) => self.handle_read_method_messages(m),
             Message::NotificationMethod(m) => self.handle_notification_method_messages(m),
             Message::IdleUnload(m) => self.handle_idle_unload_messages(m),

@@ -12,6 +12,7 @@ use super_voice_shared::models::notification_method::NotificationMethod;
 use super_voice_shared::models::protocol::PreviewSource;
 use super_voice_shared::models::read_method::ReadMethod;
 use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::models::shortcuts::{ShortcutId, ShortcutList};
 use super_voice_shared::models::write_method::WriteMethod;
 
 use cosmic::widget::segmented_button;
@@ -41,6 +42,8 @@ pub enum Message {
     WriteMethod(WriteMethodMessage),
     /// Where the read-aloud shortcut reads from.
     ReadMethod(ReadMethodMessage),
+    /// The Shortcuts page.
+    Shortcuts(ShortcutsMessage),
     NotificationMethod(NotificationMethodMessage),
     IdleUnload(IdleUnloadMessage),
     Backend(BackendMessage),
@@ -592,6 +595,21 @@ pub enum RecordingStopModeMessage {
     Error(String),
 }
 
+/// The Shortcuts page.
+#[derive(Debug, Clone)]
+pub enum ShortcutsMessage {
+    /// Ask the daemon where each shortcut stands.
+    Refresh,
+    /// The daemon's answer to a refresh.
+    Loaded(Result<ShortcutList, String>),
+    /// Add this shortcut.
+    Add(ShortcutId),
+    /// Remove this shortcut.
+    Remove(ShortcutId),
+    /// The daemon's answer to an add or a remove: the list, or why not.
+    Changed(Result<ShortcutList, String>),
+}
+
 /// The Read aloud tab: where the shortcut reads from, and its test.
 #[derive(Debug, Clone)]
 pub enum ReadMethodMessage {
@@ -967,6 +985,7 @@ message_from! {
     RecordingStopMode => RecordingStopModeMessage,
     WriteMethod => WriteMethodMessage,
     ReadMethod => ReadMethodMessage,
+    Shortcuts => ShortcutsMessage,
     NotificationMethod => NotificationMethodMessage,
     IdleUnload => IdleUnloadMessage,
     Backend => BackendMessage,

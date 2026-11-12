@@ -42,11 +42,21 @@ fn build_nav() -> nav_bar::Model {
         .data::<Section>(Section::TextToSpeech)
         .icon(icons::phosphor(icons::SPEAKER_HIGH));
 
+    // The Shortcuts page: only a Linux desktop takes shortcuts from the
+    // daemon. macOS's shortcut is the `voice hotkey` agent's.
+    #[cfg(target_os = "linux")]
+    nav.insert()
+        .text(crate::fl!("shortcuts"))
+        .data::<Section>(Section::Shortcuts)
+        .icon(icons::phosphor(icons::KEYBOARD))
+        .divider_above(true);
+
+    // Shortcuts opens the group on Linux; Customization does elsewhere.
     nav.insert()
         .text(crate::fl!("customization"))
         .data::<Section>(Section::Customization)
         .icon(icons::phosphor(icons::GEAR))
-        .divider_above(true);
+        .divider_above(!cfg!(target_os = "linux"));
 
     nav.insert()
         .text(crate::fl!("connection"))
@@ -149,6 +159,7 @@ impl AppModel {
             stage_catalog: crate::state::stage_catalog::StageCatalog::default(),
             recording_stop_mode:
                 super_voice_shared::models::recording_stop_mode::RecordingStopMode::default(),
+            shortcuts: crate::state::shortcuts::ShortcutsState::default(),
             read_method: super_voice_shared::models::read_method::ReadMethod::default(),
             write_method: super_voice_shared::models::write_method::WriteMethod::default(),
             write_method_test_text: String::new(),

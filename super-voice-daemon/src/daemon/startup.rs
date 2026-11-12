@@ -143,6 +143,7 @@ impl SuperSTTDaemon {
                 crate::output::notification::Notifier::desktop(),
             )),
             self_update: Arc::new(crate::self_update::checker()),
+            shortcuts: Arc::new(crate::shortcuts::Shortcuts::default()),
             secrets,
             tts,
         };
@@ -186,6 +187,14 @@ impl SuperSTTDaemon {
             }
         });
         stages.load_at_startup().await;
+
+        // The shortcuts the user added through the portal are bound again: the
+        // portal kept them only while the last daemon held them. In the
+        // background, since the portal may be slow to start.
+        {
+            let bg = self.clone();
+            tokio::spawn(async move { bg.bind_saved_shortcuts().await });
+        }
 
         // Periodic self-update check: first ~60s after start (don't compete
         // with model load), then daily. POST /v1/update/check bypasses the

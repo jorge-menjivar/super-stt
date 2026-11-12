@@ -144,6 +144,10 @@ pub struct SuperSTTDaemon {
     // Self-update check state: last completed check + notify-once
     // persistence. See `crate::self_update`.
     pub self_update: Arc<crate::self_update::SelfUpdateChecker>,
+    // Super Voice's keyboard shortcuts on this desktop, and on one with the
+    // `GlobalShortcuts` portal, the session holding them. See
+    // `crate::shortcuts`.
+    pub shortcuts: Arc<crate::shortcuts::Shortcuts>,
     // The secrets file: the session tokens the daemon has issued and every
     // backend's API keys. One per process, opened at startup; clones share it.
     pub secrets: Secrets,
@@ -203,6 +207,7 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
             crate::output::notification::Notifier::fake(true).0,
         )),
         self_update: Arc::new(crate::self_update::checker()),
+        shortcuts: Arc::new(crate::shortcuts::Shortcuts::default()),
         // In memory: no daemon test reads or writes the user's secrets file.
         secrets: Secrets::in_memory(),
         tts: crate::tts::daemon::types::test_daemon().await,

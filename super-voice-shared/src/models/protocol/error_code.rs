@@ -31,6 +31,15 @@ pub enum ErrorCode {
     /// not the build installed. The request succeeds once that build is
     /// installed (`POST /v1/registry/backend/install` with its `accel`).
     BuildNotInstalled,
+    /// `POST /shortcuts/{id}`: another shortcut holds the keys, so the
+    /// shortcut was not added. Bind its command to other keys instead.
+    ShortcutKeysTaken,
+    /// `POST /shortcuts/{id}`: this desktop has no method the daemon can add
+    /// a shortcut with. Bind its command in the desktop's settings instead.
+    ShortcutsUnsupported,
+    /// `POST /shortcuts/{id}`: the user said no in the desktop's dialog, so
+    /// the shortcut was not added. Asking again shows the dialog again.
+    ShortcutRefused,
 
     // --- 400 Bad Request: the client gave the daemon something it couldn't
     // use. ---
@@ -74,7 +83,10 @@ impl ErrorCode {
             | Self::DownloadInProgress
             | Self::NoSwitchInProgress
             | Self::ModelNotLoaded
-            | Self::BuildNotInstalled => 409,
+            | Self::BuildNotInstalled
+            | Self::ShortcutKeysTaken
+            | Self::ShortcutsUnsupported
+            | Self::ShortcutRefused => 409,
             Self::InvalidModel
             | Self::InvalidBackend
             | Self::CudaUnavailable

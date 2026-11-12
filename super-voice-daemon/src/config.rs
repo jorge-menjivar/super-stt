@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use super_voice_shared::models::contexts::DictationContext;
 use super_voice_shared::models::notification_method::NotificationMethod;
 use super_voice_shared::models::read_method::ReadMethod;
 use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::models::shortcuts::ShortcutId;
 use super_voice_shared::models::update_beta_optin::UpdateBetaOptIn;
 use super_voice_shared::models::write_method::WriteMethod;
 use super_voice_shared::theme::AudioTheme;
@@ -48,6 +49,8 @@ pub struct DaemonConfig {
     pub http: HttpConfig,
     #[serde(default)]
     pub idle_unload: IdleUnloadConfig,
+    #[serde(default)]
+    pub shortcuts: ShortcutsConfig,
 }
 
 /// Keeping a model in memory only while it is in use.
@@ -71,6 +74,52 @@ impl IdleUnloadConfig {
     #[must_use]
     pub fn after(self) -> Option<std::time::Duration> {
         (self.after_secs > 0).then(|| std::time::Duration::from_secs(self.after_secs))
+    }
+}
+
+/// The keyboard shortcuts the daemon binds itself. COSMIC's live in COSMIC's
+/// own shortcuts file, so only the portal's are here.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShortcutsConfig {
+    /// The shortcuts the user added through the desktop's `GlobalShortcuts`
+    /// portal, by desktop (`XDG_CURRENT_DESKTOP`), bound again at every start
+    /// there: the portal keeps them only while the daemon holds them.
+    ///
+    /// By desktop, because each keeps its own: one added on KDE Plasma is not
+    /// GNOME's, and binding it there would have GNOME ask the user about it
+    /// at the start, unasked. An unparseable stored value, like the single
+    /// list of before, degrades to none rather than failing the config load.
+    #[serde(
+        default,
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub portal: BTreeMap<String, Vec<ShortcutId>>,
+    /// The shortcuts whose keys the daemon took from GNOME's input-source
+    /// switching, which holds Super+Space and Super+Shift+Space by default.
+    /// They are given back once the daemon no longer binds the shortcut, and
+    /// only these: keys the user freed stay free.
+    #[serde(
+        default,
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub gnome_keys_taken: Vec<ShortcutId>,
+}
+
+impl ShortcutsConfig {
+    /// The shortcuts added through the portal on `desktop`.
+    #[must_use]
+    pub fn portal_on(&self, desktop: &str) -> Vec<ShortcutId> {
+        self.portal.get(desktop).cloned().unwrap_or_default()
+    }
+
+    /// Keep `set` as the shortcuts added through the portal on `desktop`.
+    /// An empty one leaves the desktop out.
+    pub fn set_portal_on(&mut self, desktop: &str, set: Vec<ShortcutId>) {
+        if set.is_empty() {
+            self.portal.remove(desktop);
+        } else {
+            self.portal.insert(desktop.to_string(), set);
+        }
     }
 }
 
@@ -389,6 +438,7 @@ impl Default for DaemonConfig {
             contexts: ContextsConfig::default(),
             http: HttpConfig::default(),
             idle_unload: IdleUnloadConfig::default(),
+            shortcuts: ShortcutsConfig::default(),
         }
     }
 }

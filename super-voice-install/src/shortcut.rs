@@ -1,34 +1,42 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Super Voice's own post-install steps: the COSMIC `Super+Space` shortcut to
-//! `voice record --write`. They run after super-engine-installer's shared
-//! steps, as [`after_install`], and are best-effort like them: a failure is
-//! logged, and the install still succeeds.
+//! Super Voice's own post-install steps, for its keyboard shortcuts. They
+//! run after super-engine-installer's shared steps, as [`after_install`], and
+//! are best-effort like them: a failure is logged, and the install still
+//! succeeds.
+//!
+//! The installer adds no shortcut. The daemon does, at `/v1/shortcuts`, from
+//! the app's Shortcuts page, so the installer says where that page is. It
+//! only keeps the COSMIC shortcuts already installed working.
 
 use std::path::Path;
 
 use super_engine_installer::{AfterInstall, Components};
+use super_voice_shared::cosmic_shortcuts;
 
 /// One shortcut step, in the order [`plan`] returns them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
-    /// Point an installed shortcut at this install's `voice`.
-    MigrateShortcut,
-    /// Interactively offer to add the `Super+Space` shortcut, when none is
-    /// installed.
-    PromptShortcut,
+    /// Point the installed COSMIC shortcuts at this install's `voice`.
+    MigrateShortcuts,
+    /// Say that shortcuts are added from the app's Shortcuts page.
+    PointToShortcutsPage,
 }
 
-/// Which shortcut steps to run: none unless the daemon (whose CLI the
-/// shortcut runs) was installed on a COSMIC desktop, and the prompt only when
-/// someone is at the terminal to answer it.
+/// Which shortcut steps to run: none unless the daemon, whose CLI the
+/// shortcuts run, was installed. The installed shortcuts are migrated on a
+/// COSMIC desktop, and the Shortcuts page is pointed to only when someone is
+/// at the terminal to read it, on Linux, the one place the page is.
 #[must_use]
 pub fn plan(components: Components, cosmic_available: bool, interactive: bool) -> Vec<Step> {
     let mut steps = Vec::new();
-    if components.daemon && cosmic_available {
-        steps.push(Step::MigrateShortcut);
-        if interactive {
-            steps.push(Step::PromptShortcut);
-        }
+    if !components.daemon {
+        return steps;
+    }
+    if cosmic_available {
+        steps.push(Step::MigrateShortcuts);
+    }
+    if interactive && cfg!(target_os = "linux") {
+        steps.push(Step::PointToShortcutsPage);
     }
     steps
 }
@@ -37,11 +45,15 @@ pub fn plan(components: Components, cosmic_available: bool, interactive: bool) -
 pub fn after_install(done: &AfterInstall<'_>) {
     for step in plan(done.components, done.cosmic_available, done.interactive) {
         match step {
-            Step::MigrateShortcut => migrate_shortcut(done.prefix),
-            Step::PromptShortcut => prompt_shortcut(done.prefix),
+            Step::MigrateShortcuts => migrate_shortcut(done.prefix),
+            Step::PointToShortcutsPage => eprintln!("\x1b[0;32m[INFO]\x1b[0m {SHORTCUTS_PAGE}"),
         }
     }
 }
+
+/// Where to add a keyboard shortcut, as the installer says it.
+const SHORTCUTS_PAGE: &str =
+    "Add keyboard shortcuts from the Shortcuts page in the Super Voice app.";
 
 /// Point every installed shortcut at this install's `<prefix>/bin/voice`,
 /// keeping its arguments. Returns `None` when there is nothing to change.
@@ -93,83 +105,13 @@ pub fn migrate_shortcut_content(content: &str, prefix: &str) -> Option<String> {
     })
 }
 
-/// Build the `Spawn(...)` shortcut entry block for `command`, RON-shaped
-/// like the rest of the COSMIC shortcuts file.
-fn shortcut_entry(command: &str) -> String {
-    format!(
-        "    (\n        modifiers: [\n            Super,\n        ],\n        key: \"space\",\n        description: Some(\"Super Voice\"),\n    ): Spawn(\"{command}\"),\n"
-    )
-}
-
-/// Whether a shortcut in `content` already runs `voice`, from any place.
-#[must_use]
-pub fn has_voice_shortcut(content: &str) -> bool {
-    content.split("Spawn(\"").skip(1).any(|rest| {
-        let command = rest.split('"').next().unwrap_or_default();
-        let program = command.split(' ').next().unwrap_or_default();
-        program == "voice" || program.ends_with("/voice")
-    })
-}
-
-/// Add a `Super+Space` → `command` shortcut entry to `content` (the
-/// COSMIC custom-shortcuts file's current text), subject to coarse checks:
-/// skip (return `None`) if Super Voice's shortcut is already installed (a
-/// "Super Voice" entry, or any shortcut that runs `voice`), or if
-/// `key: "space"` is already bound to a `Super`-modified shortcut
-/// (approximated as both substrings appearing anywhere in `content`). Empty or
-/// `{}`-only content gets the full-file template; otherwise the entry is
-/// inserted before the final closing brace.
-#[must_use]
-pub fn shortcut_with_super_voice(content: &str, command: &str) -> Option<String> {
-    if content.contains("Super Voice") || has_voice_shortcut(content) {
-        return None;
-    }
-    if content.contains("key: \"space\"") && content.contains("Super") {
-        return None;
-    }
-
-    let entry = shortcut_entry(command);
-    let trimmed = content.trim();
-    if trimmed.is_empty() || trimmed == "{}" {
-        return Some(format!("{{\n{entry}}}\n"));
-    }
-
-    // File has content: drop everything from (and including) the final `}`
-    // and append our entry plus a fresh close — mirrors the script's
-    // `head -n -1` + heredoc.
-    let last_brace = content.rfind('}')?;
-    let head = &content[..last_brace];
-    Some(format!("{head}{entry}}}\n"))
-}
-
-/// Read `/dev/tty` for a `[Y/n]`-style answer to `prompt` (echoed to
-/// stderr first). Defaults to yes on anything but an exact `n`/`N` — same
-/// as the script's `[[ "$add_shortcut" =~ ^[Nn]$ ]]` check. A `/dev/tty`
-/// open/read failure also defaults to "no" (never silently proceeds without
-/// having actually asked).
-fn prompt_yes_no(prompt: &str) -> bool {
-    use std::io::{BufRead, Write};
-    eprint!("{prompt}");
-    let _ = std::io::stderr().flush();
-    let Ok(tty) = std::fs::File::open("/dev/tty") else {
-        return false;
-    };
-    let mut line = String::new();
-    if std::io::BufReader::new(tty).read_line(&mut line).is_err() {
-        return false;
-    }
-    !line.trim().eq_ignore_ascii_case("n")
-}
-
 /// Point the shortcuts in the COSMIC custom-shortcuts file that run `stt`,
 /// or `voice` from another place, at this install. See
 /// [`migrate_shortcut_content`].
 fn migrate_shortcut(prefix: &Path) {
-    let Some(home) = dirs::home_dir() else {
+    let Some(shortcuts_file) = cosmic_shortcuts::file() else {
         return;
     };
-    let shortcuts_file =
-        home.join(".config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom");
     if let Ok(content) = std::fs::read_to_string(&shortcuts_file)
         && let Some(migrated) = migrate_shortcut_content(&content, &prefix.to_string_lossy())
         && let Err(e) = std::fs::write(&shortcuts_file, migrated)
@@ -178,40 +120,9 @@ fn migrate_shortcut(prefix: &Path) {
     }
 }
 
-/// Interactively offer to add the `Super+Space` shortcut, when it can be
-/// added: never when Super Voice's is already installed, which
-/// [`migrate_shortcut`] has just pointed at this install, nor when
-/// Super+Space is taken.
-fn prompt_shortcut(prefix: &Path) {
-    let Some(home) = dirs::home_dir() else {
-        return;
-    };
-    let shortcuts_dir = home.join(".config/cosmic/com.system76.CosmicSettings.Shortcuts/v1");
-    let shortcuts_file = shortcuts_dir.join("custom");
-
-    let command = format!("{}/bin/voice record --write", prefix.display());
-    let existing = std::fs::read_to_string(&shortcuts_file).unwrap_or_default();
-    let Some(updated) = shortcut_with_super_voice(&existing, &command) else {
-        return;
-    };
-    if !prompt_yes_no("Add COSMIC keyboard shortcut (Super+Space)? [Y/n]: ") {
-        return;
-    }
-
-    if let Err(e) = std::fs::create_dir_all(&shortcuts_dir) {
-        log::warn!("failed to create COSMIC shortcuts dir: {e}");
-        return;
-    }
-    if let Err(e) = std::fs::write(&shortcuts_file, updated) {
-        log::warn!("failed to write COSMIC shortcut: {e}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const VOICE_CMD: &str = "/usr/local/bin/voice record --write";
 
     /// Super STT's binding moves to `voice`, from either place its wrapper
     /// was installed, with its arguments kept.
@@ -275,55 +186,6 @@ mod tests {
         }
     }
 
-    /// A shortcut that runs `voice` counts as installed, whatever it is
-    /// called, so no second one is offered beside it.
-    #[test]
-    fn a_shortcut_running_voice_is_installed() {
-        let c = "{\n    (\n        modifiers: [\n            Ctrl,\n        ],\n        key: \"r\",\n        description: Some(\"Dictate\"),\n    ): Spawn(\"voice record --write\"),\n}";
-        assert!(has_voice_shortcut(c));
-        assert!(shortcut_with_super_voice(c, VOICE_CMD).is_none());
-        assert!(!has_voice_shortcut(
-            r#"{ (key: "v"): Spawn("/usr/bin/nvoice --x"), }"#
-        ));
-        assert!(!has_voice_shortcut("{}"));
-    }
-
-    #[test]
-    fn add_skips_when_super_voice_or_super_space_exists() {
-        assert!(
-            shortcut_with_super_voice(r#"{ description: Some("Super Voice") }"#, VOICE_CMD)
-                .is_none()
-        );
-        let taken = "{\n    (\n        modifiers: [\n            Super,\n        ],\n        key: \"space\",\n        description: Some(\"Other\"),\n    ): Spawn(\"x\"),\n}";
-        assert!(shortcut_with_super_voice(taken, VOICE_CMD).is_none());
-    }
-
-    #[test]
-    fn add_writes_full_file_when_empty_and_inserts_before_close_otherwise() {
-        let fresh = shortcut_with_super_voice("", VOICE_CMD).unwrap();
-        assert!(fresh.starts_with("{"));
-        assert!(fresh.contains("Super Voice"));
-        assert!(fresh.trim_end().ends_with("}"));
-
-        // The literal `{}`-only case (not just a truly empty file) also
-        // gets the full-file template, per the doc comment's "Empty or
-        // `{}`-only content" — not just whitespace-empty.
-        let fresh_braces = shortcut_with_super_voice("{}", VOICE_CMD).unwrap();
-        assert!(fresh_braces.contains("Super Voice"));
-        assert_eq!(
-            fresh_braces.matches('}').count(),
-            fresh_braces.matches('{').count()
-        );
-
-        let existing = "{\n    (\n        modifiers: [\n            Ctrl,\n        ],\n        key: \"t\",\n        description: Some(\"Terminal\"),\n    ): Spawn(\"term\"),\n}";
-        let merged = shortcut_with_super_voice(existing, VOICE_CMD).unwrap();
-        assert!(merged.contains("Terminal"));
-        assert!(merged.contains("Super Voice"));
-        assert_eq!(merged.matches('}').count(), merged.matches('{').count());
-        // Super Voice's entry comes after the existing one, before the final close.
-        assert!(merged.rfind("Super Voice").unwrap() > merged.find("Terminal").unwrap());
-    }
-
     fn daemon_only() -> Components {
         Components {
             daemon: true,
@@ -333,26 +195,27 @@ mod tests {
     }
 
     #[test]
-    fn plan_shortcut_steps_require_daemon_component_and_cosmic_available() {
+    fn plan_shortcut_steps_require_the_daemon() {
         let daemon = daemon_only();
+        let linux = cfg!(target_os = "linux");
 
-        // No cosmic-panel on PATH: no shortcut steps at all, interactive or not.
+        // No cosmic-panel on PATH: nothing to migrate, and the page is still
+        // pointed to on Linux when someone is there to read it.
         let steps = plan(daemon, false, true);
-        assert!(!steps.contains(&Step::MigrateShortcut));
-        assert!(!steps.contains(&Step::PromptShortcut));
+        assert!(!steps.contains(&Step::MigrateShortcuts));
+        assert_eq!(steps.contains(&Step::PointToShortcutsPage), linux);
 
-        // Cosmic available, non-interactive: migrate only (the prompt is
-        // interactive-only, but migration isn't gated on it at all).
-        let steps = plan(daemon, true, false);
-        assert!(steps.contains(&Step::MigrateShortcut));
-        assert!(!steps.contains(&Step::PromptShortcut));
+        // Cosmic available, non-interactive (an update from the app): migrate
+        // only, with nobody to read about the page.
+        assert_eq!(plan(daemon, true, false), [Step::MigrateShortcuts]);
 
-        // Cosmic available AND interactive: both steps, prompt after migrate.
+        // Cosmic available AND interactive: migrate first, then the page.
         let steps = plan(daemon, true, true);
-        let migrate_at = steps.iter().position(|s| *s == Step::MigrateShortcut);
-        let prompt_at = steps.iter().position(|s| *s == Step::PromptShortcut);
-        assert!(migrate_at.is_some() && prompt_at.is_some());
-        assert!(migrate_at < prompt_at);
+        if linux {
+            assert_eq!(steps, [Step::MigrateShortcuts, Step::PointToShortcutsPage]);
+        } else {
+            assert_eq!(steps, [Step::MigrateShortcuts]);
+        }
 
         // App-only (no daemon component at all): no shortcut steps even with
         // cosmic available and an interactive session.
@@ -361,8 +224,6 @@ mod tests {
             app: true,
             applet: false,
         };
-        let steps = plan(app_only, true, true);
-        assert!(!steps.contains(&Step::MigrateShortcut));
-        assert!(!steps.contains(&Step::PromptShortcut));
+        assert!(plan(app_only, true, true).is_empty());
     }
 }

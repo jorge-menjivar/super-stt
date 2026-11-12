@@ -8,6 +8,7 @@
 [dependencies]
     anyhow.workspace = true
     async-stream = "0.3.6"
+    dirs.workspace = true
     futures-util.workspace = true
     http-body-util = "0.1"
     hyper = { version = "1", features = ["client", "http1"] }

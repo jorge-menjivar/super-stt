@@ -20,6 +20,7 @@ mod pipeline;
 mod registry;
 mod session;
 mod settings;
+mod shortcuts;
 mod transcribe;
 mod update;
 mod voice;

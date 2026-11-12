@@ -21,6 +21,7 @@ pub(crate) mod ping;
 pub(crate) mod pipeline;
 pub(crate) mod registry;
 pub(crate) mod settings;
+pub(crate) mod shortcuts;
 pub(crate) mod speak;
 pub(crate) mod transcribe;
 pub(crate) mod update;

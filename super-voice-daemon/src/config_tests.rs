@@ -740,3 +740,33 @@ fn the_default_tcp_port_is_super_stts() {
         super_voice_shared::product::SUPER_VOICE.tcp_port
     );
 }
+
+/// The shortcuts added through the portal are kept by desktop: each desktop
+/// keeps its own. The single list a build before kept, which named no
+/// desktop, reads as none, and the rest of the config still loads.
+#[test]
+fn portal_shortcuts_are_kept_by_desktop() {
+    use ShortcutId::{Dictate, ReadAloud};
+    let mut config = DaemonConfig::default();
+    config
+        .shortcuts
+        .set_portal_on("KDE", vec![Dictate, ReadAloud]);
+    config.shortcuts.set_portal_on("GNOME", vec![ReadAloud]);
+    let back = round_trip(&config);
+    assert_eq!(back.shortcuts.portal_on("KDE"), [Dictate, ReadAloud]);
+    assert_eq!(back.shortcuts.portal_on("GNOME"), [ReadAloud]);
+    assert!(back.shortcuts.portal_on("Hyprland").is_empty());
+
+    config.shortcuts.set_portal_on("GNOME", Vec::new());
+    assert!(!config.shortcuts.portal.contains_key("GNOME"));
+
+    let before = from_ron(
+        r#"(
+    audio: (theme: "classic", volume: 100),
+    transcription: (preferred_model: "whisper-tiny"),
+    shortcuts: (portal: ["dictate", "read_aloud"]),
+)"#,
+    );
+    assert!(before.shortcuts.portal.is_empty());
+    assert_eq!(before.transcription.preferred_model, "whisper-tiny");
+}

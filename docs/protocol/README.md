@@ -147,6 +147,8 @@ knowing them means most paths can be guessed rather than looked up:
 | `/v1/events` | `GET` (SSE) | any | [events.md](./endpoints/v1/events.md) |
 | `/v1/status` | `GET` | `status` | [status.md](./endpoints/v1/status.md) |
 | `/v1/gpu_info` | `GET` | `settings` | [gpu_info.md](./endpoints/v1/gpu_info.md) |
+| `/v1/shortcuts` | `GET` | `settings` | [shortcuts.md](./endpoints/v1/shortcuts.md) |
+| `/v1/shortcuts/{id}` | `POST`, `DELETE` | `settings` | [shortcuts.md](./endpoints/v1/shortcuts.md) |
 | `/v1/update` | `GET` | `settings` | [update.md](./endpoints/v1/update.md) |
 | `/v1/update/check` | `POST` | `settings` | [update/check.md](./endpoints/v1/update/check.md) |
 

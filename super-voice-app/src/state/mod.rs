@@ -10,6 +10,7 @@ pub mod models;
 pub mod models_page;
 pub mod registry;
 pub mod scripts;
+pub mod shortcuts;
 pub mod speech;
 pub mod stage;
 pub mod stage_catalog;
