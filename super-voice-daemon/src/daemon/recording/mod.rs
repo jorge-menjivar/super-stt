@@ -5,6 +5,7 @@ mod preview;
 mod realtime;
 mod transcribe;
 
+use crate::daemon::model_management::idle::ModelWait;
 use crate::daemon::types::SuperSTTDaemon;
 use crate::output::notice;
 use crate::{audio::recorder::DaemonAudioRecorder, output::typer::Typer};
@@ -68,6 +69,11 @@ fn audio_for_final_decode<'a>(
     audio
 }
 
+/// The recording was stopped before it captured anything.
+#[derive(Debug, thiserror::Error)]
+#[error("recording cancelled before it started")]
+pub(crate) struct RecordingCancelled;
+
 impl SuperSTTDaemon {
     /// Surface a recording failure through the user's configured channel.
     ///
@@ -123,13 +129,30 @@ impl SuperSTTDaemon {
             }
         }
 
-        self.ensure_model_loaded().await;
+        match self.ensure_model_loaded_for_recording().await {
+            ModelWait::Ready => {}
+            ModelWait::Cancelled => {
+                return DaemonResponse::success()
+                    .with_message(DaemonResponse::RECORDING_CANCELLED_MSG.to_string())
+                    .with_transcription(String::new());
+            }
+            // One recording waits for the model at a time, as one records at
+            // a time.
+            ModelWait::AnotherWaiting => {
+                warn!("Recording request rejected - one is waiting for its model");
+                return DaemonResponse::error_with_code(
+                    ErrorCode::RecordingInProgress,
+                    "A recording is already waiting for its model to load.",
+                );
+            }
+        }
 
         // Fail before capture. With no model loaded the cycle can only end in a
         // discarded recording, so starting the mic would cost the user a full
         // take — beeps, speech, and all — to learn nothing. In write mode the
         // reason lands in the field they are actually looking at.
         if self.model.read().await.is_none() {
+            self.release_pending_recording();
             warn!("Recording request rejected - no model loaded");
             self.surface_failure(typer, &notice::Failure::no_model_loaded(), write_mode)
                 .await;
@@ -175,6 +198,10 @@ impl SuperSTTDaemon {
             }
             // Setup failed before capture began: no `recording_started`/state(true)
             // went out, so just release the busy guard the setup claimed.
+            // Stopped after its model had loaded, before it claimed `busy`.
+            Err(e) if e.is::<RecordingCancelled>() => DaemonResponse::success()
+                .with_message(DaemonResponse::RECORDING_CANCELLED_MSG.to_string())
+                .with_transcription(String::new()),
             Err(e) => {
                 error!("🎤 Recording setup failed: {e}");
                 {
@@ -371,6 +398,12 @@ impl SuperSTTDaemon {
             if *busy_guard {
                 error!("Recording already in progress - rejecting duplicate request");
                 return Err(anyhow::anyhow!("Recording already in progress"));
+            }
+            // The reservation a recording that waited for its model holds is
+            // given up here, under the same lock that makes it busy: a stop
+            // reaches one or the other, never neither.
+            if !self.start_reserved_recording() {
+                return Err(RecordingCancelled.into());
             }
             // Set busy state to true atomically
             *busy_guard = true;

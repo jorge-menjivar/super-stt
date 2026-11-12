@@ -4,11 +4,23 @@
 //! stays loaded while its stage is on.
 
 use crate::daemon::device_management::PipelineStage;
-use crate::daemon::types::SuperSTTDaemon;
+use crate::daemon::types::{PendingStart, SuperSTTDaemon};
 use crate::idle_unload::CHECK_EVERY;
 use log::{info, warn};
 use std::time::Duration;
 use super_voice_shared::models::protocol::DaemonStatusEvent;
+
+/// How a recording's wait for its model ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModelWait {
+    /// Go on: the model is in memory, or cannot be, which the caller's own
+    /// `model_not_loaded` check reports.
+    Ready,
+    /// The recording was cancelled while its model loaded.
+    Cancelled,
+    /// Another recording is already waiting for the model.
+    AnotherWaiting,
+}
 
 impl SuperSTTDaemon {
     /// Record a use of the transcription model and, when models are unloaded
@@ -28,6 +40,102 @@ impl SuperSTTDaemon {
         }
         self.load_selected_model().await;
         self.idle.touch();
+    }
+
+    /// Whether a request finding no model in memory would load one: models
+    /// are unloaded when idle, and one is selected.
+    pub(crate) async fn loads_on_demand(&self) -> bool {
+        self.config.read().await.idle_unload.after().is_some()
+            && self.pick_startup_model().await.is_some()
+    }
+
+    /// [`ensure_model_loaded`](Self::ensure_model_loaded) for a recording,
+    /// which can be cancelled while it waits: by a stop, or its client going
+    /// away.
+    ///
+    /// A recording that waited keeps its reservation when this returns
+    /// [`ModelWait::Ready`]. It gives it up as it claims `busy`
+    /// ([`start_reserved_recording`](Self::start_reserved_recording)), or with
+    /// [`release_pending_recording`](Self::release_pending_recording) if it
+    /// ends before that, so there is no moment between the two when a stop
+    /// reaches neither.
+    ///
+    /// The load itself is not cancelled. It runs on as its own task, so a
+    /// backend is never dropped half started, and the model is in memory for
+    /// the next request.
+    pub(crate) async fn ensure_model_loaded_for_recording(&self) -> ModelWait {
+        // One recording at a time is on its way to the microphone.
+        if self.recording_is_pending() {
+            return ModelWait::AnotherWaiting;
+        }
+        // Before the slot is read, as in `ensure_model_loaded`: touched after,
+        // an idle unload could take the model in between on its old time.
+        self.idle.touch();
+        if self.model.read().await.is_some() || !self.loads_on_demand().await {
+            return ModelWait::Ready;
+        }
+        let (cancel, cancelled) = tokio::sync::oneshot::channel();
+        {
+            // Checked and claimed under one lock: a second claim would
+            // replace the first's cancel handle.
+            let mut pending = self.pending();
+            if pending.is_some() {
+                return ModelWait::AnotherWaiting;
+            }
+            *pending = Some(PendingStart(Some(cancel)));
+        }
+        let bg = self.clone();
+        let load = tokio::spawn(async move { bg.ensure_model_loaded().await });
+        let outcome = tokio::select! {
+            // A cancel that was answered wins over a load that finished at
+            // the same moment.
+            biased;
+            Ok(()) = cancelled => ModelWait::Cancelled,
+            _ = load => ModelWait::Ready,
+        };
+        if outcome == ModelWait::Cancelled {
+            self.release_pending_recording();
+        }
+        outcome
+    }
+
+    /// Whether a recording is waiting for its model to load.
+    pub(crate) fn recording_is_pending(&self) -> bool {
+        self.pending().is_some()
+    }
+
+    /// Cancel the recording waiting for its model to load. Returns whether
+    /// there was one that had not been cancelled already.
+    ///
+    /// The reservation is marked, not removed: the recording gives it up
+    /// itself, so no other can take its place before it has seen the cancel.
+    pub(crate) fn cancel_pending_recording(&self) -> bool {
+        let Some(cancel) = self.pending().as_mut().and_then(|start| start.0.take()) else {
+            return false;
+        };
+        info!("Cancelled the recording that was waiting for its model to load");
+        // Unreceived when the load has just finished: the mark is what the
+        // recording then finds as it claims `busy`.
+        let _ = cancel.send(());
+        true
+    }
+
+    /// Give up the reservation of a recording that ends without capturing.
+    pub(crate) fn release_pending_recording(&self) {
+        *self.pending() = None;
+    }
+
+    /// Give up the reservation as the recording claims `busy`, under whose
+    /// write lock the caller calls this. Returns whether to start: `false`
+    /// when the recording was cancelled after its model had loaded.
+    pub(crate) fn start_reserved_recording(&self) -> bool {
+        self.pending().take().is_none_or(|start| start.0.is_some())
+    }
+
+    fn pending(&self) -> std::sync::MutexGuard<'_, Option<PendingStart>> {
+        self.pending_recording
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Load the selected model if it is not in memory, whatever the setting.

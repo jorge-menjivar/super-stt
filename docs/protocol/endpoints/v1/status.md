@@ -53,7 +53,7 @@ present, with the same fields:
 | `device`        | string  | The accelerator the feature's loaded model is actually running on: `"cpu"`, `"cuda"`, `"rocm"`, `"metal"`, `"vulkan"`, or `"remote"` for an online model. `"unknown"` if nothing is loaded. |
 | `model_loaded`  | bool    | `false` while the feature's model is still loading, after a failed switch, or when none is selected |
 | `current_model` | string? | The loaded model's name (e.g. `whisper-tiny`); absent when `model_loaded` is `false`   |
-| `busy`          | bool    | Whether the feature is at work right now. For `stt`, `true` while a daemon-mic cycle is active — audio capture **and** the transcription and typing after it; a toggle hotkey consults it and calls [`POST /stt/transcribe/stop`](./transcribe/stop.md) when `true`, [`POST /stt/transcribe`](./transcribe.md) when `false`. For `tts`, `true` while an utterance is being synthesized or played; a [`POST /tts/speak`](./tts/speak.md) then interrupts it. |
+| `busy`          | bool    | Whether the feature is at work right now. For `stt`, `true` while a daemon-mic cycle is active — the wait for a model being loaded on demand, audio capture **and** the transcription and typing after it; a toggle hotkey consults it and calls [`POST /stt/transcribe/stop`](./transcribe/stop.md) when `true`, [`POST /stt/transcribe`](./transcribe.md) when `false`. For `tts`, `true` while an utterance is being synthesized or played; a [`POST /tts/speak`](./tts/speak.md) then interrupts it. |
 
 **Errors:**
 

@@ -3176,3 +3176,122 @@ async fn an_explicit_unload_switches_off_a_model_unloaded_for_being_idle() {
     assert_eq!(response.status, "success");
     assert!(!daemon.config.read().await.transcription.is_active());
 }
+
+/// Switching off a model the idle unload left selected is announced: a client
+/// that only watches events would otherwise go on showing it as about to load.
+#[tokio::test]
+async fn an_explicit_unload_of_an_idle_unloaded_model_is_announced() {
+    use crate::daemon::events::Topic;
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/openai";
+    {
+        let mut config = daemon.config.write().await;
+        config.update_preferred_model("whisper-1".into(), source.into());
+        config.idle_unload.after_secs = 30;
+    }
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    let response = daemon.handle_unload_active_model().await;
+
+    assert_eq!(response.status, "success");
+    let (_topic, event) = tokio::time::timeout(Duration::from_millis(200), rx.recv_json())
+        .await
+        .expect("an event")
+        .expect("the bus is open");
+    assert_eq!(event["status"], "ready");
+    assert_eq!(event["model_loaded"], false);
+}
+
+/// A daemon whose transcription model is selected, not in memory, and loaded
+/// on demand.
+async fn daemon_loading_on_demand() -> SuperSTTDaemon {
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/openai";
+    *daemon.backends.write().await = vec![fixture_backend("openai", source, "OpenAI", "whisper-1")];
+    let mut config = daemon.config.write().await;
+    config.update_preferred_model("whisper-1".into(), source.into());
+    config.idle_unload.after_secs = 30;
+    drop(config);
+    daemon
+}
+
+/// Start a recording on `daemon` and wait until it is waiting for its model.
+async fn start_pending_recording(
+    daemon: &SuperSTTDaemon,
+) -> tokio::task::JoinHandle<DaemonResponse> {
+    let bg = daemon.clone();
+    let recording = tokio::spawn(async move { bg.handle_command(make_request("record")).await });
+    for _ in 0..200 {
+        if daemon.recording_is_pending() {
+            return recording;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("the recording never waited for its model");
+}
+
+/// A stop reaches a recording that is still waiting for its model: it ends
+/// without capturing, and the daemon reported itself busy meanwhile.
+#[tokio::test]
+async fn a_recording_waiting_for_its_model_can_be_cancelled() {
+    let daemon = daemon_loading_on_demand().await;
+    // The lock every on-demand load takes: held, the load never finishes.
+    let idle = std::sync::Arc::clone(&daemon.idle);
+    let _held = idle.loading.lock().await;
+    let recording = start_pending_recording(&daemon).await;
+    assert_eq!(daemon.handle_status().await.busy, Some(true));
+
+    assert!(daemon.cancel_pending_recording());
+
+    let response = recording.await.expect("the recording task ended");
+    assert_eq!(response.status, "success");
+    assert_eq!(
+        response.message.as_deref(),
+        Some(DaemonResponse::RECORDING_CANCELLED_MSG)
+    );
+    assert!(!*daemon.busy.read().await, "nothing was captured");
+    assert!(!daemon.recording_is_pending());
+}
+
+/// A second start while one waits for its model is refused, and leaves the
+/// first waiting: only a stop cancels it.
+#[tokio::test]
+async fn a_second_start_does_not_cancel_a_recording_waiting_for_its_model() {
+    let daemon = daemon_loading_on_demand().await;
+    let idle = std::sync::Arc::clone(&daemon.idle);
+    let _held = idle.loading.lock().await;
+    let recording = start_pending_recording(&daemon).await;
+
+    let second = daemon.handle_command(make_request("record")).await;
+
+    assert_eq!(second.error_code, Some(ErrorCode::RecordingInProgress));
+    assert!(daemon.recording_is_pending());
+    assert!(!recording.is_finished());
+    assert!(daemon.cancel_pending_recording());
+    recording.await.expect("the recording task ended");
+}
+
+/// A stop that lands after the model has loaded, before the recording claims
+/// `busy`, still cancels it: the reservation is held until that claim.
+#[tokio::test]
+async fn a_stop_between_the_load_and_capture_cancels_the_recording() {
+    use crate::daemon::recording::RecordingCancelled;
+    use crate::daemon::types::PendingStart;
+    let daemon = test_daemon().await;
+    let (cancel, _load_finished) = tokio::sync::oneshot::channel();
+    *daemon.pending_recording.lock().unwrap() = Some(PendingStart(Some(cancel)));
+    assert!(daemon.cancel_pending_recording());
+    assert!(
+        daemon.recording_is_pending(),
+        "the reservation is its owner's to give up"
+    );
+
+    let setup = daemon
+        .setup_recording_session(false, AudioTheme::Silent)
+        .await;
+
+    assert!(setup.is_err_and(|e| e.is::<RecordingCancelled>()));
+    assert!(!*daemon.busy.read().await);
+    assert!(!daemon.recording_is_pending());
+}

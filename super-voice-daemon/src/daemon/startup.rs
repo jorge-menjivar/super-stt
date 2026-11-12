@@ -147,6 +147,7 @@ impl SuperSTTDaemon {
             self_update: Arc::new(crate::self_update::checker()),
             loading: Arc::new(crate::daemon::types::StageLoadGates::default()),
             idle: Arc::default(),
+            pending_recording: Arc::default(),
             secrets,
             tts,
         };

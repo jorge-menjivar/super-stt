@@ -62,7 +62,7 @@ The `message` field carries one of:
 
 | `message`                                       | Meaning                                                                         |
 |-------------------------------------------------|---------------------------------------------------------------------------------|
-| `"Recording stop signal sent"`                  | A daemon-mic capture was running and the active stop mode allows manual stop.   |
+| `"Recording stop signal sent"`                  | A daemon-mic capture was running and the active stop mode allows manual stop. Also a recording still waiting for its model to load ([`/settings/idle_unload`](../settings/idle_unload.md)): it is cancelled before it captures anything, whatever the stop mode. |
 | `"No recording in progress"`                    | Nothing to stop right now.                                                      |
 | `"Manual stop not enabled in current mode"`     | The active stop mode is `silence_only`; manual stop is disabled.                |
 | `"Transcription in progress, please wait"`      | Capture has already ended; the model is decoding. The result will arrive on the connection that started it. |

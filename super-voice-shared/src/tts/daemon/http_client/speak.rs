@@ -35,7 +35,9 @@ use crate::tts::models::protocol::DaemonResponse;
 /// Returns an error if the daemon HTTP listener isn't reachable or the
 /// response can't be parsed.
 pub async fn speak(socket_path: PathBuf, token: &str, text: &str) -> HttpResult<DaemonResponse> {
-    transport::post_json(
+    // No header timeout: the daemon answers once the utterance is queued,
+    // which follows a model load when it unloads idle models.
+    transport::post_json_no_timeout(
         socket_path,
         token,
         "/tts/speak",
