@@ -168,6 +168,10 @@ impl SuperTTSDaemon {
     /// `daemon_main` would otherwise skip every destructor, leaving the
     /// `systemd-run --user` subprocess unit orphaned.
     pub async fn shutdown_unload(&self) {
+        // An idle unload has the model out of its slot until its backend has
+        // stopped. Not waiting for it would find the slot empty and exit with
+        // that backend still running.
+        let _unloading = self.idle.unloading.lock().await;
         if self.model.read().await.is_some() {
             info!("Shutdown: unloading current model so subprocess units exit cleanly");
             self.unload_current_model().await;

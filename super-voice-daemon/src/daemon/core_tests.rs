@@ -3295,3 +3295,25 @@ async fn a_stop_between_the_load_and_capture_cancels_the_recording() {
     assert!(!*daemon.busy.read().await);
     assert!(!daemon.recording_is_pending());
 }
+
+/// Shutdown waits for an idle unload still stopping its backend: the model is
+/// out of its slot by then, so not waiting would exit with it running.
+#[tokio::test]
+async fn shutdown_waits_for_an_idle_unload_in_progress() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    let unloading = daemon.idle.unloading.lock().await;
+
+    let shutdown = tokio::spawn({
+        let daemon = daemon.clone();
+        async move { daemon.shutdown_unload().await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!shutdown.is_finished(), "shutdown went ahead of the unload");
+
+    drop(unloading);
+    tokio::time::timeout(Duration::from_secs(1), shutdown)
+        .await
+        .expect("shutdown finishes once the unload has")
+        .expect("no panic");
+}
