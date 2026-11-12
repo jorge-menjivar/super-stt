@@ -54,6 +54,7 @@ impl SuperSTTDaemon {
             self.idle.touch();
             return false;
         }
+        let _unloading = self.idle.unloading.lock().await;
         let taken = {
             // A transcription or a real-time session holds the read lock.
             let Ok(mut slot) = self.model.try_write() else {

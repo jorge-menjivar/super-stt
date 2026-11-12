@@ -244,6 +244,10 @@ impl SuperSTTDaemon {
     /// one unloaded for being idle would otherwise stay unloaded, with nothing
     /// left to bring it back.
     pub async fn handle_set_idle_unload(&self, after_secs: u64) -> DaemonResponse {
+        // Counted from now, not from a last use that predates the setting, and
+        // reset before the idle check can read the new time.
+        self.idle.touch();
+        self.tts.idle.touch();
         let persist = self
             .set_config_field(|c| c.idle_unload.after_secs = after_secs)
             .await;
@@ -255,9 +259,6 @@ impl SuperSTTDaemon {
             });
             "Models stay loaded".to_string()
         } else {
-            // Counted from now, not from a last use that predates the setting.
-            self.idle.touch();
-            self.tts.idle.touch();
             format!("Models are unloaded after {after_secs}s idle")
         };
         info!("{message}");

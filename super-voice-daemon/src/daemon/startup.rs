@@ -354,6 +354,7 @@ impl SuperSTTDaemon {
         // `LoadedModel` — `ready` event consumers (e.g. the settings app's
         // current_device tracking) only update when `actual_device` is present.
         let actual_device = normalize_device(&instance.device());
+        daemon.idle.touch();
         *daemon.model.write().await = Some(LoadedModel {
             definition,
             instance,

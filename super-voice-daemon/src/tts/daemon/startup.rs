@@ -153,6 +153,7 @@ impl SuperTTSDaemon {
         // current_device tracking) only update when `actual_device` is present.
         let actual_device = normalize_device(&instance.device());
         *daemon.actual_device.write().await = actual_device.clone();
+        daemon.idle.touch();
         *daemon.model.write().await = Some(LoadedModel::new(definition, instance));
 
         // Announce the active model the same way a user-initiated switch does

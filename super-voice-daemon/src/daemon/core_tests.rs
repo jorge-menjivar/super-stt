@@ -3137,3 +3137,42 @@ async fn set_idle_unload_counts_the_idle_time_from_the_change() {
     let after = daemon.config.read().await.idle_unload.after().unwrap();
     assert!(!daemon.unload_if_idle(after).await);
 }
+
+/// A model's idle time starts when it is loaded: one loaded into a daemon
+/// that has gone unused for longer is not unloaded at the next idle check.
+#[tokio::test]
+async fn a_loaded_model_starts_a_fresh_idle_time() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    seed_loaded_model(&daemon, "whisper-1", "github.com/super-stt/openai").await;
+    let loaded = daemon.model.write().await.take().unwrap();
+    daemon.idle.rewind(Duration::from_secs(600));
+
+    daemon
+        .finalize_loaded_model(loaded.definition, loaded.instance)
+        .await;
+
+    assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
+}
+
+/// An explicit unload switches off a model the idle unload left selected, so
+/// the next request does not load it again.
+#[tokio::test]
+async fn an_explicit_unload_switches_off_a_model_unloaded_for_being_idle() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/openai";
+    seed_loaded_model(&daemon, "whisper-1", source).await;
+    {
+        let mut config = daemon.config.write().await;
+        config.update_preferred_model("whisper-1".into(), source.into());
+        config.idle_unload.after_secs = 30;
+    }
+    daemon.idle.rewind(Duration::from_secs(60));
+    assert!(daemon.unload_if_idle(Duration::from_secs(30)).await);
+
+    let response = daemon.handle_unload_active_model().await;
+
+    assert_eq!(response.status, "success");
+    assert!(!daemon.config.read().await.transcription.is_active());
+}

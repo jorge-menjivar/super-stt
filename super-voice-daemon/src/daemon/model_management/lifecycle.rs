@@ -186,6 +186,8 @@ impl SuperSTTDaemon {
         instance: Box<dyn Transcribe>,
     ) -> String {
         let actual_device = normalize_device(&instance.device());
+        // A load is a use: the idle time of a model starts when it arrives.
+        self.idle.touch();
         *self.model.write().await = Some(crate::daemon::types::LoadedModel {
             definition,
             instance,
@@ -222,6 +224,19 @@ impl SuperSTTDaemon {
             return resp;
         }
         if self.model.read().await.is_none() {
+            // Unloaded for being idle, the model is still switched on and the
+            // next request would load it: switch it off, which is what this
+            // call is for.
+            let waiting = {
+                let config = self.config.read().await;
+                config.idle_unload.after().is_some() && config.transcription.is_active()
+            };
+            if waiting {
+                self.config.write().await.disable_transcription();
+                if let Err(e) = self.persist_config().await {
+                    warn!("Failed to persist config after unloading model: {e}");
+                }
+            }
             return DaemonResponse::success().with_message("No model to unload".to_string());
         }
         let dropped = self

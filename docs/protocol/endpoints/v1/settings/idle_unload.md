@@ -23,7 +23,9 @@ covered: its model stays loaded while the stage is on.
 An explicit unload
 ([`DELETE /stt/pipeline/1/model`](../pipeline/model.md),
 [`DELETE /tts/pipeline/1/model`](../tts/pipeline/model.md)) is unchanged: it
-switches the model off, and nothing loads it again until a client does.
+switches the model off, and nothing loads it again until a client does. That
+holds for a model the daemon has already unloaded for being idle: the call
+switches it off, so the next request does not load it.
 
 ## Auth
 

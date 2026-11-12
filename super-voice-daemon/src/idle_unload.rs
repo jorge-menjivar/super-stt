@@ -17,6 +17,11 @@ pub struct IdleTracker {
     /// one load. Without it each would start its own, and the load gate would
     /// make all but the newest give up.
     pub loading: tokio::sync::Mutex<()>,
+    /// Held across an idle unload, from taking the model out of its slot to
+    /// announcing it gone. Every load waits for it, so a model is never
+    /// loaded while the one before it still holds its memory, and the
+    /// announcement never follows the next model's.
+    pub unloading: tokio::sync::Mutex<()>,
 }
 
 impl Default for IdleTracker {
@@ -24,6 +29,7 @@ impl Default for IdleTracker {
         Self {
             last_used: Mutex::new(Instant::now()),
             loading: tokio::sync::Mutex::new(()),
+            unloading: tokio::sync::Mutex::new(()),
         }
     }
 }

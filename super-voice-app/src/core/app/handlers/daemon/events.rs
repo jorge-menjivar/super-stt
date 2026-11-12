@@ -117,7 +117,9 @@ impl AppModel {
                 ..
             } => {
                 self.handle_daemon_ready(actual_device.as_deref(), model_loaded);
-                None
+                // An unload this app did not ask for, such as the daemon's
+                // own of an idle model: re-read what is loaded.
+                (!model_loaded).then(|| self.fetch_current_model())
             }
             DaemonStatusEvent::DeviceSwitchError { error, .. } => {
                 Some(self.handle_daemon_device_error(&error))
