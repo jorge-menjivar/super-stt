@@ -43,6 +43,17 @@ impl SuperSTTDaemon {
                 .ok_or_else(|| anyhow!("no installed backend serves {name}"))?;
             (b.clone(), d.clone())
         };
+        // A model of the other stage would be driven over a route its backend
+        // does not serve, failing on every transcript: refused here, once,
+        // whatever the load.
+        if def.product.role.is_post_processor() != stage.is_post_processor() {
+            let (is, isnt) = if stage.is_post_processor() {
+                ("a transcription model", "a post-processing model")
+            } else {
+                ("a post-processing model", "a transcription model")
+            };
+            bail!("model {name} is {is}, not {isnt}");
+        }
 
         let instance: Box<dyn Transcribe> = match backend.kind.as_str() {
             "wasm" => self.instantiate_wasm(&backend, &def).await?,

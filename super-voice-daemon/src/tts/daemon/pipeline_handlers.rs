@@ -123,7 +123,7 @@ impl SuperTTSDaemon {
     /// protocol one.
     ///
     /// An empty `preferred_source` resolves against the active backend, exactly
-    /// as [`pick_startup_model`](Self::pick_startup_model) resolves it and for
+    /// as [`selected_model`](Self::selected_model) resolves it and for
     /// the same reason: a config written before that key existed names a
     /// model and no backend, and reporting "nothing selected" for a config the
     /// daemon *would* load at its next start is a lie the client has no way to

@@ -2,6 +2,7 @@
 use super::*;
 use crate::daemon::recording::Stopped;
 use crate::daemon::types::test_daemon;
+use super_engine_daemon::stage::StageExt;
 use super_voice_shared::models::protocol::ErrorCode;
 use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
 use super_voice_shared::theme::AudioTheme;
@@ -2300,7 +2301,10 @@ async fn an_unload_switches_stage_one_off_and_keeps_its_selection() {
     // And the point of the flag: a restart is idle even though the model is
     // still selected.
     assert!(
-        daemon.pick_startup_model().await.is_none(),
+        daemon
+            .selected_model(crate::daemon::device_management::PipelineStage::Transcription)
+            .await
+            .is_err(),
         "a stage switched off must not reload its model at startup"
     );
 }
@@ -2597,10 +2601,13 @@ async fn a_stage_two_reload_releases_the_old_instance_before_building_its_replac
     seed_post_processor_named(&daemon, "cleanup", source).await;
 
     let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
-    let result = daemon.load_configured_post_processor().await;
+    let result = daemon
+        .stage(crate::daemon::device_management::PipelineStage::PostProcessor)
+        .reload()
+        .await;
 
     assert!(
-        result.is_err(),
+        matches!(result, super_engine_daemon::stage::Load::Failed { .. }),
         "the fixture backend has no component to instantiate"
     );
     assert!(
@@ -3086,7 +3093,12 @@ async fn idle_unload_frees_the_model_and_keeps_it_selected() {
         .update_preferred_model("whisper-1".into(), source.into());
 
     daemon.model.backdate(Duration::from_secs(60));
-    assert!(daemon.unload_if_idle(Duration::from_secs(30)).await);
+    assert!(
+        daemon
+            .stage(crate::daemon::device_management::PipelineStage::Transcription)
+            .unload_if_idle(Duration::from_secs(30))
+            .await
+    );
 
     assert!(daemon.model.read().await.is_none());
     assert!(daemon.config.read().await.transcription.is_active());
@@ -3101,13 +3113,28 @@ async fn idle_unload_leaves_a_model_in_use() {
     seed_loaded_model(&daemon, "whisper-1", "github.com/super-stt/openai").await;
 
     daemon.model.backdate(Duration::from_secs(10));
-    assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
+    assert!(
+        !daemon
+            .stage(crate::daemon::device_management::PipelineStage::Transcription)
+            .unload_if_idle(Duration::from_secs(30))
+            .await
+    );
 
     daemon.model.backdate(Duration::from_secs(60));
     let recording = capturing(&daemon);
-    assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
+    assert!(
+        !daemon
+            .stage(crate::daemon::device_management::PipelineStage::Transcription)
+            .unload_if_idle(Duration::from_secs(30))
+            .await
+    );
     drop(recording);
-    assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
+    assert!(
+        !daemon
+            .stage(crate::daemon::device_management::PipelineStage::Transcription)
+            .unload_if_idle(Duration::from_secs(30))
+            .await
+    );
 
     assert!(daemon.model.read().await.is_some());
 }
@@ -3129,7 +3156,12 @@ async fn set_idle_unload_counts_the_idle_time_from_the_change() {
     let get_response = daemon.handle_command(make_request("get_idle_unload")).await;
     assert_eq!(get_response.idle_unload_after_secs, Some(300));
     let after = daemon.config.read().await.idle_unload.after().unwrap();
-    assert!(!daemon.unload_if_idle(after).await);
+    assert!(
+        !daemon
+            .stage(crate::daemon::device_management::PipelineStage::Transcription)
+            .unload_if_idle(after)
+            .await
+    );
 }
 
 /// A model's idle time starts when it is loaded: one loaded into a daemon
@@ -3147,11 +3179,14 @@ async fn a_loaded_model_starts_a_fresh_idle_time() {
     daemon.model.backdate(Duration::from_secs(600));
 
     let turn = daemon.model.begin_load().await.expect("a turn");
-    daemon
-        .finalize_loaded_model(turn, loaded.definition, loaded.instance)
-        .await;
+    turn.install(loaded).await;
 
-    assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
+    assert!(
+        !daemon
+            .stage(crate::daemon::device_management::PipelineStage::Transcription)
+            .unload_if_idle(Duration::from_secs(30))
+            .await
+    );
 }
 
 /// An explicit unload switches off a model the idle unload left selected, so
@@ -3168,7 +3203,12 @@ async fn an_explicit_unload_switches_off_a_model_unloaded_for_being_idle() {
         config.idle_unload.after_secs = 30;
     }
     daemon.model.backdate(Duration::from_secs(60));
-    assert!(daemon.unload_if_idle(Duration::from_secs(30)).await);
+    assert!(
+        daemon
+            .stage(crate::daemon::device_management::PipelineStage::Transcription)
+            .unload_if_idle(Duration::from_secs(30))
+            .await
+    );
 
     let response = daemon.handle_unload_active_model().await;
 
@@ -3410,4 +3450,234 @@ async fn a_recording_whose_model_fails_to_load_says_so() {
         "[Super Voice: could not load the model]"
     );
     assert!(!daemon.recording.is_busy());
+}
+
+/// The `(status, stage)` of every `daemon_status_changed` event published
+/// until none comes for a moment.
+async fn statuses_after(rx: &mut crate::daemon::events::AnyReceiver) -> Vec<(String, u64)> {
+    let mut seen = Vec::new();
+    while let Ok(Ok((_topic, event))) =
+        tokio::time::timeout(Duration::from_millis(200), rx.recv_json()).await
+    {
+        seen.push((
+            event["status"].as_str().unwrap_or_default().to_string(),
+            event["stage"].as_u64().unwrap_or_default(),
+        ));
+    }
+    seen
+}
+
+/// A daemon with the post-processor selected, switched on, and unloaded on
+/// idle, its fixture backend installed. The fixture has no component, so a
+/// load of it fails.
+async fn daemon_with_post_processing_on_demand() -> SuperSTTDaemon {
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/cleanup";
+    *daemon.backends.write().await = vec![fixture_post_processor(source)];
+    let mut config = daemon.config.write().await;
+    config.enable_post_processor("cleanup".to_string(), source.to_string());
+    config.idle_unload.after_secs = 30;
+    drop(config);
+    daemon
+}
+
+/// Post-processing is unloaded when idle like every other stage, stays
+/// selected, and says so on its own stage.
+#[tokio::test]
+async fn post_processing_is_unloaded_when_idle_too() {
+    use crate::daemon::events::Topic;
+    let daemon = daemon_with_post_processing_on_demand().await;
+    seed_post_processor_named(&daemon, "cleanup", "github.com/super-stt/cleanup").await;
+    daemon.post_processor.backdate(Duration::from_secs(60));
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    daemon.all_stages().unload_idle().await;
+
+    assert!(daemon.post_processor.read().await.is_none());
+    assert!(daemon.config.read().await.post_processor.is_active());
+    assert_eq!(statuses_after(&mut rx).await, [("ready".to_string(), 2)]);
+}
+
+/// A recording keeps post-processing loaded however long it takes: its final
+/// transcript is post-processed when it ends.
+#[tokio::test]
+async fn a_recording_keeps_post_processing_loaded() {
+    let daemon = daemon_with_post_processing_on_demand().await;
+    seed_post_processor_named(&daemon, "cleanup", "github.com/super-stt/cleanup").await;
+    daemon.post_processor.backdate(Duration::from_secs(60));
+
+    let recording = capturing(&daemon);
+    daemon.all_stages().unload_idle().await;
+
+    assert!(daemon.post_processor.read().await.is_some());
+    drop(recording);
+}
+
+/// With models unloaded on idle, a start loads no stage: post-processing is
+/// left to the first transcript, as transcription is to the first request.
+#[tokio::test]
+async fn a_start_loads_no_stage_when_models_unload_on_idle() {
+    use crate::daemon::events::Topic;
+    let daemon = daemon_with_post_processing_on_demand().await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    daemon.all_stages().load_at_startup().await;
+
+    assert!(statuses_after(&mut rx).await.is_empty());
+}
+
+/// A transcript loads post-processing on demand when it is unloaded on idle.
+/// The load failing costs only the cleanup: the raw text comes back, and the
+/// stage says it holds nothing.
+#[tokio::test]
+async fn post_processing_loads_on_demand_for_a_transcript() {
+    use crate::daemon::events::Topic;
+    let daemon = daemon_with_post_processing_on_demand().await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    let text = daemon
+        .post_process_final("hello there".to_string(), None)
+        .await;
+
+    assert_eq!(text, "hello there");
+    assert_eq!(
+        statuses_after(&mut rx).await,
+        [("loading_model".to_string(), 2), ("ready".to_string(), 2)]
+    );
+}
+
+/// A recording waits for every stage it will run, loading them together, so
+/// the user never waits after speaking. A later stage failing to load does
+/// not stop the recording: its transcript passes through unchanged.
+#[tokio::test]
+async fn a_recording_loads_every_stage_before_it_starts() {
+    use crate::daemon::events::Topic;
+    let daemon = daemon_with_post_processing_on_demand().await;
+    seed_loaded_model(&daemon, "whisper-1", "github.com/super-stt/openai").await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+    let (_never, cancelled) = tokio::sync::oneshot::channel();
+
+    let waited = daemon.wait_for_pipeline(cancelled).await;
+
+    assert_eq!(
+        waited,
+        crate::daemon::model_management::idle::ModelWait::Ready
+    );
+    assert_eq!(
+        statuses_after(&mut rx).await,
+        [("loading_model".to_string(), 2), ("ready".to_string(), 2)]
+    );
+}
+
+/// A load on demand that fails says the stage holds nothing, as every stage's
+/// failed load does, so no client goes on showing the model as loading.
+#[tokio::test]
+async fn a_failed_load_on_demand_says_the_stage_is_empty() {
+    use crate::daemon::events::Topic;
+    let daemon = daemon_loading_on_demand().await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    let loaded = daemon.ensure_pipeline_loaded().await;
+
+    assert!(loaded.is_err_and(|e| e.starts_with("whisper-1 did not load")));
+    assert_eq!(
+        statuses_after(&mut rx).await,
+        [("loading_model".to_string(), 1), ("ready".to_string(), 1)]
+    );
+}
+
+/// A switch whose load fails leaves the new model selected, not the one it
+/// replaced: the selection is what the user asked for, and what the next
+/// request or start loads.
+#[tokio::test]
+async fn a_failed_switch_keeps_the_new_selection() {
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/openai";
+    *daemon.backends.write().await = vec![fixture_backend("openai", source, "OpenAI", "whisper-1")];
+    daemon
+        .config
+        .write()
+        .await
+        .update_preferred_model("older".into(), source.into());
+
+    let response = daemon
+        .handle_set_model("whisper-1".to_string(), source.to_string())
+        .await;
+
+    assert_eq!(response.status, "error");
+    let config = daemon.config.read().await;
+    assert_eq!(config.transcription.preferred_model, "whisper-1");
+    assert!(config.transcription.is_active());
+}
+
+/// A stage-2 device switch goes the way stage 1's does, and says so on its
+/// own stage: the move, its failure, and the recovery, which fails here too,
+/// leaving the stage empty.
+#[tokio::test]
+async fn a_stage_two_device_switch_reports_each_step_on_its_stage() {
+    use crate::daemon::device_management::PipelineStage;
+    use crate::daemon::events::Topic;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/cleanup";
+    *daemon.backends.write().await = vec![fixture_post_processor(source)];
+    daemon
+        .config
+        .write()
+        .await
+        .enable_post_processor("cleanup".to_string(), source.to_string());
+    seed_post_processor_on(&daemon, "cleanup", source, "vulkan").await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    daemon
+        .handle_set_model_device(
+            PipelineStage::PostProcessor,
+            "cleanup".to_string(),
+            "cpu".to_string(),
+        )
+        .await;
+
+    let statuses = statuses_after(&mut rx).await;
+    let device_steps: Vec<_> = statuses
+        .iter()
+        .filter(|(status, _)| status != "settings_changed")
+        .cloned()
+        .collect();
+    assert_eq!(
+        device_steps,
+        [
+            ("switching_device".to_string(), 2),
+            ("loading_model_for_device".to_string(), 2),
+            ("device_switch_error".to_string(), 2),
+            ("loading_model_for_device".to_string(), 2),
+            ("ready".to_string(), 2),
+        ]
+    );
+    assert!(daemon.post_processor.read().await.is_none());
+}
+
+/// Each stage refuses a model of the other at load, whatever asked for it,
+/// rather than drive it over a route its backend does not serve.
+#[tokio::test]
+async fn a_stage_refuses_a_model_of_the_other_stage() {
+    use crate::daemon::device_management::PipelineStage;
+    use super_engine_daemon::stage::Load;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/cleanup";
+    *daemon.backends.write().await = vec![fixture_post_processor(source)];
+    daemon
+        .config
+        .write()
+        .await
+        .update_preferred_model("cleanup".into(), source.into());
+
+    let loaded = daemon
+        .stage(PipelineStage::Transcription)
+        .load_selected()
+        .await;
+
+    assert!(
+        matches!(&loaded, Load::Failed { error, .. }
+            if error.to_string() == "model cleanup is a post-processing model, not a transcription model"),
+        "{loaded:?}"
+    );
 }

@@ -14,7 +14,7 @@
 use crate::daemon::types::{SuperSTTDaemon, normalize_device};
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends;
-use log::{error, info, warn};
+use log::{info, warn};
 pub(crate) use super_engine_daemon::devices::{
     backend_available_devices, backend_frameworks, model_available_devices, parse_device_preference,
 };
@@ -22,12 +22,13 @@ use super_engine_daemon::devices::{
     build_installed, device_rejection, device_switch_message, effective_framework,
     switch_is_satisfied,
 };
+use super_engine_daemon::stage::{DeviceSwitch, ModelId, StageExt};
 use super_voice_registry_types::manifest::Device;
-use super_voice_shared::models::protocol::{Command, DaemonResponse, DaemonStatusEvent, ErrorCode};
+use super_voice_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
 
 /// The pipeline stage a device command addresses. Each has its own selected
-/// backend, its own loaded slot and its own reload path; everything between
-/// — resolving the model, validating the device, shaping the answer — is
+/// backend and its own loaded slot; everything between — resolving the model,
+/// validating the device, shaping the answer, and the reload itself — is
 /// shared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineStage {
@@ -38,6 +39,9 @@ pub enum PipelineStage {
 }
 
 impl PipelineStage {
+    /// Every stage, in the order a transcript runs through them.
+    pub const ALL: [Self; 2] = [Self::Transcription, Self::PostProcessor];
+
     /// The stage's 1-based position, as `/stt/pipeline/{stage}` spells it — and
     /// as the `stage` field of the events and download reports it emits.
     #[must_use]
@@ -49,7 +53,7 @@ impl PipelineStage {
     }
 
     /// Whether the stage runs post-processors (else transcription models).
-    fn is_post_processor(self) -> bool {
+    pub(crate) fn is_post_processor(self) -> bool {
         self == Self::PostProcessor
     }
 }
@@ -228,14 +232,6 @@ impl SuperSTTDaemon {
             stage.position()
         );
 
-        // A reload started now would race the exit; refuse before touching
-        // anything.
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        if let Ok(()) = shutdown_rx.try_recv() {
-            warn!("Device change rejected - shutdown in progress");
-            return DaemonResponse::error("Device change rejected due to shutdown in progress");
-        }
-
         // Emit the documented `400 invalid_device` so a bad request is
         // distinguishable from a server failure.
         let Some(device) = parse_device_preference(&device) else {
@@ -320,14 +316,57 @@ impl SuperSTTDaemon {
             return resp;
         }
 
-        match stage {
-            PipelineStage::Transcription => {
-                self.switch_transcription_device(target, &device, &actual, &current, shutdown_rx)
+        let response = self.switch_device(stage, &target, &device, &current).await;
+        if stage == PipelineStage::PostProcessor {
+            self.publish_settings_changed("post_processor");
+        }
+        response
+    }
+
+    /// Move the model loaded in `stage` to `device`, as every stage does it:
+    /// see [`StageExt::switch_device`]. `fallback` is the framework its
+    /// setting loads it on, where a failed switch puts it back.
+    async fn switch_device(
+        &self,
+        stage: PipelineStage,
+        target: &DeviceTarget,
+        device: &str,
+        fallback: &str,
+    ) -> DaemonResponse {
+        let name = &target.definition.name;
+        let model = ModelId::new(name.clone(), target.definition.source.clone());
+        let switched = self
+            .stage(stage)
+            .switch_device(model, device.to_string(), fallback.to_string())
+            .await;
+        match switched {
+            // Unloaded since the check: the choice is its next load's.
+            DeviceSwitch::Recorded => {
+                self.model_device_response(
+                    stage,
+                    target,
+                    format!("Device for {name} set to {device}. Its next load will use it."),
+                )
+                .await
+            }
+            DeviceSwitch::Switched { device: actual } => {
+                self.model_device_response(stage, target, device_switch_message(device, &actual))
                     .await
             }
-            PipelineStage::PostProcessor => {
-                self.reload_post_processor_device(target, &device, &current)
-                    .await
+            DeviceSwitch::Recovered {
+                error,
+                device: actual,
+            } => DaemonResponse::error(&format!(
+                "Failed to switch to device '{device}': {error:#}. Reverted to previous device '{actual}'."
+            )),
+            DeviceSwitch::Failed { error, recovery } => DaemonResponse::error(&format!(
+                "Device switch failed: {error:#}. Recovery also failed: {recovery:#}. Stage {} is now idle.",
+                stage.position()
+            )),
+            DeviceSwitch::Superseded => super::model_management::superseded("device switch"),
+            DeviceSwitch::Cancelled => {
+                warn!("Device switch cancelled due to shutdown");
+                DaemonResponse::error("Device switch cancelled due to shutdown")
             }
         }
     }
@@ -392,7 +431,7 @@ impl SuperSTTDaemon {
 
     /// Repo id of the backend selected for `stage`, or `None` when the stage
     /// is empty.
-    async fn stage_source(&self, stage: PipelineStage) -> Option<String> {
+    pub(in crate::daemon) async fn stage_source(&self, stage: PipelineStage) -> Option<String> {
         match stage {
             PipelineStage::Transcription => self.active_backend_source().await,
             PipelineStage::PostProcessor => {
@@ -424,19 +463,10 @@ impl SuperSTTDaemon {
     /// not returned: the in-memory config already holds the choice, so the
     /// daemon behaves as asked until it restarts.
     async fn store_model_device(&self, target: &DeviceTarget, device: &str) {
-        self.write_model_device(target, Some(device.to_string()))
-            .await;
-    }
-
-    /// [`store_model_device`](Self::store_model_device) over the full range of
-    /// the setting, `None` included — what a rolled-back switch needs, since a
-    /// model that had no device of its own must be left with none rather than
-    /// pinned to the global default it was following.
-    async fn write_model_device(&self, target: &DeviceTarget, device: Option<String>) {
         self.config.write().await.update_model_device(
             &target.definition.source,
             &target.definition.name,
-            device,
+            Some(device.to_string()),
         );
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after device change: {e}");
@@ -523,221 +553,6 @@ impl SuperSTTDaemon {
         InstallContext {
             frameworks: backend_frameworks(&host, &builds, &installed_accel),
             installed_accel,
-        }
-    }
-
-    /// Reload the stage-1 model onto `device`: unload, load, and on failure
-    /// recover onto `fallback`, the framework its setting loads it on. The
-    /// preference is stored only once the load succeeded, so a failed switch
-    /// leaves the model's setting as it was.
-    ///
-    /// `from` is the framework the model is running on, which is what the
-    /// switch is from. It is not always one `fallback` could be: a model still
-    /// running on a build that an install has since replaced cannot be loaded
-    /// on that framework again.
-    async fn switch_transcription_device(
-        &self,
-        target: DeviceTarget,
-        device: &str,
-        from: &str,
-        fallback: &str,
-        mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-    ) -> DaemonResponse {
-        let name = target.definition.name.clone();
-        let source = target.definition.source.clone();
-        info!("Starting device switch for {name} from {from} to {device}");
-
-        self.events
-            .publish_daemon_status(DaemonStatusEvent::SwitchingDevice {
-                from_device: from.to_string(),
-                target_device: device.to_string(),
-                model: name.clone(),
-                stage: PipelineStage::Transcription.position(),
-            });
-        // The model is taken out, and its backend stopped, once it is this
-        // load's turn. The turn holds the slot through the recovery below, so
-        // no other load lands in between.
-        let Some(turn) = self.model.begin_load().await else {
-            return super::model_management::superseded("device switch", &name);
-        };
-
-        // Reload on the requested device, unless a shutdown arrives first.
-        let load_result = tokio::select! {
-            result = self.load_model_with_target_device(&turn, &name, &source, device) => result,
-            _ = shutdown_rx.recv() => {
-                warn!("Device switch cancelled due to shutdown");
-                return DaemonResponse::error("Device switch cancelled due to shutdown");
-            }
-        };
-
-        match load_result {
-            Ok((instance, definition)) => {
-                let actual_device = self.finalize_loaded_model(turn, definition, instance).await;
-                self.store_model_device(&target, device).await;
-                info!(
-                    "Device switch completed for {name}: {from} -> {device} (actual: {actual_device})"
-                );
-                self.events.publish_daemon_status(DaemonStatusEvent::Ready {
-                    model_loaded: true,
-                    model_name: Some(name),
-                    actual_device: Some(actual_device.clone()),
-                    preferred_device: Some(device.to_string()),
-                    stage: PipelineStage::Transcription.position(),
-                });
-                self.model_device_response(
-                    PipelineStage::Transcription,
-                    &target,
-                    device_switch_message(device, &actual_device),
-                )
-                .await
-            }
-            Err(e) => {
-                self.recover_transcription_device(turn, &target, e, device, fallback)
-                    .await
-            }
-        }
-    }
-
-    /// A failed switch: report it, then try to load the model again on
-    /// `fallback`, the framework its setting loads it on. Nothing was stored,
-    /// so the setting needs no reverting.
-    async fn recover_transcription_device(
-        &self,
-        turn: crate::daemon::types::LoadTurn<'_>,
-        target: &DeviceTarget,
-        error: anyhow::Error,
-        device: &str,
-        fallback: &str,
-    ) -> DaemonResponse {
-        let name = &target.definition.name;
-        let source = &target.definition.source;
-        error!("Failed to reload {name} on {device}: {error}");
-        self.events
-            .publish_daemon_status(DaemonStatusEvent::DeviceSwitchError {
-                error: error.to_string(),
-                failed_device: device.to_string(),
-                model: name.clone(),
-                stage: PipelineStage::Transcription.position(),
-            });
-
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        if let Ok(()) = shutdown_rx.try_recv() {
-            warn!("Shutdown in progress, skipping device switch recovery");
-            return DaemonResponse::error(&format!(
-                "Device switch failed: {error}. Recovery skipped due to shutdown."
-            ));
-        }
-
-        warn!("Attempting to recover by reloading {name} on {fallback}, its setting");
-        match self
-            .load_model_with_target_device(&turn, name, source, fallback)
-            .await
-        {
-            Ok((instance, definition)) => {
-                let actual_device = self.finalize_loaded_model(turn, definition, instance).await;
-                warn!(
-                    "Recovery successful - {name} reloaded on {fallback} (actual: {actual_device})"
-                );
-                self.events.publish_daemon_status(DaemonStatusEvent::Ready {
-                    model_loaded: true,
-                    model_name: Some(name.clone()),
-                    actual_device: Some(actual_device.clone()),
-                    preferred_device: Some(fallback.to_string()),
-                    stage: PipelineStage::Transcription.position(),
-                });
-                DaemonResponse::error(&format!(
-                    "Failed to switch to device '{device}': {error}. Reverted to previous device '{actual_device}'."
-                ))
-            }
-            Err(recovery_e) => {
-                error!("Recovery failed: {recovery_e}");
-                DaemonResponse::error(&format!(
-                    "Device switch failed: {error}. Recovery also failed: {recovery_e}. Daemon is now in no-model state."
-                ))
-            }
-        }
-    }
-
-    /// Reload the stage-2 model onto `device`: unload, load, and on failure
-    /// recover onto `previous` — the same shape as
-    /// [`switch_transcription_device`](Self::switch_transcription_device),
-    /// because a stage should not answer for its own device differently from
-    /// its neighbour.
-    ///
-    /// A failed reload is reported as a *failure*. The best-effort policy the
-    /// other post-processor writes follow — save the setting, report the load
-    /// in the message — is right when the setting is the request and the load
-    /// is a consequence; here the reload *is* the request, and answering
-    /// `success` left every client showing a device the model never moved to.
-    ///
-    /// Stage 2 loads on whatever device its config names, so unlike stage 1 the
-    /// choice has to be stored before the load rather than after it — and put
-    /// back if the load fails.
-    async fn reload_post_processor_device(
-        &self,
-        target: DeviceTarget,
-        device: &str,
-        previous: &str,
-    ) -> DaemonResponse {
-        let name = target.definition.name.clone();
-        // The setting the model had of its own, which `previous` is not: that
-        // is the *effective* device, and may be the global default the model
-        // was merely following.
-        let prior = self
-            .config
-            .read()
-            .await
-            .model_device(&target.definition.source, &target.definition.name)
-            .map(str::to_string);
-        self.store_model_device(&target, device).await;
-        let response = match self.load_configured_post_processor().await {
-            Ok(()) => {
-                info!("Post-processor {name} reloaded on {device}");
-                self.model_device_response(
-                    PipelineStage::PostProcessor,
-                    &target,
-                    format!("Device for {name} set to {device}"),
-                )
-                .await
-            }
-            Err(e) => {
-                self.recover_post_processor_device(&target, &e, device, previous, prior)
-                    .await
-            }
-        };
-        self.publish_settings_changed("post_processor");
-        response
-    }
-
-    /// A failed stage-2 switch: put the setting back where it was and load the
-    /// model on it again, so a device the model cannot run on costs the user
-    /// neither the preference nor the running post-processor. The stage-2 twin
-    /// of [`recover_transcription_device`](Self::recover_transcription_device).
-    async fn recover_post_processor_device(
-        &self,
-        target: &DeviceTarget,
-        error: &anyhow::Error,
-        device: &str,
-        previous: &str,
-        prior: Option<String>,
-    ) -> DaemonResponse {
-        let name = &target.definition.name;
-        error!("Failed to reload post-processor {name} on {device}: {error}");
-        warn!("Attempting to recover by reverting {name} to previous device: {previous}");
-        self.write_model_device(target, prior).await;
-        match self.load_configured_post_processor().await {
-            Ok(()) => {
-                warn!("Recovery successful - post-processor {name} reverted to {previous}");
-                DaemonResponse::error(&format!(
-                    "Failed to switch to device '{device}': {error}. Reverted to previous device '{previous}'."
-                ))
-            }
-            Err(recovery_e) => {
-                error!("Post-processor recovery failed: {recovery_e}");
-                DaemonResponse::error(&format!(
-                    "Device switch failed: {error}. Recovery also failed: {recovery_e}. Stage 2 is now idle."
-                ))
-            }
         }
     }
 

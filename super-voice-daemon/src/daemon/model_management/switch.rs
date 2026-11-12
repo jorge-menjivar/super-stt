@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::device_management::PipelineStage;
-use crate::daemon::types::{LoadTurn, SuperSTTDaemon};
-use crate::stt_models::ModelDefinition;
+use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::backends;
-use crate::stt_models::transcribe::Transcribe;
-use log::{error, info, warn};
+use log::{info, warn};
+use super_engine_daemon::stage::{Load, ModelId, StageExt};
 use super_voice_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
 
 impl SuperSTTDaemon {
@@ -250,72 +249,16 @@ impl SuperSTTDaemon {
             }
         }
 
-        self.broadcast_model_loading_status(&model, PipelineStage::Transcription);
-        // Takes the current model out once it is this load's turn.
-        let Some(turn) = self.model.begin_load().await else {
-            return super::superseded("switch", &model);
-        };
-        let chosen = self
-            .config
-            .read()
-            .await
-            .model_device(&backend_source, &model)
-            .map(ToString::to_string);
-
-        match self
-            .instantiate_backend(
-                &turn,
-                &model,
-                &backend_source,
-                chosen.as_deref(),
-                PipelineStage::Transcription,
-            )
-            .await
-        {
-            Ok((instance, definition)) => {
-                self.finalize_model_switch_success(
-                    turn,
-                    model,
-                    backend_source,
-                    definition,
-                    instance,
-                )
-                .await
-            }
-            Err(e) => {
-                error!("Model switch failed: {e}");
-                DaemonResponse::error(&format!("Model switch failed: {e}"))
-            }
+        // The choice is recorded before the load, so one that fails leaves it
+        // selected, as a failed start does.
+        let switched = self
+            .stage(PipelineStage::Transcription)
+            .switch_to(ModelId::new(model.clone(), backend_source))
+            .await;
+        if let Load::Loaded { .. } = &switched {
+            info!("Switched to model: {model}");
         }
-    }
-
-    pub(super) async fn finalize_model_switch_success(
-        &self,
-        turn: LoadTurn<'_>,
-        model: String,
-        source: String,
-        definition: ModelDefinition,
-        instance: Box<dyn Transcribe>,
-    ) -> DaemonResponse {
-        let actual_device = self.finalize_loaded_model(turn, definition, instance).await;
-        {
-            let mut config_guard = self.config.write().await;
-            config_guard.update_preferred_model(model.clone(), source.clone());
-        }
-        if let Err(e) = self.persist_config().await {
-            warn!("Failed to persist config after model switch: {e}");
-        }
-        self.broadcast_model_active(
-            &model,
-            &source,
-            &actual_device,
-            PipelineStage::Transcription,
-        );
-        info!("Switched to model: {model}");
-        DaemonResponse::success()
-            .with_current_model(model.clone())
-            .with_current_source(source)
-            .with_message(format!("Successfully switched to model: {model}"))
+        super::load_response("switch", switched)
     }
 
     async fn preflight_model_switch(&self, model: &str, source: &str) -> Option<DaemonResponse> {

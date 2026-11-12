@@ -20,8 +20,10 @@ use std::time::Duration;
 
 use log::{debug, info, warn};
 
+use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::dispatch::{DispatchError, dispatch_post_process};
+use super_engine_daemon::stage::StageExt;
 
 /// How long a post-processing pass may take before the raw transcript is used
 /// instead.
@@ -53,6 +55,13 @@ impl SuperSTTDaemon {
         if !self.config.read().await.post_processor.enabled {
             return text;
         }
+        // The stage is used as any other is: loaded first when models are
+        // unloaded on idle. A load that fails is logged and announced, and
+        // the text passes through.
+        let _ = self
+            .stage(PipelineStage::PostProcessor)
+            .ensure_loaded()
+            .await;
         if !self.post_processor_loaded().await {
             debug!("Post-processing is enabled but no processor is loaded; using the raw text");
             return text;

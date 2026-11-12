@@ -53,10 +53,11 @@ pub struct DaemonConfig {
 /// Keeping a model in memory only while it is in use.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdleUnloadConfig {
-    /// Seconds a transcription or synthesis model may sit unused before it is
-    /// unloaded. `0`, the default, never unloads.
+    /// Seconds a model may sit unused before it is unloaded, for every stage
+    /// of both features: transcription, post-processing and synthesis. `0`,
+    /// the default, never unloads.
     ///
-    /// With a value set, a selected model is not loaded at startup either: it
+    /// With a value set, no stage's model is loaded at startup either: each
     /// loads on the first request that needs it, which waits for the load.
     /// The selection is untouched, unlike an explicit unload, so the next
     /// request brings the same model back.

@@ -17,7 +17,9 @@
 use log::{info, warn};
 use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
 
+use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::SuperSTTDaemon;
+use super_engine_daemon::stage::{Load, ModelId, StageExt, Unload};
 
 impl SuperSTTDaemon {
     /// Run final transcripts through `model` — the post-processing twin of
@@ -72,28 +74,31 @@ impl SuperSTTDaemon {
                 ),
             );
         }
-        let persist = self
-            .set_config_field(|c| c.enable_post_processor(model.clone(), source.clone()))
+        // The choice is recorded before the load, so it is saved even when
+        // the load fails: post-processing then passes text through, the
+        // best-effort policy the pipeline follows. The failure is reported in
+        // the message rather than failing the call.
+        let switched = self
+            .stage(PipelineStage::PostProcessor)
+            .switch_to(ModelId::new(model.clone(), source.clone()))
             .await;
-
-        // A load failure is reported in the message but does not fail the call:
-        // the setting is saved, and post-processing degrades to passing text
-        // through — the same best-effort policy the pipeline follows.
-        let mut load_note = String::new();
-        if let Err(e) = self.load_configured_post_processor().await {
-            warn!("Post-processor selected but not loaded: {e}");
-            load_note = format!(" (not loaded: {e})");
-        }
+        let load_note = match &switched {
+            Load::Loaded { .. } | Load::Unchanged => String::new(),
+            Load::Failed { error, .. } => {
+                warn!("Post-processor selected but not loaded: {error:#}");
+                format!(" (not loaded: {error:#})")
+            }
+            Load::Superseded => " (not loaded: a newer model load replaced it)".to_string(),
+            Load::Cancelled => " (not loaded: the daemon is shutting down)".to_string(),
+        };
 
         self.publish_settings_changed("post_processor");
         info!("Post-processing enabled (model={model}, source={source})");
 
         let payload = self.post_processor_payload().await;
-        Self::settings_saved(
-            DaemonResponse::success().with_post_processor(payload),
-            format!("Post-processing enabled{load_note}"),
-            persist,
-        )
+        DaemonResponse::success()
+            .with_post_processor(payload)
+            .with_message(format!("Post-processing enabled{load_note}"))
     }
 
     /// Stop running the post-processor, keeping the backend selected — the twin
@@ -104,19 +109,24 @@ impl SuperSTTDaemon {
         if let Some(resp) = self.guard_model_mutation("change the post-processor") {
             return resp;
         }
-        self.unload_post_processor_announced().await;
-        let persist = self
-            .set_config_field(crate::config::DaemonConfig::disable_post_processor)
-            .await;
+        // Switched off as every stage is: after any load in flight, whose
+        // model is the one unloaded, and persisted so a restart stays off.
+        let message = match self.stage(PipelineStage::PostProcessor).unload().await {
+            Unload::Unloaded { .. } | Unload::NothingToUnload => "Post-processing disabled",
+            Unload::Superseded => "A newer model load replaces the post-processor",
+            Unload::Cancelled => {
+                return DaemonResponse::error(
+                    "Disabling post-processing stopped: the daemon is shutting down",
+                );
+            }
+        };
         self.publish_settings_changed("post_processor");
-        info!("Post-processing disabled");
+        info!("{message}");
 
         let payload = self.post_processor_payload().await;
-        Self::settings_saved(
-            DaemonResponse::success().with_post_processor(payload),
-            "Post-processing disabled".to_string(),
-            persist,
-        )
+        DaemonResponse::success()
+            .with_post_processor(payload)
+            .with_message(message.to_string())
     }
 
     /// Select the backend that provides the post-processor — the twin of

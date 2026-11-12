@@ -38,9 +38,10 @@ impl SuperSTTDaemon {
         }
         debug!("Audio validation completed");
 
-        // A load that fails is logged; this answer's code says only that no
-        // model is loaded, which the inference below reports.
-        let _ = self.ensure_model_loaded().await;
+        // Every stage the transcript runs through loads at once. A load that
+        // fails is logged; this answer's code says only that no model is
+        // loaded, which the inference below reports.
+        let _ = self.ensure_pipeline_loaded().await;
 
         // Process audio
         let processed_audio = match self.audio_processor.process_audio(&audio_data, sample_rate) {

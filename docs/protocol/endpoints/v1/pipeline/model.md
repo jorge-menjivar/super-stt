@@ -88,9 +88,15 @@ daemon reloads it in place.
 
 Stage 1 answers `202 Accepted` and switches asynchronously, reporting
 progress on [`/events`](../events.md); stage 2 answers `200` once the load has
-been attempted. A stage-2 load failure still succeeds — the setting is saved and
-the reason is appended to `message` — because post-processing degrades to
-passing text through rather than costing the user their words.
+been attempted. A stage-2 load failure still succeeds — the reason is appended
+to `message` — because post-processing degrades to passing text through rather
+than costing the user their words.
+
+Every stage records the model as its selection before loading it. A load that
+fails leaves that model selected and not loaded, rather than the model it
+replaced, and publishes `ready` with `model_loaded: false`: the next start
+loads it again, and with [idle unload](../settings/idle_unload.md) on, so does
+the next request that needs it.
 
 **Errors:**
 

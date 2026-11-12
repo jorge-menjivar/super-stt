@@ -5,23 +5,30 @@ Defaults to `0`, which keeps models loaded.
 
 With a value set:
 
-- The selected transcription and synthesis models are not loaded at startup.
-- A request that needs one —
+- No stage's selected model is loaded at startup: not transcription's,
+  post-processing's or synthesis's.
+- A request that needs a stage loads its model first and proceeds once it has
+  —
   [`POST /stt/transcribe`](../transcribe.md),
   [`POST /tts/speak`](../tts/speak.md) or
-  [`GET /tts/speak/stream`](../tts/speak/stream.md) — loads it first and
-  proceeds once it has. A daemon-mic recording is accepted at once and starts
-  when the model has loaded. `POST /tts/speak`, and a `POST /stt/transcribe`
-  carrying `audio_data`, answer after the load, so a client must not time
-  them out sooner. `409 model_not_loaded` then means no model is selected or,
-  for those two, that the load failed.
+  [`GET /tts/speak/stream`](../tts/speak/stream.md). A transcription loads
+  every stage it runs through at once: transcription and, when it is on,
+  post-processing. A daemon-mic recording is accepted at once and starts when
+  its models have loaded, so the user never waits after speaking.
+  `POST /tts/speak`, and a `POST /stt/transcribe` carrying `audio_data`, answer
+  after the load, so a client must not time them out sooner.
+  `409 model_not_loaded` then means no model is selected or, for those two,
+  that the load failed. A post-processor that fails to load costs only the
+  cleanup: the transcript passes through unchanged, as it does whenever
+  post-processing is down.
 - A model unused for that long is unloaded and stays selected. A recording or
-  an utterance in progress counts as use, and the time is counted from when it
-  ends. The unload is reported as a `ready` event with `model_loaded: false` on
-  [`daemon_status_changed`](../events.md).
+  an utterance in progress counts as use of every stage it runs, and the time
+  is counted from when it ends. The unload is reported as a `ready` event with
+  `model_loaded: false` on [`daemon_status_changed`](../events.md), carrying
+  the stage it is about.
 
-One value covers both features' models. The post-processing stage is not
-covered: its model stays loaded while the stage is on.
+One value covers every stage of both features: transcription,
+post-processing and synthesis.
 
 An explicit unload
 ([`DELETE /stt/pipeline/1/model`](../pipeline/model.md),

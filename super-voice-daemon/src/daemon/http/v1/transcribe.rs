@@ -9,6 +9,7 @@ use crate::daemon::http::state::AppState;
 use crate::daemon::http::wire::{Ack, ErrorEnvelope, ReasonEnvelope};
 // Only the wasm-backends realtime handler references the daemon type / bare
 // `Response`; gated so the subprocess-only and no-backend builds stay warning-clean.
+use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::PreviewFrame;
 #[cfg(feature = "wasm-backends")]
 use crate::daemon::types::SuperSTTDaemon;
@@ -17,6 +18,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use std::sync::Arc;
+use super_engine_daemon::stage::StageExt;
 use super_voice_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
 
 /// Abort a realtime session whose consumer has sent no frame for this long.
@@ -171,7 +173,11 @@ async fn run_realtime_session(
     // the session future, and the read lock is released — preventing a
     // half-open TCP connection from wedging model switches indefinitely.
     // A load that fails is logged; the session reports the missing model.
-    let _ = daemon.ensure_model_loaded().await;
+    // A real-time session transcribes only: its text is not post-processed.
+    let _ = daemon
+        .stage(PipelineStage::Transcription)
+        .ensure_loaded()
+        .await;
     {
         let guard = daemon.model.read().await;
         match guard.as_ref() {
@@ -490,7 +496,13 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
     // recording loads it, after the `202`/SSE envelope below: loading it here
     // would hold the response headers for as long as the load takes, past the
     // time a client waits for them.
-    if s.daemon.model.read().await.is_none() && !s.daemon.loads_on_demand().await {
+    if s.daemon.model.read().await.is_none()
+        && !s
+            .daemon
+            .stage(PipelineStage::Transcription)
+            .loads_on_demand()
+            .await
+    {
         if !s.daemon.recording.is_busy() {
             let _ = s.daemon.handle_command(req).await;
         }

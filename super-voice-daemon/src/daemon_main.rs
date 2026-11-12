@@ -173,12 +173,10 @@ pub async fn run() -> Result<()> {
     info!("Daemon stopped gracefully");
 
     // `std::process::exit` below skips every `Drop` destructor — without
-    // this explicit unload the `systemd-run --user` subprocess backend
-    // (e.g. Voxtral) would be orphaned. Call the daemon's shutdown unload
-    // path so `Transcribe::shutdown()` runs in an async context and stops
-    // the unit cleanly.
+    // this explicit unload each `systemd-run --user` subprocess backend
+    // (e.g. Voxtral) would be orphaned. Stop every stage's model, of both
+    // features, in an async context so each backend's unit stops cleanly.
     daemon.shutdown_unload().await;
-    daemon.tts.shutdown_unload().await;
 
     // Drain any queued session-store writes before `process::exit` skips the
     // fire-and-forget persist task — otherwise a token minted or revoked in the

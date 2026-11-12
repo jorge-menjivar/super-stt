@@ -257,7 +257,7 @@ pipeline's shape gets it from the error rather than from a second request.
 The stage reports its model lifecycle on
 [`daemon_status_changed`](../events.md). Loading a model publishes
 `loading_model`, then `model_switched` and `ready` once it is running;
-unloading publishes `ready` with `model_loaded: false`. A load that downloads
+unloading, or a load that fails, publishes `ready` with `model_loaded: false`. A load that downloads
 also publishes `download_progress` ticks, which carry the `source` serving the
 model.
 

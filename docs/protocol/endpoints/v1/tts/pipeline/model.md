@@ -139,10 +139,12 @@ in flight.
 
 Naming a `source` also selects that backend for the stage, so a client can go
 straight from a flat model picker to a load. If the model then fails to
-load — a missing secret, a download that could not complete — the backend stays
-selected and **no model is loaded**: the daemon does not silently restore the
-model that was running, because a client that asked for a switch and got a
-success would otherwise be speaking in the old voice without being told.
+load — a missing secret, a download that could not complete — the backend and
+the model stay selected and **no model is loaded**: the daemon does not
+silently restore the model that was running, because a client that asked for a
+switch and got a success would otherwise be speaking in the old voice without
+being told. The next start loads the selected model again, and with
+[idle unload](../../settings/idle_unload.md) on, so does the next speak.
 
 Anything being spoken is stopped when the switch starts: the switch is the newer
 request, the same way a second [`POST /tts/speak`](../speak.md) supersedes the

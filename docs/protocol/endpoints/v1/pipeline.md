@@ -234,8 +234,8 @@ Every stage reports its own model lifecycle on
 [`daemon_status_changed`](./events.md#daemon-status), and each of those events
 carries the `stage` it is about — a client watching one stage must not read the
 other's load as its own. Loading a model publishes `loading_model`, then
-`model_switched` and `ready` once it is running; unloading publishes `ready`
-with `model_loaded: false`. A load that downloads also publishes
+`model_switched` and `ready` once it is running; unloading, or a load that
+fails, publishes `ready` with `model_loaded: false`. A load that downloads also publishes
 [`download_progress`](./events.md#daemon-status) ticks, which carry the same
 `stage` (and the `source` serving the model), so progress lands on the stage
 that asked for it.
@@ -245,7 +245,7 @@ is stage 1's: transcription was the only stage that emitted these.
 
 Backend *selection* is separate from the model lifecycle: stage 1's publishes
 `active_backend_changed`, stage 2's publishes `settings_changed` with
-`setting: "post_processor"`. A device change that reloads stage 1's model
+`setting: "post_processor"`. A device change that reloads a stage's model
 publishes `switching_device`, `loading_model_for_device` and then `ready` (or
-`device_switch_error`); stage 2's device change is a plain reload and reports
-itself as one. A device change that only records a choice publishes nothing.
+`device_switch_error`), each with its `stage`. A device change that only
+records a choice publishes nothing.

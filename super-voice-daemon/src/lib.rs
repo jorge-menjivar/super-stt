@@ -7,7 +7,6 @@ pub mod crash;
 pub mod daemon;
 pub mod download_progress;
 pub use super_engine_daemon::download_stream;
-pub mod idle_unload;
 pub mod input;
 pub mod limits;
 pub mod old_data;
