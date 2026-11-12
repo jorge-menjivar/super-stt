@@ -3,6 +3,7 @@
 //! status and protocol types, and speech to text's own. Text to speech's own
 //! are in [`tts`].
 pub mod consent;
+pub mod cosmic_shortcuts;
 pub mod daemon;
 #[cfg(target_os = "macos")]
 pub mod launch_agents;

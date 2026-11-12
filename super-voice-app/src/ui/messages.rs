@@ -11,6 +11,7 @@
 use super_voice_shared::models::notification_method::NotificationMethod;
 use super_voice_shared::models::protocol::PreviewSource;
 use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
+use super_voice_shared::models::shortcuts::{ShortcutId, ShortcutList};
 use super_voice_shared::models::write_method::WriteMethod;
 
 use cosmic::widget::segmented_button;
@@ -38,6 +39,8 @@ pub enum Message {
     PreviewTyping(PreviewTypingMessage),
     RecordingStopMode(RecordingStopModeMessage),
     WriteMethod(WriteMethodMessage),
+    /// The Shortcuts page.
+    Shortcuts(ShortcutsMessage),
     NotificationMethod(NotificationMethodMessage),
     IdleUnload(IdleUnloadMessage),
     Backend(BackendMessage),
@@ -589,6 +592,21 @@ pub enum RecordingStopModeMessage {
     Error(String),
 }
 
+/// The Shortcuts page.
+#[derive(Debug, Clone)]
+pub enum ShortcutsMessage {
+    /// Ask the daemon where each shortcut stands.
+    Refresh,
+    /// The daemon's answer to a refresh.
+    Loaded(Result<ShortcutList, String>),
+    /// Add this shortcut.
+    Add(ShortcutId),
+    /// Remove this shortcut.
+    Remove(ShortcutId),
+    /// The daemon's answer to an add or a remove: the list, or why not.
+    Changed(Result<ShortcutList, String>),
+}
+
 /// Write-method setting.
 #[derive(Debug, Clone)]
 pub enum WriteMethodMessage {
@@ -951,6 +969,7 @@ message_from! {
     PreviewTyping => PreviewTypingMessage,
     RecordingStopMode => RecordingStopModeMessage,
     WriteMethod => WriteMethodMessage,
+    Shortcuts => ShortcutsMessage,
     NotificationMethod => NotificationMethodMessage,
     IdleUnload => IdleUnloadMessage,
     Backend => BackendMessage,

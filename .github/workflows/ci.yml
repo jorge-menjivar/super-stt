@@ -52,6 +52,7 @@ jobs:
             libxss-dev \
             libasound2-dev \
             libdbus-1-dev \
+            dbus-daemon \
             pkg-config
 
       - name: Install Rust

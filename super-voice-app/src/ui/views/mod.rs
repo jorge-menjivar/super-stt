@@ -8,6 +8,7 @@ pub mod input_simulation;
 pub mod language_picker;
 pub mod models;
 pub mod recording;
+pub mod shortcuts;
 pub mod speech;
 pub mod tabs;
 pub mod updates;

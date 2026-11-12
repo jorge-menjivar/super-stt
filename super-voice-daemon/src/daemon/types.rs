@@ -139,6 +139,10 @@ pub struct SuperSTTDaemon {
     // Self-update check state: last completed check + notify-once
     // persistence. See `crate::self_update`.
     pub self_update: Arc<crate::self_update::SelfUpdateChecker>,
+    // Super Voice's keyboard shortcuts on this desktop, and on one with the
+    // `GlobalShortcuts` portal, the session holding them. See
+    // `crate::shortcuts`.
+    pub shortcuts: Arc<crate::shortcuts::Shortcuts>,
     // One model loads into each stage at a time, and the newest request for
     // a stage wins. Taken in `instantiate_backend`, which every load of either
     // stage passes through.
@@ -254,6 +258,7 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
             crate::output::notification::Notifier::fake(true).0,
         )),
         self_update: Arc::new(crate::self_update::checker()),
+        shortcuts: Arc::new(crate::shortcuts::Shortcuts::default()),
         loading: Arc::new(StageLoadGates::default()),
         idle: Arc::default(),
         pending_recording: Arc::default(),

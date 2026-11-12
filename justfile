@@ -1267,110 +1267,14 @@ install-daemon:
     sudo install -m755 "$wrapper_tmp" {{ wrapper_dst }}
     rm -f "$wrapper_tmp"
 
-    # Set up the COSMIC keyboard shortcut, with the rules the installer uses
-    # (super-voice-install/src/shortcut.rs):
-    #   1. Point every installed shortcut at this install's `voice`: one that
-    #      runs Super STT's `stt`, which was removed above (`stt stop` is
-    #      `voice record stop`, and "Super STT" reads "Super Voice"), or one
-    #      that runs `voice` from another place. A bare `voice` is left alone.
-    #   2. Offer to add Super+Space only when no shortcut runs `voice` yet and
-    #      Super+Space is free.
-    if command -v cosmic-panel &> /dev/null; then
-        COSMIC_SHORTCUTS_DIR="$HOME/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1"
-        COSMIC_SHORTCUTS_FILE="$COSMIC_SHORTCUTS_DIR/custom"
-        shortcut_py=$(mktemp)
-        cat > "$shortcut_py" <<'PYEOF'
-    import sys
-
-    mode, path = sys.argv[1], sys.argv[2]
-    try:
-        content = open(path).read()
-    except FileNotFoundError:
-        content = ""
-    spawn = 'Spawn("'
-
-
-    def programs(text):
-        for rest in text.split(spawn)[1:]:
-            yield rest.split('"')[0].split(" ")[0]
-
-
-    def has_voice_shortcut(text):
-        return any(p == "voice" or p.endswith("/voice") for p in programs(text))
-
-
-    def can_add(text):
-        if "Super Voice" in text or has_voice_shortcut(text):
-            return False
-        return not ('key: "space"' in text and "Super" in text)
-
-
-    if mode == "migrate":
-        voice = sys.argv[3]
-        out, rest, changed = [], content, False
-        while (at := rest.find(spawn)) >= 0:
-            start = at + len(spawn)
-            out.append(rest[:start])
-            rest = rest[start:]
-            end = rest.find('"')
-            end = len(rest) if end < 0 else end
-            command = rest[:end]
-            program, sep, args = command.partition(" ")
-            args = sep + args
-            if program == "stt" or program.endswith("/stt"):
-                if args.startswith(" stop"):
-                    args = " record stop" + args[len(" stop"):]
-                out.append(voice + args)
-                changed = True
-            elif program.endswith("/voice") and program != voice:
-                out.append(voice + args)
-                changed = True
-            else:
-                out.append(command)
-            rest = rest[end:]
-        out.append(rest)
-        if changed:
-            migrated = "".join(out).replace(
-                'description: Some("Super STT")', 'description: Some("Super Voice")'
-            )
-            open(path, "w").write(migrated)
-            print(f"✓ Pointed the installed shortcut at {voice}")
-    elif mode == "can-add":
-        sys.exit(0 if can_add(content) else 1)
-    elif mode == "add":
-        command = sys.argv[3]
-        entry = (
-            "    (\n        modifiers: [\n            Super,\n        ],\n"
-            '        key: "space",\n        description: Some("Super Voice"),\n'
-            f'    ): Spawn("{command}"),\n'
-        )
-        if not can_add(content):
-            sys.exit(0)
-        trimmed = content.strip()
-        if trimmed in ("", "{}"):
-            updated = "{\n" + entry + "}\n"
-        else:
-            updated = content[: content.rfind("}")] + entry + "}\n"
-        open(path, "w").write(updated)
-        print("✓ Added the Super+Space shortcut")
-    PYEOF
-        python3 "$shortcut_py" migrate "$COSMIC_SHORTCUTS_FILE" "{{ bin_dir }}/voice"
-        if python3 "$shortcut_py" can-add "$COSMIC_SHORTCUTS_FILE"; then
-            echo -n "Add COSMIC keyboard shortcut (Super+Space)? [Y/n]: "
-            read -r add_shortcut
-            if [[ ! "$add_shortcut" =~ ^[Nn]$ ]]; then
-                mkdir -p "$COSMIC_SHORTCUTS_DIR"
-                python3 "$shortcut_py" add "$COSMIC_SHORTCUTS_FILE" "{{ bin_dir }}/voice record --write"
-            fi
-        fi
-        rm -f "$shortcut_py"
-    fi || true
-
     echo "✓ Super Voice installed to {{ daemon_dst }}"
     echo "✓ Wrapper script created at {{ wrapper_dst }}"
     echo ""
     echo "🚀 Ready to use!"
     echo "-- voice record --write         # Record, transcribe, and type result"
+    echo "-- voice speak --read           # Speak the selected or copied text"
+    echo ""
+    echo "Add keyboard shortcuts from the Shortcuts page in the Super Voice app."
 
     # Reload user systemd and enable service
     echo "Reloading user systemd..."
@@ -1405,100 +1309,6 @@ install:
         exit 1
     fi
 
-# Configure COSMIC keyboard shortcut for Super Voice
-setup-cosmic-shortcut:
-    #!/usr/bin/env bash
-    # Check if we're on COSMIC desktop
-    if ! command -v cosmic-panel &> /dev/null; then
-        echo "COSMIC desktop not detected"
-        exit 0
-    fi
-
-    COSMIC_SHORTCUTS_DIR="$HOME/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1"
-    COSMIC_SHORTCUTS_FILE="$COSMIC_SHORTCUTS_DIR/custom"
-
-    # Ask user if they want to add the shortcut
-    echo -n "Add keyboard shortcut (Super+Space) for Super Voice? [Y/n]: "
-    read -r add_shortcut
-
-    if [[ "$add_shortcut" =~ ^[Nn]$ ]]; then
-        exit 0
-    fi
-
-    # Create the shortcuts directory if it doesn't exist
-    mkdir -p "$COSMIC_SHORTCUTS_DIR"
-
-    # Use the full path to the voice wrapper for reliability
-    stt_command="{{ bin_dir }}/voice record --write"
-
-    # Check if shortcuts file exists and has content
-    if [ -f "$COSMIC_SHORTCUTS_FILE" ] && [ -s "$COSMIC_SHORTCUTS_FILE" ]; then
-        # File exists with content, check if our shortcut is already there
-        if grep -q "Super Voice" "$COSMIC_SHORTCUTS_FILE"; then
-            exit 0
-        fi
-
-        # Check if Super+Space is already used
-        if grep -q 'key: "space"' "$COSMIC_SHORTCUTS_FILE" && grep -A5 -B5 'key: "space"' "$COSMIC_SHORTCUTS_FILE" | grep -q 'Super'; then
-            echo "Super+Space already in use"
-            exit 0
-        fi
-
-        # Create a backup
-        cp "$COSMIC_SHORTCUTS_FILE" "$COSMIC_SHORTCUTS_FILE.backup"
-
-        # Create a temporary file with the new shortcut entry
-        temp_file=$(mktemp)
-
-        # Check if the file is empty (just {}) and handle accordingly
-        if grep -q '^{}$' "$COSMIC_SHORTCUTS_FILE"; then
-            # File is empty, replace entirely
-            echo '{' > "$temp_file"
-            echo '    (' >> "$temp_file"
-            echo '        modifiers: [' >> "$temp_file"
-            echo '            Super,' >> "$temp_file"
-            echo '        ],' >> "$temp_file"
-            echo '        key: "space",' >> "$temp_file"
-            echo '        description: Some("Super Voice"),' >> "$temp_file"
-            echo "    ): Spawn(\"$stt_command\")," >> "$temp_file"
-            echo '}' >> "$temp_file"
-        else
-            # File has content, remove the closing brace and add our shortcut
-            head -n -1 "$COSMIC_SHORTCUTS_FILE" > "$temp_file"
-            echo '    (' >> "$temp_file"
-            echo '        modifiers: [' >> "$temp_file"
-            echo '            Super,' >> "$temp_file"
-            echo '        ],' >> "$temp_file"
-            echo '        key: "space",' >> "$temp_file"
-            echo '        description: Some("Super Voice"),' >> "$temp_file"
-            echo "    ): Spawn(\"$stt_command\")," >> "$temp_file"
-            echo '}' >> "$temp_file"
-        fi
-
-        # Replace the original file
-        mv "$temp_file" "$COSMIC_SHORTCUTS_FILE"
-
-        # Verify the file is valid by checking it has proper structure
-        if ! grep -q '^{' "$COSMIC_SHORTCUTS_FILE" || ! grep -q '^}' "$COSMIC_SHORTCUTS_FILE"; then
-            mv "$COSMIC_SHORTCUTS_FILE.backup" "$COSMIC_SHORTCUTS_FILE"
-            exit 1
-        fi
-
-        # Remove backup if successful
-        rm -f "$COSMIC_SHORTCUTS_FILE.backup"
-    else
-
-        echo '{' > "$COSMIC_SHORTCUTS_FILE"
-        echo '    (' >> "$COSMIC_SHORTCUTS_FILE"
-        echo '        modifiers: [' >> "$COSMIC_SHORTCUTS_FILE"
-        echo '            Super,' >> "$COSMIC_SHORTCUTS_FILE"
-        echo '        ],' >> "$COSMIC_SHORTCUTS_FILE"
-        echo '        key: "space",' >> "$COSMIC_SHORTCUTS_FILE"
-        echo '        description: Some("Super Voice"),' >> "$COSMIC_SHORTCUTS_FILE"
-        echo "    ): Spawn(\"$stt_command\")," >> "$COSMIC_SHORTCUTS_FILE"
-        echo '}' >> "$COSMIC_SHORTCUTS_FILE"
-    fi
-
 # Install everything (daemon, app, and COSMIC applet)
 # Usage: just install-all
 install-all:
@@ -1517,8 +1327,9 @@ install-all:
     echo "🎉 Super Voice installation finished!"
     echo ""
     echo "⚙️  Quick Setup Tips:"
-    echo "-- If you're on COSMIC, the daemon installer already offered to set up Super+Space shortcut"
+    echo "-- If you're on COSMIC, the daemon installer already offered the Super+Space and Super+Shift+Space shortcuts"
     echo "-- For other desktop environments, add a keyboard shortcut for: voice record --write"
+    echo "-- And one to read text aloud: voice speak --read"
     echo "-- Recommended shortcuts: Super+Space, Ctrl+Alt+S, or F12"
 
 # Uninstall the app

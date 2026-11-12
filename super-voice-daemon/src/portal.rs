@@ -57,6 +57,31 @@ pub(crate) async fn portal_call(
     body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
     timeout_secs: u64,
 ) -> Result<HashMap<String, OwnedValue>> {
+    let (code, results) =
+        portal_request(conn, portal, method, handle_token, body, timeout_secs).await?;
+    if code != 0 {
+        return Err(anyhow::anyhow!(
+            "Portal {method} failed (response code {code})"
+        ));
+    }
+    Ok(results)
+}
+
+/// How a request ended, as its `Response` says: the user said no in the
+/// desktop's dialog, or it ended another way.
+pub(crate) const RESPONSE_CANCELLED: u32 = 1;
+
+/// [`portal_call`], answering the `Response`'s code with its results rather
+/// than refusing any but `0`, for a caller that tells a cancelled dialog
+/// ([`RESPONSE_CANCELLED`]) from a failure.
+pub(crate) async fn portal_request(
+    conn: &zbus::Connection,
+    portal: &zbus::Proxy<'_>,
+    method: &str,
+    handle_token: &str,
+    body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
+    timeout_secs: u64,
+) -> Result<(u32, HashMap<String, OwnedValue>)> {
     let unique_name = conn
         .unique_name()
         .context("Session bus connection has no unique name")?;
@@ -89,14 +114,7 @@ pub(crate) async fn portal_call(
         .context("Failed to deserialize portal Response")?;
 
     debug!("Portal {method}: response code = {code}");
-
-    if code != 0 {
-        return Err(anyhow::anyhow!(
-            "Portal {method} failed (response code {code})"
-        ));
-    }
-
-    Ok(results)
+    Ok((code, results))
 }
 
 #[cfg(test)]

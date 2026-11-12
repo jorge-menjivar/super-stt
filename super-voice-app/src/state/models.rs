@@ -55,6 +55,8 @@ pub enum Page {
     /// The cloned-voice library: record or import a reference clip, and manage
     /// the voices built from them.
     Voices,
+    /// Super Voice's keyboard shortcuts, and adding each one that is missing.
+    Shortcuts,
 }
 
 /// An entry in the nav rail: a page of its own, or a feature whose pages are
@@ -65,6 +67,7 @@ pub enum Section {
     Library,
     SpeechToText,
     TextToSpeech,
+    Shortcuts,
     Customization,
     Connection,
     Updates,
@@ -77,6 +80,7 @@ impl Section {
         match self {
             Self::SpeechToText => crate::fl!("speech-to-text"),
             Self::TextToSpeech => crate::fl!("text-to-speech"),
+            Self::Shortcuts => crate::fl!("shortcuts"),
             Self::Models => crate::fl!("models"),
             Self::Library => crate::fl!("library"),
             Self::Customization => crate::fl!("customization"),
@@ -93,6 +97,7 @@ impl Section {
             Self::Library => &[Page::Library],
             Self::SpeechToText => &[Page::Recording, Page::InputSimulation, Page::Contexts],
             Self::TextToSpeech => &[Page::Speech, Page::Voices],
+            Self::Shortcuts => &[Page::Shortcuts],
             Self::Customization => &[Page::Customization],
             Self::Connection => &[Page::Connection],
             Self::Updates => &[Page::Updates],
@@ -107,6 +112,7 @@ impl Section {
             Page::Library => Self::Library,
             Page::Recording | Page::InputSimulation | Page::Contexts => Self::SpeechToText,
             Page::Speech | Page::Voices => Self::TextToSpeech,
+            Page::Shortcuts => Self::Shortcuts,
             Page::Customization => Self::Customization,
             Page::Connection => Self::Connection,
             Page::Updates => Self::Updates,
@@ -126,6 +132,7 @@ impl Page {
             Self::Contexts => crate::fl!("contexts"),
             Self::Speech => crate::fl!("speech-page"),
             Self::Voices => crate::fl!("voices"),
+            Self::Shortcuts => crate::fl!("shortcuts"),
             Self::Customization => crate::fl!("customization"),
             Self::Connection => crate::fl!("connection"),
             Self::Updates => crate::fl!("updates"),
@@ -191,6 +198,8 @@ pub enum ErrorScope {
     Speech,
     /// The Voices tab: recording, upload, rename, and delete failures.
     Voices,
+    /// The Shortcuts page: a shortcut that could not be added.
+    Shortcuts,
     /// The Contexts page: a failed list fetch, activate, or delete. A failed
     /// *save* is not here — it belongs in the editor that caused it, beside the
     /// field the user has to fix.
@@ -252,6 +261,7 @@ mod section_tests {
             Section::Library,
             Section::SpeechToText,
             Section::TextToSpeech,
+            Section::Shortcuts,
             Section::Customization,
             Section::Connection,
             Section::Updates,
@@ -264,6 +274,6 @@ mod section_tests {
                 seen.push(page);
             }
         }
-        assert_eq!(seen.len(), 10, "every page is in a section");
+        assert_eq!(seen.len(), 11, "every page is in a section");
     }
 }

@@ -155,6 +155,11 @@
     }
     wiremock = "0.6.5"
 
+# The `GlobalShortcuts` tests (tests/shortcuts_portal.rs) serve a fake portal
+# on a bus of their own.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+    zbus.workspace = true
+
 [features]
     # Models are served by out-of-tree backends; both transports are on by
     # default. GPU residency now lives in the backend, so the daemon no longer

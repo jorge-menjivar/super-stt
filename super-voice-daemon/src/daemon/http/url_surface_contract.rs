@@ -75,6 +75,8 @@ const URL_SURFACE: &[(&str, &str)] = &[
     ("/v1/settings/volume", "get,post"),
     ("/v1/settings/write_method", "get,post"),
     ("/v1/settings/write_method/test", "post"),
+    ("/v1/shortcuts", "get"),
+    ("/v1/shortcuts/{id}", "delete,post"),
     ("/v1/status", "get"),
     ("/v1/stt/transcribe", "post"),
     ("/v1/stt/transcribe/realtime", "get"),

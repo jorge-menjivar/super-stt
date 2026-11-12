@@ -7224,7 +7224,6 @@ dependencies = [
 name = "super-voice-install"
 version = "0.3.0-beta.5"
 dependencies = [
- "dirs 7.0.0",
  "flate2",
  "hex",
  "log",
@@ -7233,6 +7232,7 @@ dependencies = [
  "serde_json",
  "super-engine-installer",
  "super-voice-registry-types",
+ "super-voice-shared",
  "tar",
  "tokio",
 ]
@@ -7258,6 +7258,7 @@ version = "0.3.0-beta.5"
 dependencies = [
  "anyhow",
  "async-stream",
+ "dirs 7.0.0",
  "futures-util",
  "http-body-util",
  "hyper",

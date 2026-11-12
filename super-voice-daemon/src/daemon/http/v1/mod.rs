@@ -29,6 +29,7 @@ pub(crate) mod ping;
 pub(crate) mod pipeline;
 pub(crate) mod registry;
 pub(crate) mod settings;
+pub(crate) mod shortcuts;
 pub(crate) mod status;
 pub(crate) mod transcribe;
 pub(crate) mod update;
@@ -111,6 +112,7 @@ fn settings_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(update::get_update))
         .routes(routes!(update::post_check))
         .merge(settings::routes())
+        .merge(shortcuts::routes())
         .merge(backends::routes())
         .merge(registry::routes())
         .nest(

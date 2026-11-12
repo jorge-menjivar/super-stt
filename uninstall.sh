@@ -19,7 +19,7 @@
 #   - Desktop entries, icons, metainfo (system + per-user)
 #   - Runtime socket dirs under $XDG_RUNTIME_DIR
 #   - systemd user units (/usr/lib/systemd/user + ~/.config/systemd/user)
-#   - The COSMIC keyboard shortcut (only if it's the lone entry)
+#   - The COSMIC keyboard shortcuts (only if they're the only entries)
 #
 # The COSMIC panel is restarted when an installed applet was removed, so the
 # tray drops it without a relogin.
@@ -235,18 +235,21 @@ pkill -f '^cosmic-app-library$' 2>/dev/null || true
 pkill -f '^cosmic-launcher$' 2>/dev/null || true
 pkill -f '^pop-launcher( |$)' 2>/dev/null || true
 
-# 7. COSMIC custom keyboard shortcut. Remove only if ours is the only
-#    entry; otherwise the user has other custom bindings we shouldn't
-#    disturb. They can hand-edit if they want a finer surgical removal.
-if [ -f "$COSMIC_SHORTCUTS" ] && grep -Eq 'description: Some\("Super (Voice|STT)"\)' "$COSMIC_SHORTCUTS"; then
+# 7. COSMIC custom keyboard shortcuts. Remove the file only if every entry
+#    is ours (dictation, and reading aloud); otherwise the user has
+#    other custom bindings we shouldn't disturb. They can hand-edit if they
+#    want a finer surgical removal.
+ours='description: Some\("Super (Voice|STT)(: [^"]*)?"\)'
+if [ -f "$COSMIC_SHORTCUTS" ] && grep -Eq "$ours" "$COSMIC_SHORTCUTS"; then
     # Each binding starts with `    (` in column 0. Count them.
     entry_count=$(grep -c '^    (' "$COSMIC_SHORTCUTS" || echo 0)
-    if [ "$entry_count" = "1" ]; then
+    our_count=$(grep -Ec "$ours" "$COSMIC_SHORTCUTS" || echo 0)
+    if [ "$entry_count" = "$our_count" ]; then
         rm -f "$COSMIC_SHORTCUTS"
-        print_info "Removed COSMIC keyboard shortcut"
+        print_info "Removed COSMIC keyboard shortcuts"
     else
         print_warn "COSMIC custom shortcuts file has other entries — not touching."
-        print_warn "  Edit by hand to remove the Super Voice entry:"
+        print_warn "  Edit by hand to remove the Super Voice entries:"
         print_warn "  $COSMIC_SHORTCUTS"
     fi
 fi

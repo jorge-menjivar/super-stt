@@ -275,6 +275,10 @@ impl AppModel {
                 &self.speech,
                 self.action_error_for(crate::state::ErrorScope::Speech),
             ),
+            Page::Shortcuts => views::shortcuts::page(
+                &self.shortcuts,
+                self.action_error_for(crate::state::ErrorScope::Shortcuts),
+            ),
             Page::Voices => views::voices::page(self),
         }
     }

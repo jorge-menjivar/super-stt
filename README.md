@@ -55,7 +55,7 @@ Open **Super Voice** from your app launcher. Everything starts there:
 
 ### Dictate anywhere with a shortcut
 
-Press **Super+Space**, speak, and your words are typed into whatever app is focused: your editor, browser, chat or terminal. The installer binds it for you on COSMIC. On other desktops, add a custom shortcut for `voice record --write`.
+Press **Super+Space**, speak, and your words are typed into whatever app is focused: your editor, browser, chat or terminal. Add it from the app's **Shortcuts** page, on COSMIC or on a desktop with the GlobalShortcuts portal, such as KDE Plasma, GNOME or Hyprland. On any other, such as Sway, the page shows the command to bind yourself: `voice record --write`.
 
 1. The shortcut asks the daemon to start transcribing from your mic.
 2. You speak, and the daemon transcribes your audio.

@@ -4,6 +4,7 @@ pub mod contexts;
 pub mod notification_method;
 pub mod protocol;
 pub mod recording_stop_mode;
+pub mod shortcuts;
 pub mod status;
 #[cfg(test)]
 mod wire_enum;

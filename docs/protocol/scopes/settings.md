@@ -83,6 +83,8 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/stt/context/active`](../endpoints/v1/context.md)                     | GET, POST  | Which context is in force by default                                                          |
 | [`/stt/backend/{backend_id}/context`](../endpoints/v1/context.md)       | GET, POST, DELETE | Point one backend at a context of its own, at none, or back at the active one          |
 | [`/gpu_info`](../endpoints/v1/gpu_info.md)                  | GET        | GPU / VRAM information                                                                                 |
+| [`/shortcuts`](../endpoints/v1/shortcuts.md)                | GET        | Super Voice's keyboard shortcuts on this desktop, and where each stands                                |
+| [`/shortcuts/{id}`](../endpoints/v1/shortcuts.md)           | POST, DELETE | Add or remove one shortcut                                                                           |
 | [`/registry/backend/list`](../endpoints/v1/registry/backends.md) | GET      | List backends available in the registry                                                               |
 | [`/registry/backend/preview`](../endpoints/v1/registry/preview.md) | POST | Describe what a source would install, without installing it                                           |
 | [`/registry/backend/refresh`](../endpoints/v1/registry/refresh.md) | POST | Refresh the registry index                                                                            |

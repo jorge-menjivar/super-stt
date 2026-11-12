@@ -19,6 +19,7 @@ pub mod secret_headers;
 pub use super_engine_daemon::resource_management;
 pub mod self_update;
 pub mod services;
+pub mod shortcuts;
 pub mod stt_models;
 pub mod tts;
 
