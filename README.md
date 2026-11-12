@@ -38,6 +38,7 @@ Under the hood it's two things:
 - High performance. Built in Rust. Supports GPU acceleration for both STT and TTS.
 - Native support for Linux.
 - Bind a shortcut (Super+Space by convention), speak, and your words are typed straight into whatever app is focused, e.g. your editor, browser, chat, terminal. No copy-paste, no fiddling.
+- Select or copy text in any app and press another shortcut (Super+Shift+Space by convention) to hear it read aloud.
 - It allows you to speak text (synthesize) high quality audio using state-of-the-art models without any extra setup.
 - Clone your own voice and use it to speak text.
 - You can choose the model to use from a growing library of backends. You can [create and use your own backend](./docs/protocol/README.md#add-your-own-model) too.
@@ -60,6 +61,12 @@ Press **Super+Space**, speak, and your words are typed into whatever app is focu
 1. The shortcut asks the daemon to start transcribing from your mic.
 2. You speak, and the daemon transcribes your audio.
 3. When you stop, on silence or by pressing the shortcut again, it types the transcription into the focused app.
+
+### Read text aloud
+
+Select text in any app and press **Super+Shift+Space** to hear it read aloud with your text to speech model. Press it again to stop. To read what you copy instead, set **Read from** to **Clipboard** in **Text to speech → Read aloud**. Bind the shortcut in your desktop's keyboard settings to `voice speak --read`.
+
+It reads the text through Wayland's data-control protocol, so the compositor must offer it. COSMIC, KDE Plasma and wlroots compositors such as Sway and Hyprland do. GNOME does not.
 
 ### From the command line
 
