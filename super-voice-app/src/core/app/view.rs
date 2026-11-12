@@ -279,6 +279,11 @@ impl AppModel {
                 &self.shortcuts,
                 self.action_error_for(crate::state::ErrorScope::Shortcuts),
             ),
+            Page::ReadAloud => views::read_aloud::page(
+                self.read_method,
+                &self.speech.status,
+                self.action_error_for(crate::state::ErrorScope::ReadAloud),
+            ),
             Page::Voices => views::voices::page(self),
         }
     }

@@ -7,6 +7,7 @@ pub mod customization;
 pub mod input_simulation;
 pub mod language_picker;
 pub mod models;
+pub mod read_aloud;
 pub mod recording;
 pub mod shortcuts;
 pub mod speech;

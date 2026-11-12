@@ -134,12 +134,19 @@ const SCENES: &[(&str, Scene)] = &[
     ),
     ("speech", Scene::page(Page::Speech, Stt::Running)),
     ("voices", Scene::page(Page::Voices, Stt::Running)),
-    // Nothing on it depends on speech to text, so it is left as found.
+    // Nothing on these depends on speech to text, so it is left as found.
     (
         "shortcuts",
         Scene {
             stt: None,
             ..Scene::page(Page::Shortcuts, Stt::Running)
+        },
+    ),
+    (
+        "read-aloud",
+        Scene {
+            stt: None,
+            ..Scene::page(Page::ReadAloud, Stt::Running)
         },
     ),
     (

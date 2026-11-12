@@ -110,6 +110,12 @@ async fn dispatch(matches: &ArgMatches, socket_path: PathBuf) -> Result<()> {
             .await
             .context("stop failed")
         }
+        #[cfg(target_os = "linux")]
+        Some(("speak", sub)) if sub.get_flag("read") => run_with_token(socket_path.clone(), |t| {
+            cmd_speak_read(socket_path.clone(), t)
+        })
+        .await
+        .context("speak failed"),
         Some(("speak", sub)) => {
             let text = read_text(sub)?;
             run_with_token(socket_path.clone(), |t| {
@@ -173,7 +179,7 @@ fn build_cli() -> Command {
                         )),
                 ),
         )
-        .subcommand(
+        .subcommand(read_arg(
             Command::new("speak")
                 .about("Speak text with the active model")
                 .args_conflicts_with_subcommands(true)
@@ -187,7 +193,7 @@ fn build_cli() -> Command {
                    // machine speaks is the user's configuration, not a flag on the
                    // thing that makes it talk. Set a voice with the settings app
                    // or `POST /tts/pipeline/{stage}/model/{model}/voice`.
-        )
+        ))
         .subcommand(
             Command::new("logout")
                 .about("Forget the cached session token (forces re-consent next call)"),
@@ -201,11 +207,31 @@ fn platform_subcommands(cli: Command) -> Command {
         .subcommand(service::command())
 }
 
-/// Nothing to add on Linux: the desktop environment binds the shortcut there
-/// and runs `voice record --write` itself, and systemd runs the daemon.
+/// Nothing to add on Linux: the desktop environment binds the shortcuts there
+/// and runs `voice record --write` and `voice speak --read` itself, and
+/// systemd runs the daemon.
 #[cfg(not(target_os = "macos"))]
 fn platform_subcommands(cli: Command) -> Command {
     cli
+}
+
+/// `voice speak --read`, which the desktop environment's shortcut runs: the
+/// text to speech counterpart of `voice record --write`. Linux only: the
+/// daemon reads the selection and the clipboard from the Wayland session.
+#[cfg(target_os = "linux")]
+fn read_arg(speak: Command) -> Command {
+    speak.arg(
+        Arg::new("read")
+            .long("read")
+            .help("Speak the selected or copied text, as the read method in the app says. If speech is playing, stop it instead")
+            .action(ArgAction::SetTrue)
+            .conflicts_with("text"),
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_arg(speak: Command) -> Command {
+    speak
 }
 
 /// Thin wrapper over `session::with_token` that adapts its
@@ -372,6 +398,13 @@ async fn cmd_speak(
     // what "say this instead" means. Use `speak stop` to fall silent.
     let resp =
         super_voice_shared::tts::daemon::http_client::speak(socket_path, &token, &text).await?;
+    report_speaking(resp)
+}
+
+/// Say that an utterance started, or why it did not.
+fn report_speaking(
+    resp: super_voice_shared::tts::models::protocol::DaemonResponse,
+) -> super_voice_shared::daemon::http_client::HttpResult<()> {
     if resp.status != "success" {
         return Err(http_client::HttpError::Other(
             resp.message.unwrap_or_else(|| "speak failed".to_string()),
@@ -385,6 +418,25 @@ async fn cmd_speak(
         println!("Speaking.");
     }
     Ok(())
+}
+
+/// `voice speak --read`: speak the selected or copied text, or stop. The
+/// daemon reads it, from wherever the user's read method says. Pressed while
+/// anything is speaking, the shortcut that runs this stops it rather than
+/// reading again, the way `record` stops a recording. Without that, a long
+/// passage could only be stopped from another command.
+#[cfg(target_os = "linux")]
+async fn cmd_speak_read(
+    socket_path: PathBuf,
+    token: String,
+) -> super_voice_shared::daemon::http_client::HttpResult<()> {
+    let status = http_client::status(socket_path.clone(), &token).await?;
+    if status.tts.busy {
+        return cmd_speak_stop(socket_path, token).await;
+    }
+    let resp =
+        super_voice_shared::tts::daemon::http_client::speak_read(socket_path, &token).await?;
+    report_speaking(resp)
 }
 
 async fn cmd_speak_stop(
@@ -477,6 +529,27 @@ mod tests {
         assert_eq!(text(&["voice", "speak", "hello", "there"]), "hello there");
         assert_eq!(text(&["voice", "speak", "please", "stop"]), "please stop");
         assert_eq!(text(&["voice", "speak", "--", "stop"]), "stop");
+    }
+
+    /// The binding the installer writes parses. What is read is all the text
+    /// there is, so it goes with neither text nor `stop`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn speak_read_takes_no_text() {
+        let matches = super::build_cli()
+            .try_get_matches_from(["voice", "speak", "--read"])
+            .expect("the COSMIC binding parses");
+        let (_, sub) = matches.subcommand().expect("speak");
+        assert!(sub.get_flag("read"));
+        for args in [
+            &["voice", "speak", "--read", "hello"][..],
+            &["voice", "speak", "--read", "stop"][..],
+        ] {
+            assert!(
+                super::build_cli().try_get_matches_from(args).is_err(),
+                "{args:?}"
+            );
+        }
     }
 
     /// The binding the installer writes parses, and a recording's flags do

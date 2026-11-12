@@ -14,6 +14,8 @@
 //! window — because its output was already going there. This daemon's output is
 //! audio, so a failure has nowhere to be typed and one channel is all there is.
 
+use super_voice_shared::models::read_method::ReadMethod;
+
 /// Who authored a failure's detail, which decides how the notification body
 /// labels it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +74,47 @@ impl Failure {
     }
 }
 
+impl Failure {
+    /// `POST /tts/speak/read` found nothing to read where `method` looks.
+    pub(crate) fn nothing_to_read(method: ReadMethod) -> Self {
+        Self {
+            summary: "Nothing to read",
+            body: match method {
+                ReadMethod::Selection => "Select some text and try again.",
+                ReadMethod::Clipboard => "Copy some text and try again.",
+            }
+            .to_string(),
+        }
+    }
+
+    /// The text `method` names is longer than one utterance may be.
+    pub(crate) fn too_much_to_read(method: ReadMethod) -> Self {
+        Self {
+            summary: "Too much text to read",
+            body: match method {
+                ReadMethod::Selection => "Select less text and try again.",
+                ReadMethod::Clipboard => "Copy less text and try again.",
+            }
+            .to_string(),
+        }
+    }
+
+    /// The selection or the clipboard could not be read at all.
+    pub(crate) fn could_not_read(method: ReadMethod, detail: &str) -> Self {
+        Self {
+            summary: match method {
+                ReadMethod::Selection => "Could not read the selected text",
+                ReadMethod::Clipboard => "Could not read the clipboard",
+            },
+            body: body(
+                Origin::Daemon,
+                detail,
+                "The desktop did not hand over the text.",
+            ),
+        }
+    }
+}
+
 /// Render a reason into a notification body: labelled by origin, or replaced by
 /// `fallback` when there is nothing left to say after sanitizing.
 fn body(origin: Origin, detail: &str, fallback: &str) -> String {
@@ -121,6 +164,7 @@ fn sanitize(detail: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{Failure, MAX_DETAIL, Origin, sanitize};
+    use super_voice_shared::models::read_method::ReadMethod;
 
     /// Every failure the daemon can raise, for the invariants that must hold
     /// across all of them.
@@ -130,6 +174,12 @@ mod tests {
             Failure::could_not_open_output("d"),
             Failure::synthesis_failed(Origin::Daemon, "d"),
             Failure::synthesis_failed(Origin::Backend, "d"),
+            Failure::nothing_to_read(ReadMethod::Selection),
+            Failure::nothing_to_read(ReadMethod::Clipboard),
+            Failure::too_much_to_read(ReadMethod::Selection),
+            Failure::too_much_to_read(ReadMethod::Clipboard),
+            Failure::could_not_read(ReadMethod::Selection, "d"),
+            Failure::could_not_read(ReadMethod::Clipboard, "d"),
         ]
     }
 
@@ -193,6 +243,7 @@ mod tests {
         }
         for f in [
             Failure::could_not_open_output(""),
+            Failure::could_not_read(ReadMethod::Clipboard, " "),
             Failure::synthesis_failed(Origin::Daemon, "\n\t "),
             Failure::synthesis_failed(Origin::Backend, "\u{1b}"),
         ] {

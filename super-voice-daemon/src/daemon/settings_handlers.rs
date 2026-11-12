@@ -6,6 +6,7 @@ use crate::output::keyboard::Simulator;
 use log::{info, warn};
 use super_voice_shared::models::notification_method::NotificationMethod;
 use super_voice_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_voice_shared::models::read_method::ReadMethod;
 use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
 use super_voice_shared::models::update_beta_optin::UpdateBetaOptIn;
 use super_voice_shared::models::write_method::WriteMethod;
@@ -101,6 +102,28 @@ impl SuperSTTDaemon {
         let config = self.config.read().await;
         let mode = config.transcription.recording_stop_mode;
         DaemonResponse::success().with_recording_stop_mode(mode.to_string())
+    }
+
+    /// Set where the read-aloud shortcut takes its text from. Text to
+    /// speech's setting, stored here because every setting is, and read by
+    /// [`SuperTTSDaemon::handle_speak_read`](crate::tts::daemon::types::SuperTTSDaemon::handle_speak_read).
+    pub async fn handle_set_read_method(&self, method: ReadMethod) -> DaemonResponse {
+        let persist = self
+            .set_config_field(|c| c.synthesis.read_method = method)
+            .await;
+
+        info!("Read method set to {method}");
+        Self::settings_saved(
+            DaemonResponse::success().with_read_method(method.to_string()),
+            format!("Read method set to {method}"),
+            persist,
+        )
+    }
+
+    /// Where the read-aloud shortcut takes its text from.
+    pub async fn handle_get_read_method(&self) -> DaemonResponse {
+        let method = self.config.read().await.synthesis.read_method;
+        DaemonResponse::success().with_read_method(method.to_string())
     }
 
     /// Handle set write method command

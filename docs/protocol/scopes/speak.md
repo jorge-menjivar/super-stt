@@ -38,6 +38,7 @@ for the wire-level details (HTTP framing, SSE mechanics, example client code).
 | Endpoint                                                | Methods  | Notes                                                        |
 |---------------------------------------------------------|----------|--------------------------------------------------------------|
 | [`/tts/speak`](../endpoints/v1/tts/speak.md)                    | POST     | Speak complete text; returns once queued. `text` is the whole request |
+| [`/tts/speak/read`](../endpoints/v1/tts/speak/read.md)          | POST     | Speak the selected or copied text, per the user's read method |
 | [`/tts/speak/stop`](../endpoints/v1/tts/speak/stop.md)          | POST     | Stop the current utterance; idempotent                       |
 | [`/tts/speak/stream`](../endpoints/v1/tts/speak/stream.md)      | GET (WS) | Stream text in as it is generated; `start` carries nothing |
 
@@ -52,6 +53,7 @@ scope.
 |-------------------------------------------------|------------------------------------------------------------|
 | Complete text, now                              | [`POST /tts/speak`](../endpoints/v1/tts/speak.md)                  |
 | Text arriving over time (an LLM reply)          | [`GET /tts/speak/stream`](../endpoints/v1/tts/speak/stream.md)     |
+| A read-aloud hotkey                             | [`POST /tts/speak/read`](../endpoints/v1/tts/speak/read.md)        |
 | A stop button or hotkey                         | [`POST /tts/speak/stop`](../endpoints/v1/tts/speak/stop.md)        |
 
 `POST /tts/speak` is not a toggle: issuing it while something is playing interrupts

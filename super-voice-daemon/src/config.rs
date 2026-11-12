@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use super_voice_shared::models::contexts::DictationContext;
 use super_voice_shared::models::notification_method::NotificationMethod;
+use super_voice_shared::models::read_method::ReadMethod;
 use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
 use super_voice_shared::models::shortcuts::ShortcutId;
 use super_voice_shared::models::update_beta_optin::UpdateBetaOptIn;
@@ -338,6 +339,14 @@ pub struct SynthesisConfig {
     /// an empty `preferred_model` means "backend selected, no model loaded".
     #[serde(default)]
     pub active_backend: Option<String>,
+    /// Where `POST /v1/tts/speak/read`, which the read-aloud shortcut runs,
+    /// takes its text from. An unparseable stored value degrades to the
+    /// default rather than failing the whole config load.
+    #[serde(
+        default,
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub read_method: ReadMethod,
 }
 
 impl TranscriptionConfig {

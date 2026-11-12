@@ -10,6 +10,7 @@
 
 use super_voice_shared::models::notification_method::NotificationMethod;
 use super_voice_shared::models::protocol::PreviewSource;
+use super_voice_shared::models::read_method::ReadMethod;
 use super_voice_shared::models::recording_stop_mode::RecordingStopMode;
 use super_voice_shared::models::shortcuts::{ShortcutId, ShortcutList};
 use super_voice_shared::models::write_method::WriteMethod;
@@ -39,6 +40,8 @@ pub enum Message {
     PreviewTyping(PreviewTypingMessage),
     RecordingStopMode(RecordingStopModeMessage),
     WriteMethod(WriteMethodMessage),
+    /// Where the read-aloud shortcut reads from.
+    ReadMethod(ReadMethodMessage),
     /// The Shortcuts page.
     Shortcuts(ShortcutsMessage),
     NotificationMethod(NotificationMethodMessage),
@@ -607,6 +610,18 @@ pub enum ShortcutsMessage {
     Changed(Result<ShortcutList, String>),
 }
 
+/// The Read aloud tab: where the shortcut reads from, and its test.
+#[derive(Debug, Clone)]
+pub enum ReadMethodMessage {
+    Changed(ReadMethod),
+    Loaded(ReadMethod),
+    Error(String),
+    /// Read what the setting names now and speak it, as the shortcut does.
+    Test,
+    /// The daemon could not read or speak it; carries its message.
+    TestFailed(String),
+}
+
 /// Write-method setting.
 #[derive(Debug, Clone)]
 pub enum WriteMethodMessage {
@@ -969,6 +984,7 @@ message_from! {
     PreviewTyping => PreviewTypingMessage,
     RecordingStopMode => RecordingStopModeMessage,
     WriteMethod => WriteMethodMessage,
+    ReadMethod => ReadMethodMessage,
     Shortcuts => ShortcutsMessage,
     NotificationMethod => NotificationMethodMessage,
     IdleUnload => IdleUnloadMessage,

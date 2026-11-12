@@ -55,6 +55,9 @@ pub enum Page {
     /// The cloned-voice library: record or import a reference clip, and manage
     /// the voices built from them.
     Voices,
+    /// Reading text on the screen aloud: where the shortcut reads from, and a
+    /// test that reads it now.
+    ReadAloud,
     /// Super Voice's keyboard shortcuts, and adding each one that is missing.
     Shortcuts,
 }
@@ -96,6 +99,10 @@ impl Section {
             Self::Models => &[Page::Models],
             Self::Library => &[Page::Library],
             Self::SpeechToText => &[Page::Recording, Page::InputSimulation, Page::Contexts],
+            // Reading aloud reads the Wayland session, so only Linux has it.
+            Self::TextToSpeech if cfg!(target_os = "linux") => {
+                &[Page::Speech, Page::Voices, Page::ReadAloud]
+            }
             Self::TextToSpeech => &[Page::Speech, Page::Voices],
             Self::Shortcuts => &[Page::Shortcuts],
             Self::Customization => &[Page::Customization],
@@ -111,7 +118,7 @@ impl Section {
             Page::Models => Self::Models,
             Page::Library => Self::Library,
             Page::Recording | Page::InputSimulation | Page::Contexts => Self::SpeechToText,
-            Page::Speech | Page::Voices => Self::TextToSpeech,
+            Page::Speech | Page::Voices | Page::ReadAloud => Self::TextToSpeech,
             Page::Shortcuts => Self::Shortcuts,
             Page::Customization => Self::Customization,
             Page::Connection => Self::Connection,
@@ -132,6 +139,7 @@ impl Page {
             Self::Contexts => crate::fl!("contexts"),
             Self::Speech => crate::fl!("speech-page"),
             Self::Voices => crate::fl!("voices"),
+            Self::ReadAloud => crate::fl!("read-aloud-page"),
             Self::Shortcuts => crate::fl!("shortcuts"),
             Self::Customization => crate::fl!("customization"),
             Self::Connection => crate::fl!("connection"),
@@ -198,6 +206,8 @@ pub enum ErrorScope {
     Speech,
     /// The Voices tab: recording, upload, rename, and delete failures.
     Voices,
+    /// The Read aloud tab: a failed read method save, or a failed read test.
+    ReadAloud,
     /// The Shortcuts page: a shortcut that could not be added.
     Shortcuts,
     /// The Contexts page: a failed list fetch, activate, or delete. A failed
@@ -274,6 +284,8 @@ mod section_tests {
                 seen.push(page);
             }
         }
-        assert_eq!(seen.len(), 11, "every page is in a section");
+        // Read aloud is Linux only.
+        let pages = if cfg!(target_os = "linux") { 12 } else { 11 };
+        assert_eq!(seen.len(), pages, "every page is in a section");
     }
 }

@@ -162,6 +162,9 @@ pub struct AppModel {
 
     /// The Shortcuts page: where each shortcut stands.
     pub shortcuts: crate::state::shortcuts::ShortcutsState,
+    /// Where the read-aloud shortcut reads from: the selected text or the
+    /// clipboard.
+    pub read_method: super_voice_shared::models::read_method::ReadMethod,
 
     // Write method
     pub write_method: super_voice_shared::models::write_method::WriteMethod,

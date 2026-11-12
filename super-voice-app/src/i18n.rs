@@ -62,6 +62,14 @@ pub fn recording_stop_mode_name(
     }
 }
 
+pub fn read_method_name(method: super_voice_shared::models::read_method::ReadMethod) -> String {
+    use super_voice_shared::models::read_method::ReadMethod;
+    match method {
+        ReadMethod::Selection => crate::fl!("read-method-selection"),
+        ReadMethod::Clipboard => crate::fl!("read-method-clipboard"),
+    }
+}
+
 pub fn notification_method_name(
     method: super_voice_shared::models::notification_method::NotificationMethod,
 ) -> String {

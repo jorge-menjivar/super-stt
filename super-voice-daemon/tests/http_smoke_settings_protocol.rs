@@ -75,6 +75,7 @@ const SETTINGS_READS: &[(&str, &str)] = &[
     ("/settings/language", "language"),
     ("/settings/notification_method", "notification_method"),
     ("/settings/preview_typing", "preview_typing_enabled"),
+    ("/settings/read_method", "read_method"),
     ("/settings/recording_stop_mode", "recording_stop_mode"),
     ("/settings/update_beta_optin", "update_beta_optin"),
     ("/settings/update_check_enabled", "update_check_enabled"),

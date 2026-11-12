@@ -35,7 +35,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | `/stt/pipeline/{stage}/model`, `/stt/pipeline/{stage}/model/{model}/device` (when it reloads), and the same under `/tts/pipeline` | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled). Each names the `feature` it is about; speech to text's also carry the `stage`, since every stage reports its own model lifecycle. Text to speech has one stage, so its events carry no `stage`. |
 | `/stt/pipeline/1`, `/tts/pipeline/1` (backend selection)                                                                            | Yes — `daemon_status_changed` (`active_backend_changed` variant)                                      |
 | `/settings/language`, `/settings/idle_unload`, `/settings/update_check_enabled`, `/settings/update_beta_optin`, `/stt/pipeline/{stage}` (post-processing stages), every write under `/stt/context` and `/stt/backend/{backend_id}/context`                                     | Yes — `daemon_status_changed` (`settings_changed` variant, carrying which setting changed)            |
-| `/settings/audio_theme`, `/settings/volume`, `/settings/write_method`, `/settings/notification_method`, `/settings/recording_stop_mode`, `/settings/preview_typing` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
+| `/settings/audio_theme`, `/settings/volume`, `/settings/write_method`, `/settings/read_method`, `/settings/notification_method`, `/settings/recording_stop_mode`, `/settings/preview_typing` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
 
 ## Endpoint reference
 
@@ -76,6 +76,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/settings/write_method`](../endpoints/v1/settings/write_method.md)          | POST, GET  | Keyboard simulation method (auto / built_in / xdg_desktop_portal / ydotool)                   |
 | [`/settings/write_method/test`](../endpoints/v1/settings/write_method/test.md) | POST      | Type a test string with the configured method; reports the backend it resolved to                     |
 | [`/settings/notification_method`](../endpoints/v1/settings/notification_method.md) | POST, GET  | How recording and synthesis failures are surfaced (auto / desktop / typed / off)                      |
+| [`/settings/read_method`](../endpoints/v1/settings/read_method.md)            | POST, GET  | Where `/tts/speak/read` reads from (selection / clipboard)                                            |
 | [`/backend/list`](../endpoints/v1/backends.md)                  | GET, DELETE | List installed backends; uninstall a backend                                                  |
 | [`/backend/{backend_id}/option/list`](../endpoints/v1/backends/options.md) | GET, POST, DELETE | List / read / set / reset a backend's non-sensitive options                          |
 | [`/stt/context/list`](../endpoints/v1/context.md)                       | GET        | The dictation contexts the user has, and which is active                                      |
