@@ -29,6 +29,10 @@ impl SuperSTTDaemon {
     ///
     /// Returns once the model is loaded or cannot be: a failure is logged and
     /// left for the caller's own `model_not_loaded` check to report.
+    ///
+    /// The load runs as its own task, so a request dropped while it waits (its
+    /// client gave up or went away) does not cancel it with the backend half
+    /// started. The model is then in memory for the next request.
     pub(crate) async fn ensure_model_loaded(&self) {
         // Before the slot is read: the idle check reads this under the slot's
         // write lock, so a request that got this far is never unloaded under.
@@ -38,7 +42,8 @@ impl SuperSTTDaemon {
         {
             return;
         }
-        self.load_selected_model().await;
+        let bg = self.clone();
+        let _ = tokio::spawn(async move { bg.load_selected_model().await }).await;
         self.idle.touch();
     }
 
@@ -60,9 +65,8 @@ impl SuperSTTDaemon {
     /// ends before that, so there is no moment between the two when a stop
     /// reaches neither.
     ///
-    /// The load itself is not cancelled. It runs on as its own task, so a
-    /// backend is never dropped half started, and the model is in memory for
-    /// the next request.
+    /// The load itself is not cancelled: see
+    /// [`ensure_model_loaded`](Self::ensure_model_loaded).
     pub(crate) async fn ensure_model_loaded_for_recording(&self) -> ModelWait {
         // One recording at a time is on its way to the microphone.
         if self.recording_is_pending() {
@@ -84,14 +88,13 @@ impl SuperSTTDaemon {
             }
             *pending = Some(PendingStart(Some(cancel)));
         }
-        let bg = self.clone();
-        let load = tokio::spawn(async move { bg.ensure_model_loaded().await });
+        let load = self.ensure_model_loaded();
         let outcome = tokio::select! {
             // A cancel that was answered wins over a load that finished at
             // the same moment.
             biased;
             Ok(()) = cancelled => ModelWait::Cancelled,
-            _ = load => ModelWait::Ready,
+            () = load => ModelWait::Ready,
         };
         if outcome == ModelWait::Cancelled {
             self.release_pending_recording();

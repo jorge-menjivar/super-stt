@@ -15,6 +15,10 @@ impl SuperTTSDaemon {
     ///
     /// Returns once the model is loaded or cannot be: a failure is logged and
     /// left for the caller's own `model_not_loaded` check to report.
+    ///
+    /// The load runs as its own task, so a request dropped while it waits (its
+    /// client gave up or went away) does not cancel it with the backend half
+    /// started. The model is then in memory for the next request.
     pub(crate) async fn ensure_model_loaded(&self) {
         // Before the slot is read: the idle check reads this under the slot's
         // write lock, so a request that got this far is never unloaded under.
@@ -24,7 +28,8 @@ impl SuperTTSDaemon {
         {
             return;
         }
-        self.load_selected_model().await;
+        let bg = self.clone();
+        let _ = tokio::spawn(async move { bg.load_selected_model().await }).await;
         self.idle.touch();
     }
 
