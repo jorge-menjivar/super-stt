@@ -53,26 +53,20 @@ impl SuperSTTDaemon {
     /// first).
     pub(super) async fn spawn_recorder(
         &self,
-        write_mode: bool,
-        stop_mode: super_voice_shared::models::recording_stop_mode::RecordingStopMode,
-        preview_typing: bool,
-        cue_theme: super_voice_shared::theme::AudioTheme,
+        claim: &super::Claim<'_>,
+        settings: super::TakeSettings,
     ) -> Result<(RecordingSession, tokio::sync::oneshot::Receiver<()>)> {
+        let super::TakeSettings {
+            stop_mode,
+            preview_typing,
+            cue_theme,
+        } = settings;
         let silence_detection_disabled = !stop_mode.silence_detection_enabled();
         info!("🎛️ Recording mode: {stop_mode}");
 
-        // Claim `busy` FIRST (setup_recording_session does the atomic
-        // check-and-set), and only then install the external stop channel.
-        // Installing `manual_stop_tx` before the claim let a losing racer
-        // overwrite it — and its cleanup then null it — leaving the *winning*
-        // recording with no stop channel (unstoppable until the 1-minute
-        // timeout) (audit 2 Tier 3 #6). A losing racer now returns here via `?`
-        // without ever touching `manual_stop_tx`.
-        let mut recorder = self.setup_recording_session(write_mode, cue_theme).await?;
-
-        // Create a broadcast channel so this recording can be stopped externally.
-        let (stop_tx, stop_rx) = tokio::sync::broadcast::channel(1);
-        *self.manual_stop_tx.write().await = Some(stop_tx);
+        // Take the microphone. The stop channel comes with it, so a stop
+        // reaches this recording while its recorder is still being built.
+        let (mut recorder, stop_rx) = self.setup_recording_session(claim, cue_theme).await?;
 
         // The preview cadence and whether previews are forced at all both
         // come from the loaded model. No model is unreachable here — the
@@ -191,9 +185,7 @@ impl SuperSTTDaemon {
             // uses) so it ends cleanly and returns the audio captured so far.
             if session.start_time.elapsed() > std::time::Duration::from_mins(1) {
                 warn!("Recording timeout reached, signalling recorder to stop");
-                if let Some(tx) = self.manual_stop_tx.read().await.as_ref() {
-                    let _ = tx.send(());
-                }
+                self.recording.stop();
                 break;
             }
 
@@ -475,6 +467,7 @@ impl SuperSTTDaemon {
     /// stop channel, and erase any preview text that was typed during Phase 2.
     pub(super) async fn collect_and_clear_preview(
         &self,
+        claim: &super::Claim<'_>,
         session: RecordingSession,
         typer: &mut Typer,
         write_mode: bool,
@@ -483,21 +476,21 @@ impl SuperSTTDaemon {
         let full_audio_data = match session.recorder_handle.await {
             Ok(Ok(data)) => data,
             Ok(Err(e)) => {
-                *self.manual_stop_tx.write().await = None;
+                claim.capture_ended();
                 Self::clear_preview_text(&session.actually_typed, typer, write_mode).await;
                 return Err(e);
             }
             Err(e) => {
-                *self.manual_stop_tx.write().await = None;
+                claim.capture_ended();
                 Self::clear_preview_text(&session.actually_typed, typer, write_mode).await;
                 return Err(anyhow::anyhow!("Recorder task failed: {e}"));
             }
         };
 
-        // Audio capture is done — clear stop channel.
-        // busy stays true until finalize_recording_session so the daemon
-        // rejects new recordings while transcription is in progress.
-        *self.manual_stop_tx.write().await = None;
+        // Audio capture is done: a stop now finds the take transcribing. The
+        // recording stays under way until finalize_recording_session, so the
+        // daemon rejects new recordings while it is transcribed.
+        claim.capture_ended();
 
         // Erase whatever preview was typed during Phase 2.
         Self::clear_preview_text(&session.actually_typed, typer, write_mode).await;

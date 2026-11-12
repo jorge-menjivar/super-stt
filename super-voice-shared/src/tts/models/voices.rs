@@ -83,7 +83,9 @@ pub struct VoiceListResponse {
     /// Every stored voice, newest first.
     #[serde(default)]
     pub voices: Vec<VoiceInfo>,
-    /// The loaded model's cloning capability; `None` when nothing is loaded.
+    /// The cloning capability of the model that speaks: the loaded one or,
+    /// when models are unloaded on idle, the selected one. `None` when there
+    /// is neither.
     #[serde(default)]
     pub model: Option<VoiceModelSupport>,
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::tts::daemon::types::SuperTTSDaemon;
+use crate::tts::daemon::types::{LoadTurn, SuperTTSDaemon};
 use crate::tts::tts_models::ModelDefinition;
 use crate::tts::tts_models::backends;
 use crate::tts::tts_models::synthesize::Synthesize;
@@ -131,10 +131,12 @@ impl SuperTTSDaemon {
         // model (if any) is from the requested backend, otherwise the daemon
         // is idle. Same-source re-selects don't disturb a loaded model.
         let prev_dir = self.active_backend.read().await.clone();
-        if prev_dir.as_deref() != Some(dir_name.as_str()) {
+        let _unloaded = if prev_dir.as_deref() == Some(dir_name.as_str()) {
+            None
+        } else {
             self.stop_speech_for("change the backend").await;
-            self.unload_current_model().await;
-        }
+            self.unload_current_model().await
+        };
 
         *self.active_backend.write().await = Some(dir_name.clone());
         self.config
@@ -172,7 +174,7 @@ impl SuperTTSDaemon {
     /// Clear the active backend: unload any model and return to idle.
     pub async fn handle_clear_active_backend(&self) -> DaemonResponse {
         self.stop_speech_for("deselect the backend").await;
-        self.unload_current_model().await;
+        let _unloaded = self.unload_current_model().await;
         *self.active_backend.write().await = None;
         self.config.write().await.clear_synthesis_backend();
         if let Err(e) = self.persist_config().await {
@@ -247,7 +249,10 @@ impl SuperTTSDaemon {
         }
 
         self.broadcast_model_loading_status(&model);
-        self.unload_current_model().await;
+        // Takes the current model out once it is this load's turn.
+        let Some(turn) = self.model.begin_load().await else {
+            return super::superseded("switch", &model);
+        };
         // The model's own framework if it has one, else the best its
         // installed build runs.
         let chosen = self
@@ -258,12 +263,18 @@ impl SuperTTSDaemon {
             .map(ToString::to_string);
 
         match self
-            .instantiate_backend(&model, &backend_source, chosen.as_deref())
+            .instantiate_backend(&turn, &model, &backend_source, chosen.as_deref())
             .await
         {
             Ok((instance, definition)) => {
-                self.finalize_model_switch_success(model, backend_source, definition, instance)
-                    .await
+                self.finalize_model_switch_success(
+                    turn,
+                    model,
+                    backend_source,
+                    definition,
+                    instance,
+                )
+                .await
             }
             Err(e) => {
                 error!("Model switch failed: {e}");
@@ -274,12 +285,13 @@ impl SuperTTSDaemon {
 
     pub(super) async fn finalize_model_switch_success(
         &self,
+        turn: LoadTurn<'_>,
         model: String,
         source: String,
         definition: ModelDefinition,
         instance: Box<dyn Synthesize>,
     ) -> DaemonResponse {
-        let actual_device = self.finalize_loaded_model(definition, instance).await;
+        let actual_device = self.finalize_loaded_model(turn, definition, instance).await;
         {
             let mut config_guard = self.config.write().await;
             config_guard.update_synthesis_model(model.clone(), source.clone());

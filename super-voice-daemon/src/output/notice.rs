@@ -20,6 +20,10 @@
 /// No model is loaded, so the cycle cannot produce text. Caught before capture.
 pub(crate) const NO_MODEL_LOADED: &str = "[Super Voice: no model loaded]";
 
+/// The selected model failed to load when a recording needed it. Caught
+/// before capture.
+pub(crate) const COULD_NOT_LOAD_MODEL: &str = "[Super Voice: could not load the model]";
+
 /// The recorder could not be spawned; capture never began.
 pub(crate) const COULD_NOT_START_RECORDING: &str = "[Super Voice: could not start recording]";
 
@@ -37,6 +41,7 @@ pub(crate) const KEYBOARD_UNAVAILABLE: &str = "[Super Voice: cannot type]";
 #[cfg(test)]
 pub(crate) const ALL: &[&str] = &[
     NO_MODEL_LOADED,
+    COULD_NOT_LOAD_MODEL,
     COULD_NOT_START_RECORDING,
     RECORDING_FAILED,
     TRANSCRIPTION_FAILED,
@@ -77,6 +82,21 @@ impl Failure {
             typed: NO_MODEL_LOADED,
             summary: "No model loaded",
             body: "Load a model and try again.".to_string(),
+        }
+    }
+
+    /// The selected model was to be loaded for this recording, and its load
+    /// failed. Not [`Self::no_model_loaded`]: a model is selected, and loading
+    /// another would not help.
+    pub(crate) fn could_not_load_model(detail: &str) -> Self {
+        Self {
+            typed: COULD_NOT_LOAD_MODEL,
+            summary: "Could not load the model",
+            body: body(
+                Origin::Daemon,
+                detail,
+                "The selected model could not be loaded.",
+            ),
         }
     }
 

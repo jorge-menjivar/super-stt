@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::tts::daemon::types::{SuperTTSDaemon, normalize_device};
+use crate::tts::daemon::types::{LoadTurn, LoadedModel, SuperTTSDaemon, normalize_device};
 use crate::tts::tts_models::synthesize::Synthesize;
 use anyhow::Result;
 use log::{error, info, warn};
@@ -19,6 +19,7 @@ impl SuperTTSDaemon {
     /// Returns an error if no backend serves the model or instantiation fails.
     pub async fn load_model_with_target_device(
         &self,
+        turn: &LoadTurn<'_>,
         name: &str,
         source: &str,
         target_device: &str,
@@ -26,7 +27,7 @@ impl SuperTTSDaemon {
         info!("Loading model {name} with target device: {target_device}");
         self.broadcast_device_model_loading_status(name, target_device);
         let (instance, _def) = self
-            .instantiate_backend(name, source, Some(target_device))
+            .instantiate_backend(turn, name, source, Some(target_device))
             .await?;
         let actual = normalize_device(&instance.device());
         *self.actual_device.write().await = actual.clone();
@@ -51,7 +52,10 @@ impl SuperTTSDaemon {
         info!("Reloading active model {name} to apply configuration changes");
         self.stop_speech_for("reload the model").await;
         self.broadcast_model_loading_status(&name);
-        self.unload_current_model().await;
+        // Takes the model out once it is this load's turn.
+        let Some(turn) = self.model.begin_load().await else {
+            return super::superseded("reload", &name);
+        };
         // Reload where the model belongs: an in-place reload to pick up a
         // changed secret must not also move the model off the framework it
         // was put on.
@@ -62,11 +66,11 @@ impl SuperTTSDaemon {
             .model_device(&source, &name)
             .map(ToString::to_string);
         match self
-            .instantiate_backend(&name, &source, chosen.as_deref())
+            .instantiate_backend(&turn, &name, &source, chosen.as_deref())
             .await
         {
             Ok((instance, definition)) => {
-                self.finalize_model_switch_success(name, source, definition, instance)
+                self.finalize_model_switch_success(turn, name, source, definition, instance)
                     .await
             }
             Err(e) => {
@@ -117,47 +121,38 @@ impl SuperTTSDaemon {
             });
     }
 
-    // `pub(in crate::tts::daemon)` so the device-switch paths (a sibling module)
-    // route their unload through this graceful path instead of dropping the
-    // model under the write lock (Tier 3 #2).
-    pub(in crate::tts::daemon) async fn unload_current_model(&self) {
-        // Take the loaded model OUT of the lock first, then release the lock
-        // before calling `shutdown()` — `shutdown()` may take several seconds
-        // (e.g. SIGTERM to a CUDA-loaded subprocess that has to free GPU
-        // memory) and holding the write lock for that long would stall every
-        // other reader. Drop runs after `shutdown()` returns; with the unit
-        // already stopped, Drop is effectively a no-op (its second-line stop
-        // call is the safety net for crash paths).
-        let taken = self.model.write().await.take();
-        if let Some(mut loaded) = taken {
-            if let Err(e) = loaded.instance.shutdown().await {
-                warn!("backend shutdown failed: {e}");
-            }
-            // Explicit drop here documents the ordering — the loaded value
-            // goes away after `shutdown()` ran.
-            drop(loaded);
+    /// Unload the synthesis model, after any load in flight: see
+    /// [`ModelSlot::unload`](super_engine_daemon::model_slot::ModelSlot::unload).
+    /// The backend is stopped outside the slot's lock, since it may take
+    /// seconds to free GPU memory.
+    ///
+    /// Hold what this returns while recording the change (config, events): no
+    /// load starts until it is dropped. `None` when a load asked for since
+    /// replaces the model anyway.
+    #[must_use = "dropping it lets a load start before the unload is recorded"]
+    pub(in crate::tts::daemon) async fn unload_current_model(
+        &self,
+    ) -> Option<super_engine_daemon::model_slot::Unloaded<'_, LoadedModel>> {
+        let unloaded = self.model.unload().await?;
+        if unloaded.model.is_some() {
             info!("Current model unloaded");
         }
+        Some(unloaded)
     }
 
-    /// Install a freshly-loaded model as the active one: record its normalized
-    /// device label and write the `LoadedModel` into the slot, returning that
-    /// label. The caller must have already emptied the slot gracefully via
-    /// [`unload_current_model`], so this assignment drops nothing under the
-    /// write lock. Shared by the model-switch and device-switch finalize paths
-    /// (Tier 3 #2).
+    /// Install a freshly loaded model on its `turn`: record its normalized
+    /// device label and put the `LoadedModel` in the slot, returning that
+    /// label. Its idle time starts now. Shared by the model-switch and
+    /// device-switch finalize paths.
     pub(in crate::tts::daemon) async fn finalize_loaded_model(
         &self,
+        turn: LoadTurn<'_>,
         definition: crate::tts::tts_models::ModelDefinition,
         instance: Box<dyn Synthesize>,
     ) -> String {
         let actual_device = normalize_device(&instance.device());
         *self.actual_device.write().await = actual_device.clone();
-        // A load is a use: the idle time of a model starts when it arrives.
-        self.idle.touch();
-        *self.model.write().await = Some(crate::tts::daemon::types::LoadedModel::new(
-            definition, instance,
-        ));
+        turn.install(LoadedModel::new(definition, instance)).await;
         actual_device
     }
 
@@ -167,45 +162,57 @@ impl SuperTTSDaemon {
     /// runtime is still alive — `std::process::exit` later in
     /// `daemon_main` would otherwise skip every destructor, leaving the
     /// `systemd-run --user` subprocess unit orphaned.
+    ///
+    /// Waits for an idle unload still stopping its backend, which has the
+    /// model out of its slot: see
+    /// [`ModelSlot::shutdown`](super_engine_daemon::model_slot::ModelSlot::shutdown).
     pub async fn shutdown_unload(&self) {
-        if self.model.read().await.is_some() {
-            info!("Shutdown: unloading current model so subprocess units exit cleanly");
-            self.unload_current_model().await;
+        if self.model.shutdown().await.is_some() {
+            info!("Shutdown: unloaded the current model so its subprocess unit exits cleanly");
         }
     }
 
     /// Drop the currently loaded model. The active backend stays selected
     /// (the user can immediately pick another of its models); to fully idle
-    /// out, clear the active backend instead. No-op when no model is loaded.
-    /// Stops whatever is being spoken first — see
+    /// out, clear the active backend instead. No-op when no model is loaded
+    /// and none is selected. Stops whatever is being spoken first — see
     /// [`stop_speech_for`](Self::stop_speech_for).
+    ///
+    /// A load in flight finishes first, and its model is the one unloaded;
+    /// loads still waiting give up. The unload runs as its own task, so a
+    /// client that stops waiting for it does not leave it half done.
     pub async fn handle_unload_active_model(&self) -> DaemonResponse {
-        // An on-demand load in flight finishes first: unloading around it
-        // would answer success and leave the model it then installs. Held to
-        // the end, so no request starts another load meanwhile.
-        let _loading = self.idle.loading.lock().await;
-        if self.model.read().await.is_none() {
-            // Unloaded for being idle, the model is still selected and the
-            // next request would load it: clear it below, which is what this
-            // call is for.
-            let waiting = {
-                let config = self.config.read().await;
-                config.idle_unload.after().is_some() && !config.synthesis.preferred_model.is_empty()
-            };
-            if !waiting {
-                return DaemonResponse::success().with_message("No model to unload".to_string());
-            }
-        }
-        self.stop_speech_for("unload the model").await;
-        let dropped = self
-            .model
-            .read()
+        let bg = self.clone();
+        tokio::spawn(async move { bg.unload_active_model().await })
             .await
-            .as_ref()
-            .map(|l| l.definition.name.clone());
-        self.unload_current_model().await;
+            .unwrap_or_else(|e| DaemonResponse::error(&format!("Unloading the model failed: {e}")))
+    }
+
+    async fn unload_active_model(&self) -> DaemonResponse {
+        self.stop_speech_for("unload the model").await;
+        let Some(unloaded) = self.unload_current_model().await else {
+            return DaemonResponse::success()
+                .with_message("A newer model load replaces the model".to_string());
+        };
+        let dropped = unloaded.model.as_ref().map(|l| l.definition.name.clone());
+        // A model can be selected without being in memory: unloaded for being
+        // idle, or one whose load failed. The next request or start would load
+        // it, so its selection is cleared too.
+        if dropped.is_none()
+            && self
+                .config
+                .read()
+                .await
+                .synthesis
+                .preferred_model
+                .is_empty()
+        {
+            return DaemonResponse::success().with_message("No model to unload".to_string());
+        }
         // Drop the preferred model from config *and persist* so a daemon
         // restart stays idle instead of reloading the just-unloaded model.
+        // Done while the slot is held, so no load on demand reads the
+        // selection first.
         self.config.write().await.clear_synthesis_model();
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after unloading model: {e}");
@@ -217,6 +224,7 @@ impl SuperTTSDaemon {
                 actual_device: None,
                 preferred_device: None,
             });
+        drop(unloaded);
         let msg = dropped.map_or_else(|| "Model unloaded".to_string(), |n| format!("Unloaded {n}"));
         info!("{msg}");
         DaemonResponse::success().with_message(msg)

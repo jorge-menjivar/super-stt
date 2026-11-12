@@ -50,6 +50,20 @@ impl Failure {
         }
     }
 
+    /// The selected model was to be loaded for this utterance, and its load
+    /// failed. Not [`Self::no_model_loaded`]: a model is selected, and loading
+    /// another would not help.
+    pub(crate) fn could_not_load_model(detail: &str) -> Self {
+        Self {
+            summary: "Could not load the model",
+            body: body(
+                Origin::Daemon,
+                detail,
+                "The selected model could not be loaded.",
+            ),
+        }
+    }
+
     /// The output device could not be opened, so there is nowhere to play.
     pub(crate) fn could_not_open_output(detail: &str) -> Self {
         Self {

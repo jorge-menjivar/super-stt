@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
 use crate::backend_headers::{self, Feature};
-use crate::daemon::types::SuperSTTDaemon;
+use crate::daemon::types::{LoadTurn, SuperSTTDaemon};
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use crate::stt_models::transcribe::Transcribe;
@@ -16,42 +16,27 @@ impl SuperSTTDaemon {
     /// by each caller: the same answer `GET …/device` gives, so a load never
     /// lands somewhere the card did not say.
     ///
-    /// Being the one place every load passes through, it is also where loads
-    /// are serialized, one at a time per `stage`. A load takes minutes and
-    /// every caller empties the stage's slot before starting, so without this
-    /// two of them overlap: the startup load and a user's pick would both spawn
-    /// a backend and put two models on one GPU. The gate is taken here rather
-    /// than in each caller because no caller should be exempt, and one that
-    /// forgot would look exactly like that bug.
+    /// It takes the load's `turn` at the stage's slot
+    /// ([`ModelSlot::begin_load`] or
+    /// [`ModelSlot::begin_load_if_empty`]), so no load runs outside one: a
+    /// load takes minutes, and two at once put two models on one GPU. The
+    /// turn holds the slot until the caller installs what this returns with
+    /// it.
     ///
-    /// A request superseded while it waits gives up instead of loading a model
-    /// nobody is asking for any more. That is an error rather than a silent
-    /// return, so the caller's log says what happened.
+    /// [`ModelSlot::begin_load`]: super_engine_daemon::model_slot::ModelSlot::begin_load
+    /// [`ModelSlot::begin_load_if_empty`]: super_engine_daemon::model_slot::ModelSlot::begin_load_if_empty
     ///
     /// # Errors
-    /// Returns an error if a newer load into `stage` superseded this one while
-    /// it waited, no installed backend serves the model, the backend kind is
-    /// unsupported in this build, or instantiation fails.
+    /// Returns an error if no installed backend serves the model, the backend
+    /// kind is unsupported in this build, or instantiation fails.
     pub async fn instantiate_backend(
         &self,
+        _turn: &LoadTurn<'_>,
         name: &str,
         source: &str,
         chosen: Option<&str>,
         stage: crate::daemon::device_management::PipelineStage,
     ) -> Result<(Box<dyn Transcribe>, ModelDefinition)> {
-        // Claimed before queueing, so waiting here is what reveals a newer
-        // request rather than hiding it.
-        let gate = self.loading.get(stage);
-        let ticket = gate.ticket();
-        let Some(_gate) = gate.enter(ticket).await else {
-            bail!("loading {name} was superseded by a newer model load");
-        };
-        if stage == crate::daemon::device_management::PipelineStage::Transcription {
-            // An idle unload still shutting its backend down holds the memory
-            // this load needs.
-            drop(self.idle.unloading.lock().await);
-        }
-
         let (backend, def) = {
             let backends = self.backends.read().await;
             let (b, d) = backends::find_model(&backends, name, source)

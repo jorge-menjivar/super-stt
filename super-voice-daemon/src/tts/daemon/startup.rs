@@ -5,7 +5,7 @@
 //! just the daemon struct, its type aliases, and runtime accessors.
 
 use crate::config::DaemonConfig;
-use crate::tts::daemon::types::{LoadedModel, Shared, SuperTTSDaemon, normalize_device};
+use crate::tts::daemon::types::{LoadTurn, LoadedModel, Shared, SuperTTSDaemon, normalize_device};
 use crate::tts::download_progress::DownloadStateManager;
 use crate::tts::tts_models::backends;
 use anyhow::Result;
@@ -27,7 +27,7 @@ impl SuperTTSDaemon {
 
         SuperTTSDaemon {
             // Empty until a model loads.
-            model: Arc::new(tokio::sync::RwLock::new(None)),
+            model: Arc::default(),
             shutdown_tx: shared.shutdown_tx,
             events: Arc::clone(&shared.events),
             download_manager: Arc::new(DownloadStateManager::new()),
@@ -47,8 +47,6 @@ impl SuperTTSDaemon {
                     .with_voices(Arc::clone(&voices)),
             ),
             voices,
-            loading: Arc::new(super_engine_daemon::load_gate::LoadGate::default()),
-            idle: Arc::default(),
             secrets: shared.secrets,
         }
     }
@@ -73,8 +71,13 @@ impl SuperTTSDaemon {
         } else if let Some((name, source)) = self.pick_startup_model().await {
             let bg = self.clone();
             tokio::spawn(async move {
+                // A model picked before this load's turn replaces it.
+                let Some(turn) = bg.model.begin_load().await else {
+                    info!("Startup model {name} was replaced by a newer load");
+                    return;
+                };
                 if let Err(e) =
-                    Self::load_initial_model_and_broadcast(&bg, name.clone(), source).await
+                    Self::load_initial_model_and_broadcast(&bg, turn, name.clone(), source).await
                 {
                     warn!("Failed to load startup model {name}: {e}; daemon is idle");
                     bg.download_manager.clear_download(());
@@ -121,8 +124,11 @@ impl SuperTTSDaemon {
         true
     }
 
+    /// Load `name` from `source` into the synthesis slot on `turn`, and
+    /// announce it. Shared by the start-up load and the load on demand.
     pub(in crate::tts::daemon) async fn load_initial_model_and_broadcast(
         daemon: &SuperTTSDaemon,
+        turn: LoadTurn<'_>,
         name: String,
         source: String,
     ) -> Result<()> {
@@ -137,7 +143,7 @@ impl SuperTTSDaemon {
             .model_device(&source, &name)
             .map(ToString::to_string);
         let (instance, definition) = daemon
-            .instantiate_backend(&name, &source, chosen.as_deref())
+            .instantiate_backend(&turn, &name, &source, chosen.as_deref())
             .await?;
 
         info!("model {name} loaded successfully");
@@ -153,8 +159,7 @@ impl SuperTTSDaemon {
         // current_device tracking) only update when `actual_device` is present.
         let actual_device = normalize_device(&instance.device());
         *daemon.actual_device.write().await = actual_device.clone();
-        daemon.idle.touch();
-        *daemon.model.write().await = Some(LoadedModel::new(definition, instance));
+        turn.install(LoadedModel::new(definition, instance)).await;
 
         // Announce the active model the same way a user-initiated switch does
         // (`model_switched` + `ready`). The startup load formerly emitted only

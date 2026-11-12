@@ -135,6 +135,28 @@ pub enum SpeechEvent {
     Mark(super_voice_shared::tts::audio::frames::Mark),
 }
 
+/// Refuse text that cannot be spoken: empty, longer than [`MAX_TEXT_CHARS`],
+/// or entirely markup. Needs no model, so a request can be refused before one
+/// is loaded for it.
+///
+/// # Errors
+/// [`SpeakError::EmptyText`] or [`SpeakError::TextTooLong`].
+pub(crate) fn check_text(text: &str) -> Result<(), SpeakError> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err(SpeakError::EmptyText);
+    }
+    if trimmed.chars().count() > MAX_TEXT_CHARS {
+        return Err(SpeakError::TextTooLong);
+    }
+    if crate::tts::text::normalize::normalize(trimmed).is_empty() {
+        // The input was entirely markup. Nothing to say is not a failure, but
+        // it is not an utterance either.
+        return Err(SpeakError::EmptyText);
+    }
+    Ok(())
+}
+
 /// Why a speak request could not be served.
 #[derive(Debug, thiserror::Error)]
 pub enum SpeakError {
@@ -762,22 +784,11 @@ impl SpeechEngine {
         voice: Option<&str>,
         language: Option<&str>,
     ) -> Result<Utterance, SpeakError> {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return Err(SpeakError::EmptyText);
-        }
-        if trimmed.chars().count() > MAX_TEXT_CHARS {
-            return Err(SpeakError::TextTooLong);
-        }
+        check_text(text)?;
         // Checked before claiming the utterance slot, so a request that cannot
         // be served never interrupts what is already playing.
         if model.read().await.is_none() {
             return Err(SpeakError::NotLoaded);
-        }
-        if crate::tts::text::normalize::normalize(trimmed).is_empty() {
-            // The input was entirely markup. Nothing to say is not a failure,
-            // but it is not an utterance either.
-            return Err(SpeakError::EmptyText);
         }
 
         let options = SpeakOptions { voice, language };
@@ -1475,7 +1486,28 @@ impl crate::tts::daemon::types::SuperTTSDaemon {
         // The request is `text`; how it is spoken comes from the user's
         // settings, the same way the streaming path gets it — see
         // [`stored_defaults`](Self::stored_defaults), which both go through.
-        self.ensure_model_loaded().await;
+        //
+        // Text that cannot be spoken is refused first: with idle unload on, it
+        // would otherwise load the model only to be refused after.
+        if let Err(e) = check_text(&text) {
+            return DaemonResponse::error_with_code(ErrorCode::InvalidValue, &e.to_string());
+        }
+        // A model is selected and failed to load: the notice says that, not
+        // "no model loaded", which would send the user to load one. The answer
+        // keeps the code a missing model gets.
+        if let Err(detail) = self.ensure_model_loaded().await {
+            let method = crate::tts::output::notification::method_for_speech(
+                self.config.read().await.notification_method,
+            );
+            let mut notifier = self.notifier.lock().await;
+            crate::tts::output::notification::deliver(
+                method,
+                &mut notifier,
+                &Failure::could_not_load_model(&detail),
+            )
+            .await;
+            return DaemonResponse::error_with_code(ErrorCode::ModelNotLoaded, "model_not_loaded");
+        }
         let (voice, language) = self.stored_defaults().await;
 
         // `speak` rather than the session API on purpose: it refuses empty,
@@ -1539,7 +1571,8 @@ impl crate::tts::daemon::types::SuperTTSDaemon {
     /// # Errors
     /// See [`SpeakError`].
     pub(crate) async fn begin_speech(&self) -> Result<SpeakSession, SpeakError> {
-        self.ensure_model_loaded().await;
+        // A load that fails is logged; the session reports the missing model.
+        let _ = self.ensure_model_loaded().await;
         let (voice, language) = self.stored_defaults().await;
         let options = SpeakOptions {
             voice: voice.as_deref(),

@@ -187,10 +187,14 @@ mod tests {
             true,
             std::time::Duration::from_secs(1),
         );
-        *daemon.post_processor.write().await = Some(LoadedModel {
-            definition,
-            instance: Box::new(FakeProcessor { info, behavior }),
-        });
+        crate::daemon::types::put_model(
+            &daemon.post_processor,
+            LoadedModel {
+                definition,
+                instance: Box::new(FakeProcessor { info, behavior }),
+            },
+        )
+        .await;
         daemon
     }
 
