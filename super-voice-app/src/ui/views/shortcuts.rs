@@ -30,6 +30,11 @@ fn name(id: ShortcutId) -> (String, String) {
     }
 }
 
+/// Whether `desktop`, an `XDG_CURRENT_DESKTOP`, names GNOME.
+fn is_gnome(desktop: &str) -> bool {
+    desktop.split(':').any(|d| d.eq_ignore_ascii_case("GNOME"))
+}
+
 /// One shortcut's row: what it does and where it stands, with its keys once
 /// it is set up and a Remove button where the daemon can remove it, or the
 /// button that adds it.
@@ -61,10 +66,16 @@ fn row_for(shortcut: &Shortcut, list: &ShortcutList) -> Element<'static, Message
                 )
                 .into()
         }
+        // GNOME keeps an app's shortcuts on the app's page in its Settings,
+        // not with its keyboard settings.
         ShortcutState::Installed => item
             .description(format!(
                 "{does} {}",
-                crate::fl!("shortcut-change-in-desktop")
+                if is_gnome(&list.desktop) {
+                    crate::fl!("shortcut-change-in-gnome")
+                } else {
+                    crate::fl!("shortcut-change-in-desktop")
+                }
             ))
             .control(
                 row![
@@ -113,4 +124,18 @@ pub fn page<'a>(state: &ShortcutsState, action_error: Option<&'a str>) -> Elemen
         blocks.push(section.into());
     }
     page_layout(crate::fl!("shortcuts"), settings::view_column(blocks))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_gnome;
+
+    #[test]
+    fn gnome_is_found_in_a_desktop_list() {
+        assert!(is_gnome("GNOME"));
+        assert!(is_gnome("ubuntu:GNOME"));
+        assert!(!is_gnome("KDE"));
+        assert!(!is_gnome("GNOME-Flashback-less"));
+        assert!(!is_gnome(""));
+    }
 }

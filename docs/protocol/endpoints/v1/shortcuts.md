@@ -22,6 +22,11 @@ How the daemon puts a shortcut on the desktop is the `method`:
 desktop, so a client offers to remove one. It is true on COSMIC, and through the
 portal on KDE Plasma. Through the portal elsewhere it is false: see below.
 
+`desktop` is the desktop the daemon runs in, as `XDG_CURRENT_DESKTOP` names it,
+such as `GNOME`, `KDE` or `ubuntu:GNOME`, and empty when that is not set. A client
+can say by it where the user changes a shortcut the daemon cannot remove: GNOME
+keeps an app's shortcuts on the app's page in its Settings, under Apps.
+
 Each shortcut's `state`:
 
 | `state`     | Meaning                                                                                   |
@@ -99,6 +104,7 @@ Authorization: Bearer …64hex…
   "status": "success",
   "method": "cosmic",
   "removable": true,
+  "desktop": "COSMIC",
   "shortcuts": [
     { "id": "dictate",    "state": "installed", "keys": "Super+Space",       "command": "voice record --write" },
     { "id": "read_aloud", "state": "missing",   "keys": "Super+Shift+Space", "command": "voice speak --read" }

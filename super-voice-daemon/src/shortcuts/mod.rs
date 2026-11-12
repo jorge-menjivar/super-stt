@@ -118,8 +118,7 @@ impl Shortcuts {
             String::new()
         };
         let bound = self.bound().await;
-        let removable = removable(method, desktop().as_deref());
-        list_from(method, removable, &cosmic_file, &bound)
+        list_from(method, &desktop_name(), &cosmic_file, &bound)
     }
 
     /// The shortcuts bound through the portal now: none without a session.
@@ -503,10 +502,10 @@ fn on_gnome() -> bool {
 /// `method`: COSMIC's file the daemon writes itself, and KDE Plasma's
 /// shortcut service forgets one when asked. Through the portal elsewhere the
 /// desktop keeps it until the user removes it in its own settings.
-fn removable(method: ShortcutMethod, desktop: Option<&str>) -> bool {
+fn removable(method: ShortcutMethod, desktop: &str) -> bool {
     match method {
         ShortcutMethod::Cosmic => true,
-        ShortcutMethod::Portal => is_kde(desktop),
+        ShortcutMethod::Portal => is_kde(Some(desktop)),
         ShortcutMethod::Manual => false,
     }
 }
@@ -567,13 +566,13 @@ pub fn run(id: ShortcutId) {
     });
 }
 
-/// Every shortcut and where it stands, given the method, whether `DELETE`
-/// takes one off the desktop, COSMIC's shortcuts file's text for COSMIC, and
+/// Every shortcut and where it stands, given the method, the desktop
+/// (`XDG_CURRENT_DESKTOP`), COSMIC's shortcuts file's text for COSMIC, and
 /// what the portal has bound for the portal.
 #[must_use]
 pub fn list_from(
     method: ShortcutMethod,
-    removable: bool,
+    desktop: &str,
     cosmic_file: &str,
     bound: &[Bound],
 ) -> ShortcutList {
@@ -604,7 +603,8 @@ pub fn list_from(
     ShortcutList {
         status: "success".to_string(),
         method,
-        removable,
+        removable: removable(method, desktop),
+        desktop: desktop.to_string(),
         shortcuts,
     }
 }
@@ -686,11 +686,11 @@ mod tests {
     /// its shortcut service. Through the portal elsewhere it cannot.
     #[test]
     fn only_cosmic_and_kde_shortcuts_are_removable() {
-        assert!(removable(ShortcutMethod::Cosmic, Some("COSMIC")));
-        assert!(removable(ShortcutMethod::Portal, Some("KDE")));
-        assert!(!removable(ShortcutMethod::Portal, Some("GNOME")));
-        assert!(!removable(ShortcutMethod::Portal, Some("Hyprland")));
-        assert!(!removable(ShortcutMethod::Manual, Some("KDE")));
+        assert!(removable(ShortcutMethod::Cosmic, "COSMIC"));
+        assert!(removable(ShortcutMethod::Portal, "KDE"));
+        assert!(!removable(ShortcutMethod::Portal, "GNOME"));
+        assert!(!removable(ShortcutMethod::Portal, "Hyprland"));
+        assert!(!removable(ShortcutMethod::Manual, "KDE"));
     }
 
     /// A saved shortcut the desktop no longer lists was removed in its
@@ -722,9 +722,10 @@ mod tests {
     #[test]
     fn the_list_says_where_each_stands() {
         let file = r#"{ (modifiers: [Super], key: "space", description: Some("Super Voice")): Spawn("/usr/local/bin/voice record --write"), (modifiers: [Super, Shift], key: "space"): Spawn("x"), }"#;
-        let list = list_from(ShortcutMethod::Cosmic, true, file, &[]);
+        let list = list_from(ShortcutMethod::Cosmic, "COSMIC", file, &[]);
         assert_eq!(list.method, ShortcutMethod::Cosmic);
         assert!(list.removable);
+        assert_eq!(list.desktop, "COSMIC");
         let [dictate, read] = list.shortcuts.as_slice() else {
             panic!("two shortcuts: {list:?}");
         };
@@ -742,7 +743,7 @@ mod tests {
         );
         assert_eq!(read.command, "voice speak --read");
 
-        let missing = list_from(ShortcutMethod::Cosmic, true, "", &[]);
+        let missing = list_from(ShortcutMethod::Cosmic, "COSMIC", "", &[]);
         assert!(
             missing
                 .shortcuts
@@ -750,7 +751,7 @@ mod tests {
                 .all(|s| s.state == ShortcutState::Missing)
         );
 
-        let manual = list_from(ShortcutMethod::Manual, false, file, &[]);
+        let manual = list_from(ShortcutMethod::Manual, "Sway", file, &[]);
         assert!(
             manual
                 .shortcuts
@@ -767,7 +768,9 @@ mod tests {
             id: ShortcutId::ReadAloud,
             keys: "Meta+Shift+Space".to_string(),
         }];
-        let list = list_from(ShortcutMethod::Portal, false, "", &bound);
+        let list = list_from(ShortcutMethod::Portal, "GNOME", "", &bound);
+        assert!(!list.removable);
+        assert_eq!(list.desktop, "GNOME");
         let [dictate, read] = list.shortcuts.as_slice() else {
             panic!("two shortcuts: {list:?}");
         };

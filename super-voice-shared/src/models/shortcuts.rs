@@ -98,6 +98,12 @@ pub struct ShortcutList {
     /// binding it, and the desktop keeps it until the user removes it in its
     /// own settings.
     pub removable: bool,
+    /// The desktop the daemon runs in, as `XDG_CURRENT_DESKTOP` names it:
+    /// `GNOME`, `KDE`, or a `:`-separated list such as `ubuntu:GNOME`. Empty
+    /// when it is not set. A client says by it where the user changes a
+    /// shortcut the daemon cannot remove.
+    #[cfg_attr(feature = "openapi", schema(example = "GNOME"))]
+    pub desktop: String,
     /// Every shortcut, in [`ShortcutId::ALL`]'s order.
     pub shortcuts: Vec<Shortcut>,
 }

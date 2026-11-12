@@ -4,6 +4,7 @@ app-title = Super Voice
 keyboard-shortcuts = Raccourcis clavier
 shortcut-change-failed = Impossible de modifier le raccourci : { $error }
 shortcut-change-in-desktop = Modifiez-le ou retirez-le dans les paramètres clavier de votre bureau.
+shortcut-change-in-gnome = Modifiez-le ou retirez-le dans Paramètres, sous Applications, puis Super Voice.
 shortcut-dictate = Dicter
 shortcut-dictate-description = Tape ce que vous dites dans l’application active.
 shortcut-elsewhere = Ajoutez-le dans les paramètres clavier de votre bureau : { $command }

@@ -702,6 +702,7 @@ async fn off_kde_removing_is_left_to_the_desktop() {
     let (status, list) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
     assert_eq!(status, StatusCode::OK, "{list}");
     assert_eq!(list["removable"], false, "{list}");
+    assert_eq!(list["desktop"], "GNOME", "{list}");
 
     let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/dictate").await;
     assert_eq!(status, StatusCode::OK, "{list}");

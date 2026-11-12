@@ -4,6 +4,7 @@ app-title = Super Voice
 keyboard-shortcuts = Keyboard shortcuts
 shortcut-change-failed = Couldn't change the shortcut: { $error }
 shortcut-change-in-desktop = Change or remove it in your desktop's keyboard settings.
+shortcut-change-in-gnome = Change or remove it in Settings, under Apps, then Super Voice.
 shortcut-dictate = Dictate
 shortcut-dictate-description = Types what you say into the focused app.
 shortcut-elsewhere = Add it in your desktop's keyboard settings: { $command }
