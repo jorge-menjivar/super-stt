@@ -3539,6 +3539,253 @@
         ]
       }
     },
+    "/v1/shortcuts": {
+      "get": {
+        "tags": [
+          "shortcuts"
+        ],
+        "summary": "List the keyboard shortcuts (scope: settings)",
+        "description": "Super Voice's keyboard shortcuts, `dictate` and `read_aloud`, and where each stands on this desktop: set up and on which keys, missing, blocked by another shortcut on its keys, or for the user to bind. `method` says how the daemon puts a shortcut on this desktop: `cosmic` writes COSMIC's custom shortcuts, `portal` binds it through the desktop's `GlobalShortcuts` portal, and `manual` means the user binds `command` in the desktop's settings. `removable` says whether `DELETE` takes a shortcut off the desktop, so a client offers to remove one.\n\nRead from the desktop on every request, so a shortcut changed in its settings shows here at once. Through the portal, `keys` are as the desktop describes them, and empty when it does not say.",
+        "operationId": "list_shortcuts",
+        "responses": {
+          "200": {
+            "description": "Every shortcut, and the method.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShortcutList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/shortcuts/{id}": {
+      "post": {
+        "tags": [
+          "shortcuts"
+        ],
+        "summary": "Add a keyboard shortcut (scope: settings)",
+        "description": "Adds the shortcut on its own keys. Adding one that is set up already changes nothing and succeeds. Answers the whole list, as `GET /shortcuts` does.\n\nIt is never added on keys another shortcut holds: that is `409 shortcut_keys_taken`, and the user binds `command` to other keys instead. On a desktop the daemon has no method for, it is `409 shortcuts_unsupported`.\n\nThrough the portal the desktop may ask the user first, in a dialog, and the request waits on the answer, up to 60 seconds. The desktop may put it on other keys than it asked for. When the user says no, it is `409 shortcut_refused`.",
+        "operationId": "add_shortcut",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "`dictate` or `read_aloud`.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShortcutId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Added, or set up already. Every shortcut.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShortcutList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No shortcut has that id (`unknown_shortcut`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Its keys are taken (`shortcut_keys_taken`), this desktop has no method (`shortcuts_unsupported`), or the user said no (`shortcut_refused`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The desktop's settings could not be changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "shortcuts"
+        ],
+        "summary": "Remove a keyboard shortcut (scope: settings)",
+        "description": "Removes the shortcut, from whatever keys it is on. Removing one that is not set up changes nothing and succeeds. Answers the whole list, as `GET /shortcuts` does.\n\nOn COSMIC, removing `dictate` hands Super+Space back to COSMIC's own binding for it, switching the input source. Through the portal on KDE Plasma, KDE's shortcut service is told to forget it too, so it leaves KDE's settings, and on GNOME it is taken out of GNOME's record of the app's shortcuts, so it leaves GNOME's Settings. Through the portal elsewhere, it only stops Super Voice binding it: the desktop keeps it in its own settings until the user removes it there, and `removable` is false.",
+        "operationId": "remove_shortcut",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "`dictate` or `read_aloud`.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ShortcutId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed, or not set up. Every shortcut.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShortcutList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No shortcut has that id (`unknown_shortcut`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The desktop's settings could not be changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/status": {
       "get": {
         "tags": [
@@ -10278,6 +10525,9 @@
           "no_switch_in_progress",
           "model_not_loaded",
           "build_not_installed",
+          "shortcut_keys_taken",
+          "shortcuts_unsupported",
+          "shortcut_refused",
           "invalid_model",
           "invalid_backend",
           "cuda_unavailable",
@@ -11830,6 +12080,95 @@
           }
         }
       },
+      "Shortcut": {
+        "type": "object",
+        "description": "One shortcut on `GET /shortcuts`.",
+        "required": [
+          "id",
+          "state",
+          "keys",
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "What the shortcut runs, for binding it by hand.",
+            "example": "voice speak --read"
+          },
+          "id": {
+            "$ref": "#/components/schemas/ShortcutId"
+          },
+          "keys": {
+            "type": "string",
+            "description": "The keys, as people write them. `installed`: the keys it is on, which\nmay be others than its own if the user rebound it. Otherwise the keys\nit would take, or that another shortcut holds.",
+            "example": "Super+Shift+Space"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ShortcutState"
+          }
+        }
+      },
+      "ShortcutId": {
+        "type": "string",
+        "enum": [
+          "dictate",
+          "read_aloud"
+        ]
+      },
+      "ShortcutList": {
+        "type": "object",
+        "description": "What `/shortcuts` answers with: the method, and every shortcut.",
+        "required": [
+          "status",
+          "method",
+          "removable",
+          "desktop",
+          "shortcuts"
+        ],
+        "properties": {
+          "desktop": {
+            "type": "string",
+            "description": "The desktop the daemon runs in, as `XDG_CURRENT_DESKTOP` names it:\n`GNOME`, `KDE`, or a `:`-separated list such as `ubuntu:GNOME`. Empty\nwhen it is not set. A client says by it where the user finds a\nshortcut in the desktop's settings.",
+            "example": "GNOME"
+          },
+          "method": {
+            "$ref": "#/components/schemas/ShortcutMethod"
+          },
+          "removable": {
+            "type": "boolean",
+            "description": "Whether `DELETE /shortcuts/{id}` takes a shortcut off the desktop, so\na client offers to remove one: on COSMIC, and through the portal on\nKDE Plasma and GNOME. Through the portal elsewhere it only stops Super\nVoice binding it, and the desktop keeps it until the user removes it\nin its own settings."
+          },
+          "shortcuts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Shortcut"
+            },
+            "description": "Every shortcut, in [`ShortcutId::ALL`]'s order."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `success`.",
+            "example": "success"
+          }
+        }
+      },
+      "ShortcutMethod": {
+        "type": "string",
+        "enum": [
+          "cosmic",
+          "portal",
+          "manual"
+        ]
+      },
+      "ShortcutState": {
+        "type": "string",
+        "enum": [
+          "installed",
+          "missing",
+          "taken",
+          "manual"
+        ]
+      },
       "SpeakBody": {
         "type": "object",
         "description": "The body of `POST /speak`.\n\nThe handler parses a bare [`Value`] rather than this type, because the\ndispatcher re-reads the same object and going through a typed struct would\nmean maintaining two spellings of the same fields. This is what that body's\nshape *is*, published in the `OpenAPI` document and kept beside the handler\nthat validates it.",
@@ -13017,6 +13356,10 @@
     {
       "name": "hardware",
       "description": "What the daemon can see of this machine: GPUs, drivers, runtimes."
+    },
+    {
+      "name": "shortcuts",
+      "description": "Super Voice's keyboard shortcuts on this desktop: where each stands, adding one, removing one."
     },
     {
       "name": "update",
