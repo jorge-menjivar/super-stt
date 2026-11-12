@@ -38,6 +38,8 @@ impl SuperSTTDaemon {
         }
         debug!("Audio validation completed");
 
+        self.ensure_model_loaded().await;
+
         // Process audio
         let processed_audio = match self.audio_processor.process_audio(&audio_data, sample_rate) {
             Ok(p) => p,

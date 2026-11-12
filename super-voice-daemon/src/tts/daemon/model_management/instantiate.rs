@@ -45,6 +45,9 @@ impl SuperTTSDaemon {
         let Some(_gate) = self.loading.enter(ticket).await else {
             bail!("loading {name} was superseded by a newer model load");
         };
+        // An idle unload still shutting its backend down holds the memory this
+        // load needs.
+        drop(self.idle.unloading.lock().await);
 
         let (backend, def) = {
             let backends = self.backends.read().await;

@@ -123,6 +123,8 @@ impl SuperSTTDaemon {
             }
         }
 
+        self.ensure_model_loaded().await;
+
         // Fail before capture. With no model loaded the cycle can only end in a
         // discarded recording, so starting the mic would cost the user a full
         // take — beeps, speech, and all — to learn nothing. In write mode the

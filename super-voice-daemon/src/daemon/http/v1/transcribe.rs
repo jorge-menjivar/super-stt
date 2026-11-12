@@ -170,6 +170,7 @@ async fn run_realtime_session(
     // arrives for REALTIME_IDLE_TIMEOUT the watchdog wins, the select! drops
     // the session future, and the read lock is released — preventing a
     // half-open TCP connection from wedging model switches indefinitely.
+    daemon.ensure_model_loaded().await;
     {
         let guard = daemon.model.read().await;
         match guard.as_ref() {
@@ -483,6 +484,9 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
     // already running), so nothing regresses by not calling
     // `handle_record_internal` for this specific request; the `409` response
     // below still stands.
+    if !*s.daemon.busy.read().await {
+        s.daemon.ensure_model_loaded().await;
+    }
     if s.daemon.model.read().await.is_none() {
         if !*s.daemon.busy.read().await {
             let _ = s.daemon.handle_command(req).await;

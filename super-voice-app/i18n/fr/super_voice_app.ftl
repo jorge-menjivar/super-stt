@@ -608,3 +608,17 @@ registry-phase-verifying = vérification
 registry-phase-extracting = extraction
 registry-phase-installing = installation
 registry-phase-finishing = finalisation
+
+# Idle unload
+memory = Mémoire
+unload-idle-models = Décharger les modèles inactifs
+unload-idle-models-description = Libère la mémoire d’un modèle resté inutilisé un certain temps. Il est rechargé au prochain enregistrement ou à la prochaine lecture, qui attend son chargement.
+unload-after = Décharger après
+idle-minutes = { $minutes ->
+        [one] { $minutes } minute
+       *[other] { $minutes } minutes
+    }
+idle-seconds = { $seconds ->
+        [one] { $seconds } seconde
+       *[other] { $seconds } secondes
+    }

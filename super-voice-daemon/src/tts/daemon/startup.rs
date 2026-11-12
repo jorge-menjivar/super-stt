@@ -48,6 +48,7 @@ impl SuperTTSDaemon {
             ),
             voices,
             loading: Arc::new(super_engine_daemon::load_gate::LoadGate::default()),
+            idle: Arc::default(),
             secrets: shared.secrets,
         }
     }
@@ -64,7 +65,12 @@ impl SuperTTSDaemon {
         // finishes. Clients watch the `daemon_status_changed` SSE topic for the
         // `ready` transition. With no configured preference the daemon stays
         // idle until the user selects a model — it never auto-pulls a model.
-        if let Some((name, source)) = self.pick_startup_model().await {
+        // Nor does it load one here when models are unloaded on idle: the
+        // first request that speaks does.
+        self.spawn_idle_unload();
+        if self.config.read().await.idle_unload.after().is_some() {
+            info!("Models are unloaded when idle; the synthesis model loads on first use");
+        } else if let Some((name, source)) = self.pick_startup_model().await {
             let bg = self.clone();
             tokio::spawn(async move {
                 if let Err(e) =
@@ -115,7 +121,7 @@ impl SuperTTSDaemon {
         true
     }
 
-    async fn load_initial_model_and_broadcast(
+    pub(in crate::tts::daemon) async fn load_initial_model_and_broadcast(
         daemon: &SuperTTSDaemon,
         name: String,
         source: String,
@@ -147,6 +153,7 @@ impl SuperTTSDaemon {
         // current_device tracking) only update when `actual_device` is present.
         let actual_device = normalize_device(&instance.device());
         *daemon.actual_device.write().await = actual_device.clone();
+        daemon.idle.touch();
         *daemon.model.write().await = Some(LoadedModel::new(definition, instance));
 
         // Announce the active model the same way a user-initiated switch does

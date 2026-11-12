@@ -197,7 +197,7 @@ payload about a feature names it in `feature`: `"stt"` or `"tts"`. A client that
 is about one feature ignores the other's — a speech model loading must not move
 a dictation app's progress bar. The daemon's own news names no feature and is
 every client's: `update_available`, and `settings_changed` for a setting both
-features read (the global `language`, `update_check_enabled`,
+features read (the global `language`, `idle_unload`, `update_check_enabled`,
 `update_beta_optin`). A per-model `language`, `post_processor` and `contexts`
 are a feature's. Text to speech has one stage, so its payloads carry no `stage`,
 and it adds two `daemon_status_changed` statuses of its own, `preparing_voice`

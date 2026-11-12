@@ -117,7 +117,9 @@ impl AppModel {
                 ..
             } => {
                 self.handle_daemon_ready(actual_device.as_deref(), model_loaded);
-                None
+                // An unload this app did not ask for, such as the daemon's
+                // own of an idle model: re-read what is loaded.
+                (!model_loaded).then(|| self.fetch_current_model())
             }
             DaemonStatusEvent::DeviceSwitchError { error, .. } => {
                 Some(self.handle_daemon_device_error(&error))
@@ -285,6 +287,7 @@ impl AppModel {
             "post_processor" => Some(crate::core::app::handlers::stage::load_block(
                 BlockStage::PostProcessing,
             )),
+            "idle_unload" => Some(crate::core::app::handlers::tasks::load_idle_unload()),
             // A context was added, edited, deleted, or put in force.
             // One topic covers the whole family because the answer to
             // any of them is the same: re-read the list. The open

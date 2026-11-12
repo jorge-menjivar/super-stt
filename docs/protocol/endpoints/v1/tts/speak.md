@@ -19,6 +19,11 @@ model away does the same: unloading it, switching it, reloading it, moving it
 to another device or changing its backend stops whatever it was saying rather
 than waiting for it (see [`/tts/pipeline/{stage}/model`](./pipeline/model.md)).
 
+When the daemon unloads idle models
+([`/settings/idle_unload`](../settings/idle_unload.md)), a request that finds the selected model unloaded loads it first
+and answers once it has: `409 model_not_loaded` then means no model is selected,
+or the load failed.
+
 To stream text in as it is generated — an LLM reply spoken as it arrives —
 use [`GET /tts/speak/stream`](./speak/stream.md) instead. This endpoint takes
 complete text.

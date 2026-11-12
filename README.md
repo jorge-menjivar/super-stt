@@ -83,6 +83,12 @@ Models come from a **library** of backends you install on demand. Open the app, 
 
 > **GPU acceleration** is a property of the model, not a separate build of the app. Install a GPU-capable backend (like Voxtral or Qwen3-ASR) and the daemon downloads the build matched to your GPU automatically. You just need an up-to-date driver.
 
+### Free a model's memory when idle
+
+By default a selected model stays loaded, so every request is answered at once. To keep it in memory only while you use it, turn on **Customization → Memory → Unload Idle Models** in the app and pick how long a model may sit unused.
+
+The speech-to-text and text-to-speech models are then unloaded after that long without use, and loaded again by the next recording or `voice speak`, which waits for the load. Unloading a model yourself still switches it off until you load it again.
+
 Want a model that isn't there? Anyone can [publish one](./docs/protocol/README.md#add-your-own-model).
 
 ## 🖼️ Screenshots

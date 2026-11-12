@@ -111,6 +111,8 @@ impl SuperSTTDaemon {
             Command::GetUpdateBetaOptin => self.handle_get_update_beta_optin().await,
             Command::SetVolume { volume } => self.handle_set_volume(volume),
             Command::GetVolume => self.handle_get_volume(),
+            Command::SetIdleUnload { after_secs } => self.handle_set_idle_unload(after_secs).await,
+            Command::GetIdleUnload => self.handle_get_idle_unload().await,
             Command::SetPrimaryLanguage { language } => {
                 self.handle_set_primary_language(language).await
             }

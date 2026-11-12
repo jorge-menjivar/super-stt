@@ -6,16 +6,23 @@ use super_voice_shared::models::notification_method::NotificationMethod;
 use super_voice_shared::theme::AudioTheme;
 
 use super::common::{error_banner, page_layout};
-use crate::ui::messages::{LanguageMessage, Message, NotificationMethodMessage, RecordingMessage};
+use crate::ui::messages::{
+    IdleUnloadMessage, LanguageMessage, Message, NotificationMethodMessage, RecordingMessage,
+};
+
+/// The idle times offered, in seconds. The first is what the toggle turns on.
+const IDLE_UNLOAD_CHOICES: [u64; 5] = [300, 60, 900, 1800, 3600];
 
 /// Customization page: what both features share — audio feedback, its theme
-/// and volume, the primary language, and how failures are reported.
+/// and volume, the primary language, how failures are reported, and how long
+/// an unused model stays in memory.
 pub fn page<'a>(
     audio_themes: &'a [AudioTheme],
     selected_audio_theme: &'a AudioTheme,
     volume: u8,
     app_primary_language: Option<&'a str>,
     notification_method: NotificationMethod,
+    idle_unload_secs: u64,
     action_error: Option<&'a str>,
 ) -> Element<'a, Message> {
     let audio_enabled = *selected_audio_theme != AudioTheme::Silent;
@@ -115,6 +122,7 @@ pub fn page<'a>(
     blocks.push(section.into());
     blocks.push(language_section.into());
     blocks.push(notifications_section(notification_method));
+    blocks.push(memory_section(idle_unload_secs));
 
     page_layout(crate::fl!("customization"), settings::view_column(blocks))
 }
@@ -150,4 +158,51 @@ fn notifications_section(notification_method: NotificationMethod) -> Element<'st
                 )),
         )
         .into()
+}
+
+/// Memory section: whether a model is unloaded when unused, and after how
+/// long. One setting for both features' models.
+fn memory_section(idle_unload_secs: u64) -> Element<'static, Message> {
+    let enabled = idle_unload_secs > 0;
+    let mut section = settings::section().title(crate::fl!("memory")).add(
+        settings::item::builder(crate::fl!("unload-idle-models"))
+            .description(crate::fl!("unload-idle-models-description"))
+            .control(cosmic::widget::toggler(enabled).on_toggle(|on| {
+                Message::IdleUnload(IdleUnloadMessage::Changed(if on {
+                    IDLE_UNLOAD_CHOICES[0]
+                } else {
+                    0
+                }))
+            })),
+    );
+
+    if enabled {
+        // A time set outside the app is listed too, so the dropdown always
+        // shows the one in force.
+        let mut choices = IDLE_UNLOAD_CHOICES.to_vec();
+        if !choices.contains(&idle_unload_secs) {
+            choices.push(idle_unload_secs);
+        }
+        choices.sort_unstable();
+        let names: Vec<String> = choices.iter().map(|secs| idle_time_name(*secs)).collect();
+        let selected = choices.iter().position(|secs| *secs == idle_unload_secs);
+        section = section.add(settings::item::builder(crate::fl!("unload-after")).control(
+            widget::dropdown(names, selected, move |index| {
+                Message::IdleUnload(IdleUnloadMessage::Changed(choices[index]))
+            }),
+        ));
+    }
+
+    section.into()
+}
+
+/// An idle time as the dropdown shows it: whole minutes when it is one, else
+/// seconds.
+fn idle_time_name(secs: u64) -> String {
+    if secs.is_multiple_of(60) {
+        let minutes = secs / 60;
+        crate::fl!("idle-minutes", minutes = minutes)
+    } else {
+        crate::fl!("idle-seconds", seconds = secs)
+    }
 }

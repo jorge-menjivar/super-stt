@@ -2,12 +2,12 @@
 
 use crate::core::app::AppModel;
 use crate::daemon::client::{
-    set_notification_method, set_preview_typing, set_recording_stop_mode, set_write_method,
-    test_write_method,
+    set_idle_unload, set_notification_method, set_preview_typing, set_recording_stop_mode,
+    set_write_method, test_write_method,
 };
 use crate::ui::messages::{
-    Message, NotificationMethodMessage, PreviewTypingMessage, RecordingStopModeMessage,
-    WriteMethodMessage,
+    IdleUnloadMessage, Message, NotificationMethodMessage, PreviewTypingMessage,
+    RecordingStopModeMessage, WriteMethodMessage,
 };
 use cosmic::prelude::*;
 
@@ -221,6 +221,41 @@ impl AppModel {
                 self.set_action_error(
                     crate::state::ErrorScope::Customization,
                     format!("Couldn't save notification method: {err}"),
+                );
+                Task::none()
+            }
+        }
+    }
+
+    /// Handle idle-unload messages
+    pub(in crate::core::app) fn handle_idle_unload_messages(
+        &mut self,
+        message: IdleUnloadMessage,
+    ) -> Task<cosmic::Action<Message>> {
+        match message {
+            // Confirm-then-apply, as with the notification method.
+            IdleUnloadMessage::Changed(after_secs) => {
+                Task::perform(set_idle_unload(after_secs), move |result| match result {
+                    Ok(()) => cosmic::Action::App(Message::IdleUnload(IdleUnloadMessage::Loaded(
+                        after_secs,
+                    ))),
+                    Err(e) => cosmic::Action::App(Message::IdleUnload(IdleUnloadMessage::Error(
+                        e.to_string(),
+                    ))),
+                })
+            }
+
+            IdleUnloadMessage::Loaded(after_secs) => {
+                self.idle_unload_secs = after_secs;
+                self.clear_action_error(crate::state::ErrorScope::Customization);
+                Task::none()
+            }
+
+            IdleUnloadMessage::Error(err) => {
+                log::warn!("Idle unload error: {err}");
+                self.set_action_error(
+                    crate::state::ErrorScope::Customization,
+                    format!("Couldn't save the idle unload setting: {err}"),
                 );
                 Task::none()
             }

@@ -1475,6 +1475,7 @@ impl crate::tts::daemon::types::SuperTTSDaemon {
         // The request is `text`; how it is spoken comes from the user's
         // settings, the same way the streaming path gets it — see
         // [`stored_defaults`](Self::stored_defaults), which both go through.
+        self.ensure_model_loaded().await;
         let (voice, language) = self.stored_defaults().await;
 
         // `speak` rather than the session API on purpose: it refuses empty,
@@ -1538,6 +1539,7 @@ impl crate::tts::daemon::types::SuperTTSDaemon {
     /// # Errors
     /// See [`SpeakError`].
     pub(crate) async fn begin_speech(&self) -> Result<SpeakSession, SpeakError> {
+        self.ensure_model_loaded().await;
         let (voice, language) = self.stored_defaults().await;
         let options = SpeakOptions {
             voice: voice.as_deref(),

@@ -245,6 +245,7 @@ impl AppModel {
                 self.volume,
                 self.language.primary_language.as_deref(),
                 self.notification_method,
+                self.idle_unload_secs,
                 self.action_error_for(crate::state::ErrorScope::Customization),
             ),
             Page::Recording => views::recording::page(

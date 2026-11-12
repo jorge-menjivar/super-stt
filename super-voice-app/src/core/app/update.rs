@@ -29,6 +29,7 @@ impl AppModel {
             Message::RecordingStopMode(m) => self.handle_recording_stop_mode_messages(m),
             Message::WriteMethod(m) => self.handle_write_method_messages(m),
             Message::NotificationMethod(m) => self.handle_notification_method_messages(m),
+            Message::IdleUnload(m) => self.handle_idle_unload_messages(m),
             Message::Backend(m) => self.handle_backend_messages(m),
             Message::Contexts(m) => self.handle_contexts_messages(m),
             Message::Language(m) => self.handle_language_messages(m),

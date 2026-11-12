@@ -2103,3 +2103,31 @@ async fn list_model_languages_refuses_an_unknown_model() {
     assert_eq!(response.error_code, Some(ErrorCode::InvalidModel));
     assert!(response.available_languages.is_none());
 }
+
+/// An idle unload frees the model and keeps it selected, so the next request
+/// loads it again: an explicit unload clears the selection instead.
+#[tokio::test]
+async fn idle_unload_frees_the_model_and_keeps_it_selected() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/openai";
+    seed_loaded_model(&daemon, "kokoro-1", source).await;
+    daemon
+        .config
+        .write()
+        .await
+        .update_synthesis_model("kokoro-1".into(), source.into());
+
+    daemon.idle.rewind(Duration::from_secs(10));
+    assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
+    assert!(daemon.model.read().await.is_some());
+
+    daemon.idle.rewind(Duration::from_secs(60));
+    assert!(daemon.unload_if_idle(Duration::from_secs(30)).await);
+
+    assert!(daemon.model.read().await.is_none());
+    assert_eq!(
+        daemon.config.read().await.synthesis.preferred_model,
+        "kokoro-1"
+    );
+}

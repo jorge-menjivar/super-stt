@@ -45,6 +45,31 @@ pub struct DaemonConfig {
     pub contexts: ContextsConfig,
     #[serde(default)]
     pub http: HttpConfig,
+    #[serde(default)]
+    pub idle_unload: IdleUnloadConfig,
+}
+
+/// Keeping a model in memory only while it is in use.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdleUnloadConfig {
+    /// Seconds a transcription or synthesis model may sit unused before it is
+    /// unloaded. `0`, the default, never unloads.
+    ///
+    /// With a value set, a selected model is not loaded at startup either: it
+    /// loads on the first request that needs it, which waits for the load.
+    /// The selection is untouched, unlike an explicit unload, so the next
+    /// request brings the same model back.
+    #[serde(default)]
+    pub after_secs: u64,
+}
+
+impl IdleUnloadConfig {
+    /// The idle time after which a model is unloaded, or `None` when models
+    /// stay loaded.
+    #[must_use]
+    pub fn after(self) -> Option<std::time::Duration> {
+        (self.after_secs > 0).then(|| std::time::Duration::from_secs(self.after_secs))
+    }
 }
 
 /// Self-update checking. Contract: docs/protocol/endpoints/v1/update.md
@@ -353,6 +378,7 @@ impl Default for DaemonConfig {
             post_processor: PostProcessorConfig::default(),
             contexts: ContextsConfig::default(),
             http: HttpConfig::default(),
+            idle_unload: IdleUnloadConfig::default(),
         }
     }
 }

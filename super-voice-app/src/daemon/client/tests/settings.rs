@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::fake_daemon::{FakeDaemon, Reply};
 use crate::daemon::client::v1::settings::{
-    audio_theme, language, notification_method, preview_typing, recording_stop_mode,
+    audio_theme, idle_unload, language, notification_method, preview_typing, recording_stop_mode,
     update_beta_optin, update_check_enabled, volume, write_method,
 };
 use crate::state::AudioTheme;
@@ -58,6 +58,9 @@ async fn each_generated_setter_posts_the_key_its_endpoint_reads() {
     preview_typing::set_preview_typing(true)
         .await
         .expect("preview typing set");
+    idle_unload::set_idle_unload(300)
+        .await
+        .expect("idle unload set");
 
     let sent: Vec<(String, serde_json::Value)> = daemon
         .requests()
@@ -86,6 +89,10 @@ async fn each_generated_setter_posts_the_key_its_endpoint_reads() {
             (
                 "/settings/preview_typing".to_string(),
                 json!({ "enabled": true })
+            ),
+            (
+                "/settings/idle_unload".to_string(),
+                json!({ "after_secs": 300 })
             ),
         ]
     );

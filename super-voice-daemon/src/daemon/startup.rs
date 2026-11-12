@@ -146,6 +146,7 @@ impl SuperSTTDaemon {
             )),
             self_update: Arc::new(crate::self_update::checker()),
             loading: Arc::new(crate::daemon::types::StageLoadGates::default()),
+            idle: Arc::default(),
             secrets,
             tts,
         };
@@ -182,7 +183,12 @@ impl SuperSTTDaemon {
         // finishes. Clients watch the `daemon_status_changed` SSE topic for the
         // `ready` transition. With no configured preference the daemon stays
         // idle until the user selects a model — it never auto-pulls a model.
-        if let Some((name, source)) = self.pick_startup_model().await {
+        // Nor does it load one here when models are unloaded on idle: the
+        // first request that needs it does.
+        self.spawn_idle_unload();
+        if self.config.read().await.idle_unload.after().is_some() {
+            info!("Models are unloaded when idle; the transcription model loads on first use");
+        } else if let Some((name, source)) = self.pick_startup_model().await {
             let bg = self.clone();
             tokio::spawn(async move {
                 if let Err(e) =
@@ -314,7 +320,7 @@ impl SuperSTTDaemon {
         true
     }
 
-    async fn load_initial_model_and_broadcast(
+    pub(in crate::daemon) async fn load_initial_model_and_broadcast(
         daemon: &SuperSTTDaemon,
         name: String,
         source: String,
@@ -348,6 +354,7 @@ impl SuperSTTDaemon {
         // `LoadedModel` — `ready` event consumers (e.g. the settings app's
         // current_device tracking) only update when `actual_device` is present.
         let actual_device = normalize_device(&instance.device());
+        daemon.idle.touch();
         *daemon.model.write().await = Some(LoadedModel {
             definition,
             instance,

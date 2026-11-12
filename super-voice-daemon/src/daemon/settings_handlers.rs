@@ -237,6 +237,44 @@ impl SuperSTTDaemon {
         DaemonResponse::success().with_update_check_enabled(enabled)
     }
 
+    /// Handle set idle-unload command: `after_secs` is how long a model may
+    /// sit unused before it is unloaded, and `0` keeps models loaded.
+    ///
+    /// Turning it off loads the selected models, as a start with it off would:
+    /// one unloaded for being idle would otherwise stay unloaded, with nothing
+    /// left to bring it back.
+    pub async fn handle_set_idle_unload(&self, after_secs: u64) -> DaemonResponse {
+        // Counted from now, not from a last use that predates the setting, and
+        // reset before the idle check can read the new time.
+        self.idle.touch();
+        self.tts.idle.touch();
+        let persist = self
+            .set_config_field(|c| c.idle_unload.after_secs = after_secs)
+            .await;
+        self.publish_shared_setting_changed("idle_unload");
+        let message = if after_secs == 0 {
+            let bg = self.clone();
+            tokio::spawn(async move {
+                tokio::join!(bg.load_selected_model(), bg.tts.load_selected_model());
+            });
+            "Models stay loaded".to_string()
+        } else {
+            format!("Models are unloaded after {after_secs}s idle")
+        };
+        info!("{message}");
+        Self::settings_saved(
+            DaemonResponse::success().with_idle_unload_after_secs(after_secs),
+            message,
+            persist,
+        )
+    }
+
+    /// Handle get idle-unload command
+    pub async fn handle_get_idle_unload(&self) -> DaemonResponse {
+        let after_secs = self.config.read().await.idle_unload.after_secs;
+        DaemonResponse::success().with_idle_unload_after_secs(after_secs)
+    }
+
     /// Handle set update-beta-optin command. An unknown value is rejected
     /// with `invalid_update_beta_optin` (HTTP 400) per
     /// `docs/protocol/endpoints/v1/update_beta_optin.md`, rather than
