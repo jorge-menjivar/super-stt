@@ -8,6 +8,13 @@ use crate::state::ErrorScope;
 use crate::ui::messages::{Message, ShortcutsMessage};
 use cosmic::prelude::*;
 
+/// Whether a change failed because the user turned the shortcut down in the
+/// desktop's own dialog. That is their answer, not a failure, so the page
+/// shows no error for it: it offers to add the shortcut again.
+fn turned_down(error: &str) -> bool {
+    error.contains("shortcut_refused")
+}
+
 impl AppModel {
     /// Route the Shortcuts page's messages. The daemon answers every change
     /// with the whole list, so the page shows what the desktop now has.
@@ -48,15 +55,36 @@ impl AppModel {
             }
             // Read the list again: what failed may have changed something.
             ShortcutsMessage::Changed(Err(error)) => {
-                log::warn!("Could not change a shortcut: {error}");
-                self.set_action_error(
-                    ErrorScope::Shortcuts,
-                    crate::fl!("shortcut-change-failed", error = error),
-                );
+                if turned_down(&error) {
+                    log::info!("The shortcut was turned down in the desktop's dialog");
+                } else {
+                    log::warn!("Could not change a shortcut: {error}");
+                    self.set_action_error(
+                        ErrorScope::Shortcuts,
+                        crate::fl!("shortcut-change-failed", error = error),
+                    );
+                }
                 Task::done(cosmic::Action::App(Message::Shortcuts(
                     ShortcutsMessage::Refresh,
                 )))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::turned_down;
+
+    /// Only the user saying no in the desktop's dialog goes without an error:
+    /// every other failure is shown.
+    #[test]
+    fn only_a_refusal_is_the_user_turning_it_down() {
+        assert!(turned_down("shortcut_refused (HTTP 409)"));
+        assert!(!turned_down("shortcut_keys_taken (HTTP 409)"));
+        assert!(!turned_down("shortcuts_unsupported (HTTP 409)"));
+        assert!(!turned_down(
+            "internal: could_not_write_shortcut: no session bus (HTTP 500)"
+        ));
     }
 }
