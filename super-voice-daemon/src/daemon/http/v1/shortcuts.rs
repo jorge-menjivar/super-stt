@@ -59,7 +59,7 @@ fn unknown_shortcut() -> Response {
     tag = "shortcuts",
     summary = "List the keyboard shortcuts",
     description = "\
-Super Voice's keyboard shortcuts, `dictate` and `read_aloud`, and where each stands on \
+Super Voice's keyboard shortcuts, such as `dictate`, and where each stands on \
 this desktop: set up and on which keys, missing, blocked by another shortcut on its \
 keys, or for the user to bind. `method` says how the daemon puts a shortcut on this \
 desktop: `cosmic` writes COSMIC's custom shortcuts, `portal` binds it through the \
@@ -97,7 +97,7 @@ method for, it is `409 shortcuts_unsupported`.
 Through the portal the desktop may ask the user first, in a dialog, and the request \
 waits on the answer, up to 60 seconds. The desktop may put it on other keys than it \
 asked for. When the user says no, it is `409 shortcut_refused`.",
-    params(("id" = ShortcutId, Path, description = "`dictate` or `read_aloud`.")),
+    params(("id" = ShortcutId, Path, description = "`dictate`.")),
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "Added, or set up already. Every shortcut.", body = ShortcutList),
@@ -130,7 +130,7 @@ changes nothing and succeeds. Answers the whole list, as `GET /shortcuts` does.
 
 On COSMIC, removing `dictate` hands Super+Space back to COSMIC's own binding for it, \
 switching the input source.",
-    params(("id" = ShortcutId, Path, description = "`dictate` or `read_aloud`.")),
+    params(("id" = ShortcutId, Path, description = "`dictate`.")),
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "Removed, or not set up. Every shortcut.", body = ShortcutList),

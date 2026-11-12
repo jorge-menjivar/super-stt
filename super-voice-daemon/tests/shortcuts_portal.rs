@@ -400,11 +400,11 @@ fn pair(id: &str, keys: &str) -> (String, String) {
 
 // ---------- the tests --------------------------------------------------------
 
-/// Each shortcut added is bound in a new session with the ones before it,
-/// under the app's id, and one removed is left out of the next. What is bound
-/// is kept in the config.
+/// A shortcut added is bound in a session under the app's id, on the keys it
+/// asks for, and kept in the config. Removed, its session is closed and it
+/// leaves the config.
 #[tokio::test]
-async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
+async fn the_portal_binds_a_shortcut_added_and_closes_it_removed() {
     let home = tempfile::tempdir().expect("tempdir");
     let bus = Bus::start(home.path());
     let (_portal, calls) = fake_portal(&bus).await;
@@ -413,13 +413,7 @@ async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
     let (status, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
     assert_eq!(status, StatusCode::OK, "{list}");
     assert_eq!(list["method"], "portal");
-    assert_eq!(
-        states(&list),
-        [
-            row("dictate", "missing", "Super+Space"),
-            row("read_aloud", "missing", "Super+Shift+Space")
-        ]
-    );
+    assert_eq!(states(&list), [row("dictate", "missing", "Super+Space")]);
     assert!(
         calls.lock().unwrap().sessions.is_empty(),
         "nothing bound yet"
@@ -427,65 +421,20 @@ async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
 
     let (status, list) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
     assert_eq!(status, StatusCode::OK, "{list}");
-    assert_eq!(
-        states(&list),
-        [
-            row("dictate", "installed", "Meta+Space"),
-            row("read_aloud", "missing", "Super+Shift+Space")
-        ]
-    );
+    assert_eq!(states(&list), [row("dictate", "installed", "Meta+Space")]);
     assert_eq!(calls.lock().unwrap().registered, ["super-voice-app"]);
     assert_eq!(last_bind(&calls), [pair("dictate", "LOGO+space")]);
-
-    let (status, list) = call(&daemon, &token, Method::POST, "/shortcuts/read_aloud").await;
-    assert_eq!(status, StatusCode::OK, "{list}");
-    assert_eq!(
-        states(&list),
-        [
-            row("dictate", "installed", "Meta+Space"),
-            row("read_aloud", "installed", "Meta+Shift+Space")
-        ]
-    );
-    assert_eq!(
-        last_bind(&calls),
-        [
-            pair("dictate", "LOGO+space"),
-            pair("read_aloud", "LOGO+SHIFT+space")
-        ]
-    );
-    {
-        let calls = calls.lock().unwrap();
-        assert_eq!(calls.sessions.len(), 2);
-        assert_eq!(
-            calls.closed,
-            calls.sessions[..1],
-            "the first session is closed"
-        );
-    }
+    let config = std::fs::read_to_string(config_file(&daemon.home().config)).expect("config");
+    assert!(config.contains(r#""dictate""#), "{config}");
 
     let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/dictate").await;
     assert_eq!(status, StatusCode::OK, "{list}");
-    assert_eq!(
-        states(&list),
-        [
-            row("dictate", "missing", "Super+Space"),
-            row("read_aloud", "installed", "Meta+Shift+Space")
-        ]
-    );
-    assert_eq!(last_bind(&calls), [pair("read_aloud", "LOGO+SHIFT+space")]);
+    assert_eq!(states(&list), [row("dictate", "missing", "Super+Space")]);
     let config = std::fs::read_to_string(config_file(&daemon.home().config)).expect("config");
-    assert!(config.contains(r#""read_aloud""#), "{config}");
     assert!(!config.contains(r#""dictate""#), "{config}");
-
-    let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/read_aloud").await;
-    assert_eq!(status, StatusCode::OK, "{list}");
     let calls = calls.lock().unwrap();
-    assert_eq!(
-        calls.closed.len(),
-        calls.sessions.len(),
-        "no session is left open"
-    );
-    assert_eq!(calls.sessions.len(), 3, "and none is opened for nothing");
+    assert_eq!(calls.sessions.len(), 1, "no session is opened for nothing");
+    assert_eq!(calls.closed, calls.sessions, "and none is left open");
 }
 
 /// A shortcut the user turns down in the desktop's dialog is refused, and not
@@ -503,7 +452,7 @@ async fn a_shortcut_the_user_turns_down_is_not_kept() {
     assert_eq!(body["error_code"], "shortcut_refused", "{body}");
 
     let (_, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
-    assert_eq!(states(&list)[0], row("dictate", "missing", "Super+Space"));
+    assert_eq!(states(&list), [row("dictate", "missing", "Super+Space")]);
     let config = std::fs::read_to_string(config_file(&daemon.home().config)).unwrap_or_default();
     assert!(!config.contains(r#""dictate""#), "{config}");
 }
@@ -516,9 +465,9 @@ async fn saved_shortcuts_are_bound_again_at_start() {
     let bus = Bus::start(home.path());
     let (_portal, calls) = fake_portal(&bus).await;
 
-    // A config with read aloud saved, as a daemon before this one left it.
+    // A config with dictation saved, as a daemon before this one left it.
     let (first, token) = start("shortcuts-portal-saved", &bus, None).await;
-    let (status, body) = call(&first, &token, Method::POST, "/shortcuts/read_aloud").await;
+    let (status, body) = call(&first, &token, Method::POST, "/shortcuts/dictate").await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let config = std::fs::read_to_string(config_file(&first.home().config)).expect("config");
     drop(first);
@@ -533,13 +482,10 @@ async fn saved_shortcuts_are_bound_again_at_start() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert_eq!(last_bind(&calls), [pair("read_aloud", "LOGO+SHIFT+space")]);
+    assert_eq!(last_bind(&calls), [pair("dictate", "LOGO+space")]);
 
     let (_, list) = call(&second, &token, Method::GET, "/shortcuts").await;
-    assert_eq!(
-        states(&list)[1],
-        row("read_aloud", "installed", "Meta+Shift+Space")
-    );
+    assert_eq!(states(&list), [row("dictate", "installed", "Meta+Space")]);
 }
 
 /// A press reaches the session's caller as the shortcut's id, and only a
@@ -551,37 +497,30 @@ async fn a_press_on_the_session_is_handed_on() {
     let (portal, calls) = fake_portal(&bus).await;
 
     let (pressed, mut presses) = tokio::sync::mpsc::unbounded_channel();
-    let (_session, bound) =
-        Session::bind(bus.connect().await, &[ShortcutId::ReadAloud], move |id| {
-            let _ = pressed.send(id);
-        })
-        .await
-        .expect("bind");
+    let (_session, bound) = Session::bind(bus.connect().await, &[ShortcutId::Dictate], move |id| {
+        let _ = pressed.send(id);
+    })
+    .await
+    .expect("bind");
     assert_eq!(bound.len(), 1);
     let ours = calls.lock().unwrap().sessions[0].clone();
 
     let emitter = SignalEmitter::new(&portal, PORTAL_PATH).expect("emitter");
     let other = ObjectPath::try_from("/org/freedesktop/portal/desktop/session/1_1/other").unwrap();
-    GlobalShortcuts::activated(&emitter, other, "dictate", 0, HashMap::new())
-        .await
-        .expect("emit");
-    GlobalShortcuts::activated(
-        &emitter,
-        ObjectPath::try_from(ours.as_str()).unwrap(),
-        "read_aloud",
-        0,
-        HashMap::new(),
-    )
-    .await
-    .expect("emit");
+    for session in [other, ObjectPath::try_from(ours.as_str()).unwrap()] {
+        GlobalShortcuts::activated(&emitter, session, "dictate", 0, HashMap::new())
+            .await
+            .expect("emit");
+    }
 
     let id = tokio::time::timeout(Duration::from_secs(5), presses.recv())
         .await
         .expect("a press arrives")
         .expect("the channel is open");
-    assert_eq!(
-        id,
-        ShortcutId::ReadAloud,
-        "the other session's press is not ours"
+    assert_eq!(id, ShortcutId::Dictate);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        presses.try_recv().is_err(),
+        "the press on the other session is not ours"
     );
 }

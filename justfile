@@ -1272,7 +1272,6 @@ install-daemon:
     echo ""
     echo "🚀 Ready to use!"
     echo "-- voice record --write         # Record, transcribe, and type result"
-    echo "-- voice speak --read           # Speak the selected or copied text"
     echo ""
     echo "Add keyboard shortcuts from the Shortcuts page in the Super Voice app."
 
@@ -1327,10 +1326,7 @@ install-all:
     echo "🎉 Super Voice installation finished!"
     echo ""
     echo "⚙️  Quick Setup Tips:"
-    echo "-- If you're on COSMIC, the daemon installer already offered the Super+Space and Super+Shift+Space shortcuts"
-    echo "-- For other desktop environments, add a keyboard shortcut for: voice record --write"
-    echo "-- And one to read text aloud: voice speak --read"
-    echo "-- Recommended shortcuts: Super+Space, Ctrl+Alt+S, or F12"
+    echo "-- Add keyboard shortcuts from the Shortcuts page in the Super Voice app"
 
 # Uninstall the app
 uninstall-app:

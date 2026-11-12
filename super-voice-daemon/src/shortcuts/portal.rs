@@ -304,7 +304,6 @@ async fn create_session(
 fn shortcut(id: ShortcutId) -> &'static cosmic_shortcuts::Shortcut {
     match id {
         ShortcutId::Dictate => &cosmic_shortcuts::DICTATE,
-        ShortcutId::ReadAloud => &cosmic_shortcuts::READ_ALOUD,
     }
 }
 
@@ -312,7 +311,6 @@ fn shortcut(id: ShortcutId) -> &'static cosmic_shortcuts::Shortcut {
 fn description(id: ShortcutId) -> &'static str {
     match id {
         ShortcutId::Dictate => "Dictate",
-        ShortcutId::ReadAloud => "Read aloud",
     }
 }
 
@@ -378,23 +376,19 @@ fn bound_from(results: &HashMap<String, OwnedValue>) -> Vec<Bound> {
 mod tests {
     use super::*;
 
-    /// Each shortcut asks for the keys it has on COSMIC, in the portal's
+    /// A shortcut asks for the keys it has on COSMIC, in the portal's
     /// syntax.
     #[test]
-    fn each_shortcut_asks_for_its_keys() {
+    fn a_shortcut_asks_for_its_keys() {
         assert_eq!(preferred_trigger(ShortcutId::Dictate), "LOGO+space");
-        assert_eq!(preferred_trigger(ShortcutId::ReadAloud), "LOGO+SHIFT+space");
     }
 
     #[test]
     fn a_bind_names_each_shortcut_by_its_wire_id() {
         let args = bind_args(&ShortcutId::ALL);
         let ids: Vec<_> = args.iter().map(|(id, _)| *id).collect();
-        assert_eq!(ids, ["dictate", "read_aloud"]);
-        assert_eq!(
-            args[1].1.get("description"),
-            Some(&Value::from("Read aloud"))
-        );
+        assert_eq!(ids, ["dictate"]);
+        assert_eq!(args[0].1.get("description"), Some(&Value::from("Dictate")));
     }
 
     #[test]
