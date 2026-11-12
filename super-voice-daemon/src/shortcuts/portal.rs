@@ -9,10 +9,10 @@
 //! daemon closes the session and binds the ones left in a new one, and the
 //! desktop may still list a dropped one in its settings.
 //!
-//! A desktop that keeps its shortcuts, as KDE Plasma and GNOME do, lists in a
-//! new session the ones it kept, before anything is bound in it. A shortcut
-//! the daemon saved but the desktop no longer has was removed in the
-//! desktop's settings, and is not bound again.
+//! KDE Plasma lists in a new session the shortcuts it kept, before anything
+//! is bound in it. A shortcut the daemon saved but KDE no longer has was
+//! removed in KDE's settings, and is not bound again. GNOME lists nothing
+//! until a bind.
 //!
 //! The portal asks who is calling by app id, and the daemon, a service the
 //! host runs, has none. So it first registers the app's, [`APP_ID`], on the
@@ -21,7 +21,7 @@
 //! id itself.
 
 use crate::portal::{
-    PORTAL_BUS, PORTAL_PATH, RESPONSE_CANCELLED, next_handle_token, portal_request,
+    PORTAL_BUS, PORTAL_PATH, RESPONSE_CANCELLED, RESPONSE_ENDED, next_handle_token, portal_request,
 };
 use anyhow::{Context, Result, bail};
 use futures::StreamExt;
@@ -211,7 +211,9 @@ impl Session {
             warn!("BindShortcuts answered {code}, but the shortcuts are bound");
             return Ok(bound);
         }
-        if code == RESPONSE_CANCELLED {
+        // KDE answers its dialog's Cancel as cancelled, and GNOME as ended
+        // another way: with nothing bound, either is the user not adding it.
+        if code == RESPONSE_CANCELLED || code == RESPONSE_ENDED {
             return Err(BindError::Cancelled);
         }
         Err(BindError::Failed(anyhow::anyhow!(

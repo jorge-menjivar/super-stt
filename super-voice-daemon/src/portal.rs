@@ -68,8 +68,12 @@ pub(crate) async fn portal_call(
 }
 
 /// How a request ended, as its `Response` says: the user said no in the
-/// desktop's dialog, or it ended another way.
+/// desktop's dialog.
 pub(crate) const RESPONSE_CANCELLED: u32 = 1;
+
+/// How a request ended, as its `Response` says: another way than the user
+/// saying yes or no. GNOME answers its dialog's Cancel this way.
+pub(crate) const RESPONSE_ENDED: u32 = 2;
 
 /// [`portal_call`], answering the `Response`'s code with its results rather
 /// than refusing any but `0`, for a caller that tells a cancelled dialog

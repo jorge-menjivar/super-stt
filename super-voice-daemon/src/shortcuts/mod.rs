@@ -179,10 +179,15 @@ impl Shortcuts {
         }
     }
 
-    /// Bind the shortcuts `saved` at a start, but only the ones the desktop
-    /// still has: one the user removed in the desktop's settings is not bound
-    /// again, so the page offers to add it. Answers the ones kept. A desktop
-    /// that keeps nothing between sessions, as Hyprland, keeps them all.
+    /// Bind the shortcuts `saved` at a start, and answer the ones kept: one
+    /// the user removed in the desktop's settings is not, so the page offers
+    /// to add it again.
+    ///
+    /// 1. KDE Plasma lists, in a new session, the shortcuts it kept, so only
+    ///    those are bound.
+    /// 2. GNOME lists nothing until a bind, and Hyprland keeps nothing, so
+    ///    every saved one is bound. GNOME asks again, in its dialog, for one
+    ///    removed in its settings: one the user turns down there is not kept.
     ///
     /// # Errors
     ///
@@ -206,24 +211,33 @@ impl Shortcuts {
                 old.close().await;
             }
             let session = open_session().await?;
-            let kept = if keeps_shortcuts(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref()) {
-                match session.list().await {
-                    Ok(listed) => still_kept(saved, &listed),
-                    Err(e) => {
-                        warn!("Could not ask which shortcuts the desktop kept: {e:#}");
-                        saved.to_vec()
+            let asked =
+                if lists_kept_shortcuts(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref()) {
+                    match session.list().await {
+                        Ok(listed) => still_kept(saved, &listed),
+                        Err(e) => {
+                            warn!("Could not ask which shortcuts the desktop kept: {e:#}");
+                            saved.to_vec()
+                        }
                     }
-                }
-            } else {
-                saved.to_vec()
-            };
-            if kept.is_empty() {
+                } else {
+                    saved.to_vec()
+                };
+            if asked.is_empty() {
                 session.close().await;
-                return Ok(kept);
+                return Ok(asked);
             }
-            session.bind(&kept).await.map_err(Error::from)?;
-            *held = Some(session);
-            Ok(kept)
+            match session.bind(&asked).await {
+                Ok(bound) => {
+                    *held = Some(session);
+                    Ok(still_kept(&asked, &bound))
+                }
+                Err(portal::BindError::Cancelled) => {
+                    session.close().await;
+                    Ok(Vec::new())
+                }
+                Err(e) => Err(e.into()),
+            }
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -301,11 +315,12 @@ fn is_cosmic(desktop: Option<&str>) -> bool {
     names(desktop, "COSMIC")
 }
 
-/// Whether the desktop keeps the shortcuts an app bound once it closes its
-/// session. Hyprland keeps none: the user binds them in its config.
+/// Whether the desktop lists, in a new session and before anything is bound
+/// in it, the shortcuts it kept from the app's sessions before. KDE Plasma
+/// does. GNOME lists nothing until a bind, and Hyprland keeps nothing.
 #[cfg(target_os = "linux")]
-fn keeps_shortcuts(desktop: Option<&str>) -> bool {
-    !names(desktop, "Hyprland")
+fn lists_kept_shortcuts(desktop: Option<&str>) -> bool {
+    names(desktop, "KDE")
 }
 
 /// The method for an `XDG_CURRENT_DESKTOP`, given whether the desktop offers
@@ -465,13 +480,15 @@ mod tests {
 
     /// The portal is used wherever the desktop offers it, except on COSMIC,
     /// whose own file comes first.
+    /// Only KDE Plasma says, before a bind, which shortcuts it kept.
     #[cfg(target_os = "linux")]
     #[test]
-    fn only_hyprland_keeps_no_shortcuts() {
-        assert!(!keeps_shortcuts(Some("Hyprland")));
-        assert!(keeps_shortcuts(Some("KDE")));
-        assert!(keeps_shortcuts(Some("GNOME")));
-        assert!(keeps_shortcuts(None));
+    fn only_kde_lists_the_shortcuts_it_kept() {
+        assert!(lists_kept_shortcuts(Some("KDE")));
+        assert!(lists_kept_shortcuts(Some("kde:wayland")));
+        assert!(!lists_kept_shortcuts(Some("GNOME")));
+        assert!(!lists_kept_shortcuts(Some("Hyprland")));
+        assert!(!lists_kept_shortcuts(None));
     }
 
     /// A saved shortcut the desktop no longer lists was removed in its

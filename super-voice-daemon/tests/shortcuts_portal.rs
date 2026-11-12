@@ -106,8 +106,9 @@ struct Calls {
     binds: Vec<(String, Vec<(String, String)>)>,
     /// What each session has bound.
     bound: HashMap<String, Vec<String>>,
-    /// Answer a bind as the user saying no in the dialog.
-    refuse: bool,
+    /// Answer a bind as the user saying no in the dialog, with this response
+    /// code: KDE answers its Cancel with 1, GNOME with 2.
+    refuse: Option<u32>,
     /// The shortcuts the desktop keeps across sessions, as KDE Plasma and
     /// GNOME do: each one ever bound, until the user removes it in the
     /// desktop's settings.
@@ -245,7 +246,7 @@ impl GlobalShortcuts {
         let refuse = {
             let mut calls = self.0.lock().unwrap();
             calls.binds.push((session.clone(), asked));
-            if !calls.refuse {
+            if calls.refuse.is_none() {
                 calls.bound.insert(session, ids.clone());
                 for id in &ids {
                     if !calls.kept.contains(id) {
@@ -255,8 +256,8 @@ impl GlobalShortcuts {
             }
             calls.refuse
         };
-        if refuse {
-            respond(conn, &header, request.clone(), 1, HashMap::new()).await;
+        if let Some(code) = refuse {
+            respond(conn, &header, request.clone(), code, HashMap::new()).await;
         } else {
             let mut results = HashMap::new();
             results.insert("shortcuts".to_string(), described(&ids));
@@ -500,23 +501,27 @@ async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
 }
 
 /// A shortcut the user turns down in the desktop's dialog is refused, and not
-/// kept.
+/// kept, however the desktop answers the Cancel: KDE as cancelled, GNOME as
+/// ended another way.
 #[tokio::test]
 async fn a_shortcut_the_user_turns_down_is_not_kept() {
-    let home = tempfile::tempdir().expect("tempdir");
-    let bus = Bus::start(home.path());
-    let (_portal, calls) = fake_portal(&bus).await;
-    calls.lock().unwrap().refuse = true;
-    let (daemon, token) = start("shortcuts-portal-refused", &bus, None).await;
+    for (desktop, code) in [("kde", 1), ("gnome", 2)] {
+        let home = tempfile::tempdir().expect("tempdir");
+        let bus = Bus::start(home.path());
+        let (_portal, calls) = fake_portal(&bus).await;
+        calls.lock().unwrap().refuse = Some(code);
+        let (daemon, token) = start(&format!("shortcuts-refused-{desktop}"), &bus, None).await;
 
-    let (status, body) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["error_code"], "shortcut_refused", "{body}");
+        let (status, body) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
+        assert_eq!(status, StatusCode::CONFLICT, "{desktop}: {body}");
+        assert_eq!(body["error_code"], "shortcut_refused", "{desktop}: {body}");
 
-    let (_, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
-    assert_eq!(states(&list)[0], row("dictate", "missing", "Super+Space"));
-    let config = std::fs::read_to_string(config_file(&daemon.home().config)).unwrap_or_default();
-    assert!(!config.contains(r#""dictate""#), "{config}");
+        let (_, list) = call(&daemon, &token, Method::GET, "/shortcuts").await;
+        assert_eq!(states(&list)[0], row("dictate", "missing", "Super+Space"));
+        let config =
+            std::fs::read_to_string(config_file(&daemon.home().config)).unwrap_or_default();
+        assert!(!config.contains(r#""dictate""#), "{desktop}: {config}");
+    }
 }
 
 /// A daemon binds the shortcuts in its config as it starts, with no client

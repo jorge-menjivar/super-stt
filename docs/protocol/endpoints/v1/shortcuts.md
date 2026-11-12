@@ -48,10 +48,15 @@ the desktop names Super Voice in its dialog and its shortcut settings.
    settings, keys and all, until the user removes it there. So a shortcut is
    changed or removed in the desktop's settings. `DELETE` only stops Super
    Voice binding it.
-4. At each start the daemon binds only the saved shortcuts the desktop still
-   has. One the user removed in the desktop's settings is forgotten, and
-   `GET /shortcuts` lists it as `missing` again. Hyprland keeps nothing
-   between sessions, so there every saved shortcut is bound again.
+4. At each start the daemon binds the saved shortcuts again, and forgets one
+   the user removed in the desktop's settings, so `GET /shortcuts` lists it
+   as `missing` again:
+   1. KDE Plasma says which it kept before they are bound, so only those are
+      bound.
+   2. GNOME lists nothing until a bind, so every saved one is bound, and
+      GNOME asks again in its dialog for one removed in its settings. One the
+      user turns down there is forgotten.
+   3. Hyprland keeps nothing between sessions, so every saved one is bound.
 
 ## Auth
 
