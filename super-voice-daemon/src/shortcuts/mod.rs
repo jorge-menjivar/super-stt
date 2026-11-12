@@ -13,11 +13,15 @@
 //!    the user added are in the config, and bound again at every start. The
 //!    portal cannot unbind one: on KDE Plasma, KDE's shortcut service is told
 //!    to forget it, and elsewhere the user removes it in the desktop's
-//!    settings.
+//!    settings. GNOME holds Super Voice's keys for input-source switching,
+//!    so there the daemon takes them over first, as Dictate's entry does on
+//!    COSMIC ([`gnome`]).
 //! 3. Anything else: the user binds the command in the desktop's settings.
 //!
 //! Contract: `docs/protocol/endpoints/v1/shortcuts.md`.
 
+#[cfg(target_os = "linux")]
+mod gnome;
 #[cfg(target_os = "linux")]
 pub mod portal;
 
@@ -328,6 +332,71 @@ async fn open_session() -> Result<portal::Session, Error> {
         .map_err(|e| Error::Write(format!("{e:#}")))
 }
 
+/// On GNOME, take the keys of `ids` from GNOME's input-source switching,
+/// which holds them by default, before they are bound ([`gnome`]). Answers
+/// the ones whose keys were taken. Elsewhere none, and a failure is logged:
+/// the shortcut is bound all the same.
+// `allow`, not `expect`: clippy 1.98 files these under `unused_async_trait_impl`
+// and later releases under `unused_async`, so either `expect` goes unfulfilled
+// on some toolchain.
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(
+        clippy::unused_async,
+        clippy::unused_async_trait_impl,
+        reason = "GNOME's settings are Linux's: elsewhere there is nothing to await"
+    )
+)]
+pub async fn take_desktop_keys(ids: &[ShortcutId]) -> Vec<ShortcutId> {
+    let mut taken = Vec::new();
+    #[cfg(target_os = "linux")]
+    if on_gnome() {
+        for &id in ids {
+            match gnome::take(id).await {
+                Ok(true) => {
+                    info!("Took shortcut {id}'s keys from GNOME's input-source switching");
+                    taken.push(id);
+                }
+                Ok(false) => {}
+                Err(e) => warn!("Could not take shortcut {id}'s keys from GNOME: {e:#}"),
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = ids;
+    taken
+}
+
+/// On GNOME, give the keys of `ids` back to GNOME's input-source switching.
+/// Answers the ones given back. Elsewhere none.
+// `allow`, not `expect`: see `take_desktop_keys`.
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(
+        clippy::unused_async,
+        clippy::unused_async_trait_impl,
+        reason = "GNOME's settings are Linux's: elsewhere there is nothing to await"
+    )
+)]
+pub async fn give_back_desktop_keys(ids: &[ShortcutId]) -> Vec<ShortcutId> {
+    let mut given = Vec::new();
+    #[cfg(target_os = "linux")]
+    if on_gnome() {
+        for &id in ids {
+            match gnome::give_back(id).await {
+                Ok(()) => {
+                    info!("Gave shortcut {id}'s keys back to GNOME's input-source switching");
+                    given.push(id);
+                }
+                Err(e) => warn!("Could not give shortcut {id}'s keys back to GNOME: {e:#}"),
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = ids;
+    given
+}
+
 /// Have KDE Plasma's shortcut service forget shortcut `id`.
 #[cfg(target_os = "linux")]
 async fn forget_on_kde(id: ShortcutId) -> Result<(), Error> {
@@ -420,6 +489,12 @@ fn is_kde(desktop: Option<&str>) -> bool {
 #[cfg(target_os = "linux")]
 fn on_kde() -> bool {
     is_kde(desktop().as_deref())
+}
+
+/// Whether the daemon runs on GNOME.
+#[cfg(target_os = "linux")]
+fn on_gnome() -> bool {
+    names(desktop().as_deref(), "GNOME")
 }
 
 /// Whether `DELETE /shortcuts/{id}` takes a shortcut off the desktop by

@@ -64,6 +64,9 @@ impl SuperSTTDaemon {
         let desktop = shortcuts::desktop_name();
         let before = self.config.read().await.shortcuts.portal_on(&desktop);
         let wanted = shortcuts::with(&before, id, add);
+        if add {
+            self.take_desktop_keys(&[id]).await;
+        }
         let changed = if add {
             self.shortcuts.bind_added(&wanted, id).await
         } else {
@@ -75,6 +78,7 @@ impl SuperSTTDaemon {
                 if let Err(again) = self.shortcuts.bind(&before).await {
                     warn!("Could not bind the shortcuts held before: {again:?}");
                 }
+                self.give_back_desktop_keys(&before).await;
                 return Err(e);
             }
         };
@@ -83,6 +87,7 @@ impl SuperSTTDaemon {
             .filter(|s| bound.iter().any(|b| b.id == *s))
             .collect();
         let refused = add && !kept.contains(&id);
+        self.give_back_desktop_keys(&kept).await;
         if let Err(e) = self
             .set_config_field(|c| c.shortcuts.set_portal_on(&desktop, kept))
             .await
@@ -112,9 +117,12 @@ impl SuperSTTDaemon {
             info!("Shortcuts saved for the portal, but this desktop has none: not bound");
             return;
         }
+        // GNOME may hold the keys again, as it did before any were taken.
+        self.take_desktop_keys(&saved).await;
         match self.shortcuts.bind_saved(&saved).await {
             Ok(kept) if kept == saved => info!("Bound {} saved shortcuts", kept.len()),
             Ok(kept) => {
+                self.give_back_desktop_keys(&kept).await;
                 // Removed in the desktop's settings: forgotten here too, so
                 // the page offers to add them again.
                 info!(
@@ -129,6 +137,63 @@ impl SuperSTTDaemon {
                 }
             }
             Err(e) => warn!("Could not bind the saved shortcuts: {e:?}"),
+        }
+    }
+
+    /// GNOME holds Super Voice's keys for its own input-source switching.
+    /// Take the ones of `ids` from it before they are bound, which is when
+    /// GNOME grabs an app's keys, and keep which were taken, so only those
+    /// are given back. Elsewhere nothing.
+    async fn take_desktop_keys(&self, ids: &[ShortcutId]) {
+        let taken = shortcuts::take_desktop_keys(ids).await;
+        if taken.is_empty() {
+            return;
+        }
+        let saved = self
+            .set_config_field(|c| {
+                let record = &mut c.shortcuts.gnome_keys_taken;
+                for id in taken {
+                    if !record.contains(&id) {
+                        record.push(id);
+                    }
+                }
+            })
+            .await;
+        if let Err(e) = saved {
+            warn!("Shortcut keys taken from GNOME but config save failed: {e}");
+        }
+    }
+
+    /// Give back the keys taken from GNOME for every shortcut not in
+    /// `bound`, the ones the daemon binds now. Ones that could not be given
+    /// back are kept, for the next change.
+    async fn give_back_desktop_keys(&self, bound: &[ShortcutId]) {
+        let unbound: Vec<ShortcutId> = self
+            .config
+            .read()
+            .await
+            .shortcuts
+            .gnome_keys_taken
+            .iter()
+            .copied()
+            .filter(|id| !bound.contains(id))
+            .collect();
+        if unbound.is_empty() {
+            return;
+        }
+        let given = shortcuts::give_back_desktop_keys(&unbound).await;
+        if given.is_empty() {
+            return;
+        }
+        let saved = self
+            .set_config_field(|c| {
+                c.shortcuts
+                    .gnome_keys_taken
+                    .retain(|id| !given.contains(id));
+            })
+            .await;
+        if let Err(e) = saved {
+            warn!("Shortcut keys given back to GNOME but config save failed: {e}");
         }
     }
 }

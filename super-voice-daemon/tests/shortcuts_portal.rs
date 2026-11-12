@@ -6,7 +6,9 @@
 //! daemon asks on KDE to forget a shortcut.
 //!
 //! The bus is a `dbus-daemon` with a config of the test's own and no service
-//! directories, so no call can start a real service on it.
+//! directories, so no call can start a real service on it. Beside it is a
+//! fake `gsettings`, first on each daemon's `PATH`, so a daemon on GNOME
+//! changes no one's real GNOME settings.
 
 #![cfg(target_os = "linux")]
 
@@ -30,16 +32,23 @@ const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 
 // ---------- a session bus of the test's own ---------------------------------
 
-/// A `dbus-daemon` that only these tests are on. Stopped when dropped.
+/// A `dbus-daemon` that only these tests are on, and a fake `gsettings`
+/// beside it. Stopped when dropped.
 struct Bus {
     child: std::process::Child,
     address: String,
+    dir: PathBuf,
 }
+
+/// GNOME's input-source bindings as GNOME has them by default.
+const SWITCH_DEFAULT: &str = "['<Super>space', 'XF86Keyboard']";
+const SWITCH_BACKWARD_DEFAULT: &str = "['<Shift><Super>space', '<Shift>XF86Keyboard']";
 
 impl Bus {
     /// Start one, listening in `dir`.
     fn start(dir: &Path) -> Self {
         std::fs::create_dir_all(dir).expect("bus dir");
+        fake_gsettings(dir);
         let config = dir.join("bus.conf");
         std::fs::write(
             &config,
@@ -74,6 +83,7 @@ impl Bus {
         Self {
             child,
             address: address.trim().to_string(),
+            dir: dir.to_path_buf(),
         }
     }
 
@@ -84,6 +94,55 @@ impl Bus {
             .await
             .expect("connect to the test bus")
     }
+
+    /// The fake GNOME's binding `key`, as `gsettings get` prints it.
+    fn gsettings(&self, key: &str) -> String {
+        std::fs::read_to_string(self.dir.join("gsettings").join(key))
+            .expect("a gsettings value")
+            .trim()
+            .to_string()
+    }
+
+    /// Set the fake GNOME's binding `key`, as the user would.
+    fn set_gsettings(&self, key: &str, value: &str) {
+        std::fs::write(self.dir.join("gsettings").join(key), format!("{value}\n"))
+            .expect("set a gsettings value");
+    }
+}
+
+/// A fake `gsettings` in `dir/bin`, which keeps each binding of GNOME's in
+/// a file of its own under `dir/gsettings`, starting from GNOME's defaults.
+fn fake_gsettings(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let values = dir.join("gsettings");
+    std::fs::create_dir_all(&values).expect("gsettings dir");
+    for (key, value) in [
+        ("switch-input-source", SWITCH_DEFAULT),
+        ("switch-input-source-backward", SWITCH_BACKWARD_DEFAULT),
+    ] {
+        std::fs::write(values.join(key), format!("{value}\n")).expect("gsettings value");
+    }
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).expect("bin dir");
+    let script = bin.join("gsettings");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+# A fake gsettings: each key's value is a file of its own.
+dir='{}'
+case "$1" in
+get) cat "$dir/$3" ;;
+set) printf '%s\n' "$4" > "$dir/$3" ;;
+*) echo "fake gsettings: $*" >&2; exit 1 ;;
+esac
+"#,
+            values.display()
+        ),
+    )
+    .expect("write the fake gsettings");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+        .expect("make the fake gsettings runnable");
 }
 
 impl Drop for Bus {
@@ -119,6 +178,10 @@ struct Calls {
     /// Each shortcut KDE's shortcut service was told to forget: the app id
     /// it is under, and its id.
     forgotten: Vec<(String, String)>,
+    /// When set, the fake GNOME's `switch-input-source` file, and what it
+    /// held at each bind.
+    watch_switch: Option<PathBuf>,
+    switch_at_bind: Vec<String>,
     /// The shortcuts the desktop keeps across sessions, as KDE Plasma and
     /// GNOME do: each one ever bound, until the user removes it in the
     /// desktop's settings.
@@ -262,6 +325,10 @@ impl GlobalShortcuts {
         let (refuse, no_keys) = {
             let mut calls = self.0.lock().unwrap();
             calls.binds.push((session.clone(), asked));
+            if let Some(file) = calls.watch_switch.clone() {
+                let held = std::fs::read_to_string(file).unwrap_or_default();
+                calls.switch_at_bind.push(held.trim().to_string());
+            }
             if calls.refuse.is_none() {
                 calls.bound.insert(session, ids.clone());
                 for id in &ids {
@@ -398,7 +465,13 @@ async fn start_on(
     bus: &Bus,
     config: Option<&str>,
 ) -> (TestDaemon, String) {
+    let path = format!(
+        "{}:{}",
+        bus.dir.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let builder = common::daemon(label)
+        .env("PATH", path)
         .env("XDG_CURRENT_DESKTOP", desktop)
         .env("DBUS_SESSION_BUS_ADDRESS", &bus.address);
     if let Some(content) = config {
@@ -744,6 +817,75 @@ async fn a_shortcut_removed_in_the_desktop_is_offered_again() {
     );
     let config = std::fs::read_to_string(config_file(&second.home().config)).expect("config");
     assert!(!config.contains(r#""dictate""#), "{config}");
+}
+
+/// GNOME switches the input source on Super Voice's keys. Adding a shortcut
+/// there takes its keys from that first, so the bind gets them, and removing
+/// it gives them back. One turned down gives them back too, and keys the
+/// user freed are never put back.
+#[tokio::test]
+async fn on_gnome_a_shortcut_takes_its_keys_from_input_source_switching() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let bus = Bus::start(home.path());
+    let (_portal, calls) = fake_portal(&bus).await;
+    calls.lock().unwrap().watch_switch = Some(bus.dir.join("gsettings/switch-input-source"));
+    let (daemon, token) = start_on("GNOME", "shortcuts-gnome-keys", &bus, None).await;
+
+    let (status, body) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(bus.gsettings("switch-input-source"), "['XF86Keyboard']");
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .switch_at_bind
+            .last()
+            .map(String::as_str),
+        Some("['XF86Keyboard']"),
+        "the keys are taken before the bind"
+    );
+    assert_eq!(
+        bus.gsettings("switch-input-source-backward"),
+        SWITCH_BACKWARD_DEFAULT
+    );
+
+    calls.lock().unwrap().refuse = Some(2);
+    let (status, body) = call(&daemon, &token, Method::POST, "/shortcuts/read_aloud").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        bus.gsettings("switch-input-source-backward"),
+        SWITCH_BACKWARD_DEFAULT,
+        "turned down, its keys are given back"
+    );
+    calls.lock().unwrap().refuse = None;
+
+    let (status, body) = call(&daemon, &token, Method::DELETE, "/shortcuts/dictate").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(bus.gsettings("switch-input-source"), SWITCH_DEFAULT);
+
+    // The user freed Super+Shift+Space: it stays free.
+    bus.set_gsettings("switch-input-source-backward", "['<Shift>XF86Keyboard']");
+    for method in [Method::POST, Method::DELETE] {
+        let (status, body) = call(&daemon, &token, method, "/shortcuts/read_aloud").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    assert_eq!(
+        bus.gsettings("switch-input-source-backward"),
+        "['<Shift>XF86Keyboard']"
+    );
+}
+
+/// Off GNOME, GNOME's settings are left alone.
+#[tokio::test]
+async fn off_gnome_its_keys_are_left_alone() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let bus = Bus::start(home.path());
+    let (_portal, _calls) = fake_portal(&bus).await;
+    let (daemon, token) = start("shortcuts-kde-keys", &bus, None).await;
+
+    let (status, body) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(bus.gsettings("switch-input-source"), SWITCH_DEFAULT);
 }
 
 /// A press reaches the session's caller as the shortcut's id, and only a

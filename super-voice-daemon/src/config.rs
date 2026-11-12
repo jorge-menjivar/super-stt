@@ -93,6 +93,15 @@ pub struct ShortcutsConfig {
         deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub portal: BTreeMap<String, Vec<ShortcutId>>,
+    /// The shortcuts whose keys the daemon took from GNOME's input-source
+    /// switching, which holds Super+Space and Super+Shift+Space by default.
+    /// They are given back once the daemon no longer binds the shortcut, and
+    /// only these: keys the user freed stay free.
+    #[serde(
+        default,
+        deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub gnome_keys_taken: Vec<ShortcutId>,
 }
 
 impl ShortcutsConfig {

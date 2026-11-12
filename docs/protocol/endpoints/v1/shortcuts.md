@@ -69,6 +69,14 @@ the desktop names Super Voice in its dialog and its shortcut settings.
       GNOME asks again in its dialog for one removed in its settings. One the
       user turns down there is forgotten.
    3. Hyprland keeps nothing between sessions, so every saved one is bound.
+5. GNOME switches the input source on Super+Space, and back on
+   Super+Shift+Space, and its own binding gets a press before Super Voice's.
+   So, as Dictate's entry does on COSMIC, the daemon takes a shortcut's keys
+   from GNOME's input-source switching before it binds the shortcut, at each
+   add and each start, and gives them back once it no longer binds it.
+   Input-source switching keeps its other keys, such as the keyboard's own
+   switch key. Only keys the daemon took are given back: ones the user freed
+   stay free.
 
 ## Auth
 
