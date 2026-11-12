@@ -26,7 +26,9 @@ impl SuperSTTDaemon {
             None => ("unknown".to_string(), false, None),
         };
 
-        let busy = *self.busy.read().await;
+        // A recording waiting for its model is at work too: a client that
+        // toggles on this would otherwise start a second one, not stop it.
+        let busy = *self.busy.read().await || self.recording_is_pending();
 
         let mut response = DaemonResponse::success()
             .with_device(device)

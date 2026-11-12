@@ -47,8 +47,10 @@ pub async fn speak_command(text: String) -> HttpResult<Option<String>> {
     with_settings_token(move |socket, token| {
         let body = body.clone();
         async move {
+            // No header timeout: the daemon answers once the utterance is
+            // queued, which follows a model load when it unloads idle models.
             let reply: SpeakReply =
-                transport::post_json(socket, &token, "/tts/speak", &body).await?;
+                transport::post_json_no_timeout(socket, &token, "/tts/speak", &body).await?;
             Ok(reply.require_success("speak_command")?.utterance_id)
         }
     })

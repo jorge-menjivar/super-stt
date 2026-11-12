@@ -180,21 +180,21 @@ impl SuperTTSDaemon {
     /// Stops whatever is being spoken first — see
     /// [`stop_speech_for`](Self::stop_speech_for).
     pub async fn handle_unload_active_model(&self) -> DaemonResponse {
+        // An on-demand load in flight finishes first: unloading around it
+        // would answer success and leave the model it then installs. Held to
+        // the end, so no request starts another load meanwhile.
+        let _loading = self.idle.loading.lock().await;
         if self.model.read().await.is_none() {
             // Unloaded for being idle, the model is still selected and the
-            // next request would load it: clear it, which is what this call
-            // is for.
+            // next request would load it: clear it below, which is what this
+            // call is for.
             let waiting = {
                 let config = self.config.read().await;
                 config.idle_unload.after().is_some() && !config.synthesis.preferred_model.is_empty()
             };
-            if waiting {
-                self.config.write().await.clear_synthesis_model();
-                if let Err(e) = self.persist_config().await {
-                    warn!("Failed to persist config after unloading model: {e}");
-                }
+            if !waiting {
+                return DaemonResponse::success().with_message("No model to unload".to_string());
             }
-            return DaemonResponse::success().with_message("No model to unload".to_string());
         }
         self.stop_speech_for("unload the model").await;
         let dropped = self

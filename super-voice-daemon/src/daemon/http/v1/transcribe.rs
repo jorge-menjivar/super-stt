@@ -453,7 +453,7 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
     // `docs/protocol/endpoints/v1/transcribe.md`). The client is
     // expected to consult `GET /v1/status::busy` and call
     // `/v1/stt/transcribe/stop` to end an in-flight capture.
-    if *s.daemon.busy.read().await {
+    if *s.daemon.busy.read().await || s.daemon.recording_is_pending() {
         return recording_in_progress_response();
     }
 
@@ -484,10 +484,12 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
     // already running), so nothing regresses by not calling
     // `handle_record_internal` for this specific request; the `409` response
     // below still stands.
-    if !*s.daemon.busy.read().await {
-        s.daemon.ensure_model_loaded().await;
-    }
-    if s.daemon.model.read().await.is_none() {
+    //
+    // A model the daemon unloaded for being idle is not this case. The
+    // recording loads it, after the `202`/SSE envelope below: loading it here
+    // would hold the response headers for as long as the load takes, past the
+    // time a client waits for them.
+    if s.daemon.model.read().await.is_none() && !s.daemon.loads_on_demand().await {
         if !*s.daemon.busy.read().await {
             let _ = s.daemon.handle_command(req).await;
         }
@@ -646,6 +648,8 @@ fn transcribe_mic_sse(
         // daemon would be stuck with `busy=true` /
         // `manual_stop_tx=Some(_)` until the next daemon restart.
         if client_disconnected {
+            // Waiting for its model, it has no stop channel yet.
+            daemon.cancel_pending_recording();
             if let Some(tx) = daemon.manual_stop_tx.read().await.as_ref() {
                 let _ = tx.send(());
             }
@@ -723,6 +727,17 @@ pub(crate) async fn transcribe_stop(State(s): State<AppState>) -> Response {
     // Idempotent: nothing to stop. Direct response — going through
     // `handle_record_command` here would start a fresh recording
     // because that path is shared with `record`'s start case.
+    // A recording waiting for its model is not busy yet: cancel it here.
+    if s.daemon.cancel_pending_recording() {
+        return narrowed(
+            DaemonResponse::success()
+                .with_message(DaemonResponse::RECORDING_STOP_SIGNAL_MSG.to_string()),
+            |r| Ack {
+                status: "success",
+                message: r.message,
+            },
+        );
+    }
     if !*s.daemon.busy.read().await {
         return narrowed(
             DaemonResponse::success().with_message("No recording in progress".to_string()),

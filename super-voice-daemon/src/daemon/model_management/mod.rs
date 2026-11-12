@@ -8,7 +8,7 @@
 //! backends provision their own files when spawned.
 
 mod discovery;
-mod idle;
+pub(crate) mod idle;
 mod instantiate;
 mod lifecycle;
 mod post_processor;

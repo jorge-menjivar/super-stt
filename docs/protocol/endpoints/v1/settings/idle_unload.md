@@ -10,8 +10,11 @@ With a value set:
   [`POST /stt/transcribe`](../transcribe.md),
   [`POST /tts/speak`](../tts/speak.md) or
   [`GET /tts/speak/stream`](../tts/speak/stream.md) — loads it first and
-  proceeds once it has. `409 model_not_loaded` then means no model is selected,
-  or the load failed.
+  proceeds once it has. A daemon-mic recording is accepted at once and starts
+  when the model has loaded. `POST /tts/speak`, and a `POST /stt/transcribe`
+  carrying `audio_data`, answer after the load, so a client must not time
+  them out sooner. `409 model_not_loaded` then means no model is selected or,
+  for those two, that the load failed.
 - A model unused for that long is unloaded and stays selected. A recording or
   an utterance in progress counts as use, and the time is counted from when it
   ends. The unload is reported as a `ready` event with `model_loaded: false` on
@@ -25,7 +28,9 @@ An explicit unload
 [`DELETE /tts/pipeline/1/model`](../tts/pipeline/model.md)) is unchanged: it
 switches the model off, and nothing loads it again until a client does. That
 holds for a model the daemon has already unloaded for being idle: the call
-switches it off, so the next request does not load it.
+switches it off, so the next request does not load it, and announces it with
+the same `ready` event. A call that arrives while a request is loading the
+model waits for that load and then unloads it.
 
 ## Auth
 

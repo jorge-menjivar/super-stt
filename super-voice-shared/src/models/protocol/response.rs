@@ -237,6 +237,9 @@ pub struct NotificationEvent {
 impl DaemonResponse {
     /// Canonical message returned when a running recording is stopped via a second press.
     pub const RECORDING_STOP_SIGNAL_MSG: &str = "Recording stop signal sent";
+    /// Canonical message of a recording cancelled before it captured anything,
+    /// while it waited for its model to load.
+    pub const RECORDING_CANCELLED_MSG: &str = "Recording cancelled before it started";
 
     #[must_use]
     pub fn success() -> Self {

@@ -75,6 +75,16 @@ pub struct PreviewFrame {
 pub type PreviewSlot =
     Arc<tokio::sync::RwLock<Option<(u64, tokio::sync::mpsc::UnboundedSender<PreviewFrame>)>>>;
 
+/// The recording that has not started capturing yet: reserved from when it
+/// begins waiting for its model until it claims `busy`, so a stop always has
+/// one of the two to reach.
+pub type PendingRecording = Arc<std::sync::Mutex<Option<PendingStart>>>;
+
+/// A reserved recording's cancel handle. `None` once it has been cancelled:
+/// the reservation stays, marked, until the recording itself gives it up.
+#[derive(Debug)]
+pub struct PendingStart(pub(crate) Option<tokio::sync::oneshot::Sender<()>>);
+
 #[derive(Clone)]
 pub struct SuperSTTDaemon {
     pub model: SharedLoadedModel,
@@ -133,6 +143,10 @@ pub struct SuperSTTDaemon {
     // a stage wins. Taken in `instantiate_backend`, which every load of either
     // stage passes through.
     pub loading: Arc<StageLoadGates>,
+    // The recording waiting for its model to load, if one is: nothing is
+    // capturing yet, so `busy` is false and there is no `manual_stop_tx`. See
+    // `model_management::idle`.
+    pub pending_recording: PendingRecording,
     // The transcription model's last use, for unloading it when idle. See
     // `model_management::idle`.
     pub idle: Arc<crate::idle_unload::IdleTracker>,
@@ -242,6 +256,7 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         self_update: Arc::new(crate::self_update::checker()),
         loading: Arc::new(StageLoadGates::default()),
         idle: Arc::default(),
+        pending_recording: Arc::default(),
         // In memory: no daemon test reads or writes the user's secrets file.
         secrets: Secrets::in_memory(),
         tts: crate::tts::daemon::types::test_daemon().await,
