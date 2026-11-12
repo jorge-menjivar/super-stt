@@ -278,7 +278,8 @@ impl SuperSTTDaemon {
         let message = if after_secs == 0 {
             let bg = self.clone();
             tokio::spawn(async move {
-                tokio::join!(bg.load_selected_model(), bg.tts.load_selected_model());
+                // Each logs its own failure; nobody is waiting on this.
+                let _ = tokio::join!(bg.load_selected_model(), bg.tts.load_selected_model());
             });
             "Models stay loaded".to_string()
         } else {

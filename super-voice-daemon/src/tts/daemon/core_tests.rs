@@ -2231,3 +2231,38 @@ async fn an_unload_during_a_load_waits_for_it_and_clears_the_selection() {
             .is_empty()
     );
 }
+
+/// A speak whose model fails to load on demand notifies that, not "no model
+/// loaded": a model is selected, and loading another would not help.
+#[tokio::test]
+async fn a_speak_whose_model_fails_to_load_says_so() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-tts/kokoro";
+    // No component on disk, so its load fails.
+    *daemon.backends.write().await = vec![fixture_backend_local(
+        "kokoro",
+        source,
+        "Kokoro",
+        "kokoro-tiny",
+    )];
+    {
+        let mut config = daemon.config.write().await;
+        config.update_synthesis_model("kokoro-tiny".into(), source.into());
+        config.idle_unload.after_secs = 30;
+    }
+    let (notifier, sent) = crate::tts::output::notification::Notifier::fake(false);
+    *daemon.notifier.lock().await = notifier;
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(10),
+        daemon.handle_speak("hello".to_string()),
+    )
+    .await
+    .expect("the load failed rather than hung");
+
+    assert_eq!(response.error_code, Some(ErrorCode::ModelNotLoaded));
+    let sent = sent.lock().unwrap();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].0, "Could not load the model");
+}

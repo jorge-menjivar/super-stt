@@ -170,7 +170,8 @@ async fn run_realtime_session(
     // arrives for REALTIME_IDLE_TIMEOUT the watchdog wins, the select! drops
     // the session future, and the read lock is released — preventing a
     // half-open TCP connection from wedging model switches indefinitely.
-    daemon.ensure_model_loaded().await;
+    // A load that fails is logged; the session reports the missing model.
+    let _ = daemon.ensure_model_loaded().await;
     {
         let guard = daemon.model.read().await;
         match guard.as_ref() {

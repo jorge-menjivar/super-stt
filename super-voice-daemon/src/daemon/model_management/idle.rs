@@ -11,11 +11,14 @@ use std::time::Duration;
 use super_voice_shared::models::protocol::DaemonStatusEvent;
 
 /// How a recording's wait for its model ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ModelWait {
-    /// Go on: the model is in memory, or cannot be, which the caller's own
-    /// `model_not_loaded` check reports.
+    /// Go on: the model is in memory, or there was none to load, which the
+    /// caller's own `model_not_loaded` check reports.
     Ready,
+    /// The selected model was loaded for the recording, and the load failed:
+    /// why.
+    LoadFailed(String),
     /// The recording was cancelled while its model loaded.
     Cancelled,
     /// Another recording is already waiting for the model.
@@ -27,24 +30,29 @@ impl SuperSTTDaemon {
     /// on idle, load the selected one if it is not in memory. Every request
     /// that needs the model calls this first.
     ///
-    /// Returns once the model is loaded or cannot be: a failure is logged and
-    /// left for the caller's own `model_not_loaded` check to report.
+    /// Returns once the model is loaded or cannot be. A load that failed is
+    /// the error, with why, so the caller reports that rather than "no model
+    /// loaded"; with no model to load, it is left to the caller's own
+    /// `model_not_loaded` check.
     ///
     /// The load runs as its own task, so a request dropped while it waits (its
     /// client gave up or went away) does not cancel it with the backend half
     /// started. The model is then in memory for the next request.
-    pub(crate) async fn ensure_model_loaded(&self) {
+    pub(crate) async fn ensure_model_loaded(&self) -> Result<(), String> {
         // Before the slot is read: the idle check reads this under the slot's
         // write lock, so a request that got this far is never unloaded under.
         self.model.touch();
         if self.model.read().await.is_some()
             || self.config.read().await.idle_unload.after().is_none()
         {
-            return;
+            return Ok(());
         }
         let bg = self.clone();
-        let _ = tokio::spawn(async move { bg.load_selected_model().await }).await;
+        let loaded = tokio::spawn(async move { bg.load_selected_model().await })
+            .await
+            .unwrap_or_else(|e| Err(format!("The load stopped: {e}")));
         self.model.touch();
+        loaded
     }
 
     /// Whether a request finding no model in memory would load one: models
@@ -94,7 +102,7 @@ impl SuperSTTDaemon {
             // the same moment.
             biased;
             Ok(()) = cancelled => ModelWait::Cancelled,
-            () = load => ModelWait::Ready,
+            loaded = load => loaded.map_or_else(ModelWait::LoadFailed, |()| ModelWait::Ready),
         };
         if outcome == ModelWait::Cancelled {
             self.release_pending_recording();
@@ -148,21 +156,25 @@ impl SuperSTTDaemon {
     /// [`ModelSlot::begin_load_if_empty`](super_engine_daemon::model_slot::ModelSlot::begin_load_if_empty).
     /// The selection is read on the load's turn, so an unload that switched
     /// the model off meanwhile is seen.
-    pub(crate) async fn load_selected_model(&self) {
+    ///
+    /// # Errors
+    /// Why the load failed. Finding nothing to load is not an error.
+    pub(crate) async fn load_selected_model(&self) -> Result<(), String> {
         let Some(turn) = self.model.begin_load_if_empty().await else {
-            return;
+            return Ok(());
         };
         let Some((name, source)) = self.pick_startup_model().await else {
-            return;
+            return Ok(());
         };
         info!("Loading {name} on demand");
-        if let Err(e) =
-            Self::load_initial_model_and_broadcast(self, turn, name.clone(), source).await
-        {
-            warn!("Failed to load {name} on demand: {e}");
-            self.download_manager
-                .clear_download(PipelineStage::Transcription.position());
-        }
+        Self::load_initial_model_and_broadcast(self, turn, name.clone(), source)
+            .await
+            .map_err(|e| {
+                warn!("Failed to load {name} on demand: {e:#}");
+                self.download_manager
+                    .clear_download(PipelineStage::Transcription.position());
+                format!("{name} did not load: {e:#}")
+            })
     }
 
     /// Unload the transcription model if nothing has used it for `after`,

@@ -1492,7 +1492,22 @@ impl crate::tts::daemon::types::SuperTTSDaemon {
         if let Err(e) = check_text(&text) {
             return DaemonResponse::error_with_code(ErrorCode::InvalidValue, &e.to_string());
         }
-        self.ensure_model_loaded().await;
+        // A model is selected and failed to load: the notice says that, not
+        // "no model loaded", which would send the user to load one. The answer
+        // keeps the code a missing model gets.
+        if let Err(detail) = self.ensure_model_loaded().await {
+            let method = crate::tts::output::notification::method_for_speech(
+                self.config.read().await.notification_method,
+            );
+            let mut notifier = self.notifier.lock().await;
+            crate::tts::output::notification::deliver(
+                method,
+                &mut notifier,
+                &Failure::could_not_load_model(&detail),
+            )
+            .await;
+            return DaemonResponse::error_with_code(ErrorCode::ModelNotLoaded, "model_not_loaded");
+        }
         let (voice, language) = self.stored_defaults().await;
 
         // `speak` rather than the session API on purpose: it refuses empty,
@@ -1556,7 +1571,8 @@ impl crate::tts::daemon::types::SuperTTSDaemon {
     /// # Errors
     /// See [`SpeakError`].
     pub(crate) async fn begin_speech(&self) -> Result<SpeakSession, SpeakError> {
-        self.ensure_model_loaded().await;
+        // A load that fails is logged; the session reports the missing model.
+        let _ = self.ensure_model_loaded().await;
         let (voice, language) = self.stored_defaults().await;
         let options = SpeakOptions {
             voice: voice.as_deref(),

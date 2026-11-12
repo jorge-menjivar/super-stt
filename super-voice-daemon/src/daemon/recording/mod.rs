@@ -138,6 +138,22 @@ impl SuperSTTDaemon {
             }
             // One recording waits for the model at a time, as one records at
             // a time.
+            // A model is selected and failed to load: say that, not "no
+            // model loaded", which would send the user to load one.
+            ModelWait::LoadFailed(detail) => {
+                self.release_pending_recording();
+                warn!("Recording request rejected - its model failed to load");
+                self.surface_failure(
+                    typer,
+                    &notice::Failure::could_not_load_model(&detail),
+                    write_mode,
+                )
+                .await;
+                return DaemonResponse::error_with_code(
+                    ErrorCode::ModelNotLoaded,
+                    &format!("Could not load the model: {detail}"),
+                );
+            }
             ModelWait::AnotherWaiting => {
                 warn!("Recording request rejected - one is waiting for its model");
                 return DaemonResponse::error_with_code(

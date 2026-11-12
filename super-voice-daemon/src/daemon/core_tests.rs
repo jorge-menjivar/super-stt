@@ -3374,3 +3374,43 @@ async fn an_unload_switches_off_a_model_not_in_memory() {
     assert_eq!(response.status, "success");
     assert!(!daemon.config.read().await.transcription.is_active());
 }
+
+/// A recording whose model fails to load on demand says so, not "no model
+/// loaded": a model is selected, and loading another would not help.
+#[tokio::test]
+async fn a_recording_whose_model_fails_to_load_says_so() {
+    use std::time::Duration;
+    // The fixture's backend has no component on disk, so its load fails.
+    let daemon = daemon_loading_on_demand().await;
+    let (sim, buf) = crate::output::keyboard::Simulator::capture();
+    let mut typer = crate::output::typer::Typer::new(sim);
+
+    let resp = tokio::time::timeout(
+        Duration::from_secs(10),
+        daemon.handle_record_internal(
+            &mut typer,
+            true,
+            RecordingStopMode::ManualOnly,
+            false,
+            AudioTheme::Silent,
+            None,
+        ),
+    )
+    .await
+    .expect("the load failed rather than hung");
+
+    assert_eq!(resp.error_code, Some(ErrorCode::ModelNotLoaded));
+    assert!(
+        resp.message
+            .as_deref()
+            .is_some_and(|m| m.starts_with("Could not load the model: whisper-1")),
+        "{:?}",
+        resp.message
+    );
+    assert_eq!(
+        *buf.lock().unwrap(),
+        "[Super Voice: could not load the model]"
+    );
+    assert!(!daemon.recording_is_pending());
+    assert!(!*daemon.busy.read().await);
+}
