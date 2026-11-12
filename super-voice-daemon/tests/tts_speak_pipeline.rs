@@ -57,19 +57,27 @@ fn definition() -> ModelDefinition {
 
 /// A shared slot holding the mock backend, or `None` when the fixture is not
 /// built (the caller then skips).
-fn loaded_model() -> Option<SharedLoadedModel> {
+async fn loaded_model() -> Option<SharedLoadedModel> {
     let path = mock_component()?;
     let backend = WasmBackend::new(&path, Vec::new(), "mock".to_string(), Vec::new())
         .expect("load mock backend");
-    Some(Arc::new(tokio::sync::RwLock::new(Some(LoadedModel::new(
-        definition(),
-        Box::new(backend),
-    )))))
+    Some(slot_with(LoadedModel::new(definition(), Box::new(backend))).await)
+}
+
+/// A slot holding `model`, put there on a load turn as a load would.
+async fn slot_with(model: LoadedModel) -> SharedLoadedModel {
+    let slot: SharedLoadedModel = Arc::default();
+    slot.begin_load()
+        .await
+        .expect("nothing else loads in a test")
+        .install(model)
+        .await;
+    slot
 }
 
 /// An empty slot, for the not-loaded path.
 fn empty_model() -> SharedLoadedModel {
-    Arc::new(tokio::sync::RwLock::new(None))
+    Arc::default()
 }
 
 /// Pull `n` samples out of the engine's playback ring the way a device would.
@@ -122,7 +130,7 @@ async fn play_out(engine: &SpeechEngine) {
 
 #[tokio::test]
 async fn speak_synthesizes_and_queues_audio_for_playback() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built (run `just build-mock-wasm-backend`)");
         return;
     };
@@ -179,7 +187,7 @@ async fn speak_synthesizes_and_queues_audio_for_playback() {
 /// would still "sound like something".
 #[tokio::test]
 async fn the_queued_audio_preserves_the_backends_ramp() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -232,7 +240,7 @@ async fn speaking_without_a_model_is_a_coded_refusal() {
 
 #[tokio::test]
 async fn empty_and_oversized_text_are_refused_before_the_backend_is_touched() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -261,7 +269,7 @@ async fn empty_and_oversized_text_are_refused_before_the_backend_is_touched() {
 
 #[tokio::test]
 async fn cancel_clears_the_queued_audio() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -300,7 +308,7 @@ async fn cancelling_nothing_is_harmless() {
 /// whatever the first left in the ring.
 #[tokio::test]
 async fn a_second_utterance_supersedes_the_first() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -328,23 +336,20 @@ async fn a_second_utterance_supersedes_the_first() {
 }
 
 /// A model with a small `max_input_chars`, so the chunker has to split.
-fn loaded_model_with_limit(limit: u32) -> Option<SharedLoadedModel> {
+async fn loaded_model_with_limit(limit: u32) -> Option<SharedLoadedModel> {
     let path = mock_component()?;
     let backend = WasmBackend::new(&path, Vec::new(), "mock".to_string(), Vec::new())
         .expect("load mock backend");
     let mut def = definition();
     def.product.max_input_chars = Some(limit);
-    Some(Arc::new(tokio::sync::RwLock::new(Some(LoadedModel::new(
-        def,
-        Box::new(backend),
-    )))))
+    Some(slot_with(LoadedModel::new(def, Box::new(backend))).await)
 }
 
 /// Text past the model's limit becomes several synthesis requests, and the
 /// audio from all of them reaches the ring.
 #[tokio::test]
 async fn long_text_is_split_into_several_synthesis_chunks() {
-    let Some(model) = loaded_model_with_limit(40) else {
+    let Some(model) = loaded_model_with_limit(40).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -378,7 +383,7 @@ async fn long_text_is_split_into_several_synthesis_chunks() {
 /// and resets the model's prosodic context.
 #[tokio::test]
 async fn short_text_stays_a_single_synthesis_chunk() {
-    let Some(model) = loaded_model_with_limit(4000) else {
+    let Some(model) = loaded_model_with_limit(4000).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -394,7 +399,7 @@ async fn short_text_stays_a_single_synthesis_chunk() {
 /// the asterisks out loud.
 #[tokio::test]
 async fn markup_is_normalized_away_before_synthesis() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -418,7 +423,7 @@ async fn markup_is_normalized_away_before_synthesis() {
 /// the audio device.
 #[tokio::test]
 async fn text_that_is_entirely_markup_is_refused_as_empty() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -466,7 +471,7 @@ async fn eventually(mut cond: impl FnMut() -> bool) -> bool {
 /// utterance would sound different from the same text pasted in.
 #[tokio::test]
 async fn streaming_deltas_produce_the_same_audio_as_one_shot() {
-    let Some(model) = loaded_model_with_limit(60) else {
+    let Some(model) = loaded_model_with_limit(60).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -517,7 +522,7 @@ async fn streaming_deltas_produce_the_same_audio_as_one_shot() {
 /// not after. If this failed, the WebSocket would be a slower POST.
 #[tokio::test]
 async fn sentences_are_synthesized_before_the_stream_ends() {
-    let Some(model) = loaded_model_with_limit(60) else {
+    let Some(model) = loaded_model_with_limit(60).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -552,7 +557,7 @@ async fn sentences_are_synthesized_before_the_stream_ends() {
 /// wrong, and the rest is usually one token away.
 #[tokio::test]
 async fn an_incomplete_sentence_is_not_synthesized_early() {
-    let Some(model) = loaded_model_with_limit(4000) else {
+    let Some(model) = loaded_model_with_limit(4000).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -569,7 +574,7 @@ async fn an_incomplete_sentence_is_not_synthesized_early() {
 
 #[tokio::test]
 async fn cancelling_a_stream_drops_its_queued_audio() {
-    let Some(model) = loaded_model_with_limit(60) else {
+    let Some(model) = loaded_model_with_limit(60).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -598,7 +603,7 @@ async fn cancelling_a_stream_drops_its_queued_audio() {
 /// the task dies without running its cleanup.
 #[tokio::test]
 async fn dropping_a_session_cancels_it() {
-    let Some(model) = loaded_model_with_limit(60) else {
+    let Some(model) = loaded_model_with_limit(60).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -624,7 +629,7 @@ async fn dropping_a_session_cancels_it() {
 /// tell — otherwise a client keeps feeding a session whose audio is discarded.
 #[tokio::test]
 async fn a_new_utterance_supersedes_a_live_stream() {
-    let Some(model) = loaded_model_with_limit(60) else {
+    let Some(model) = loaded_model_with_limit(60).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -663,7 +668,7 @@ fn backlog() -> String {
 /// came back a ring's worth further on, and carried on through the backlog.
 #[tokio::test]
 async fn a_stop_is_not_undone_by_the_audio_queued_behind_the_ring() {
-    let Some(model) = loaded_model_with_limit(60) else {
+    let Some(model) = loaded_model_with_limit(60).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -701,7 +706,7 @@ async fn a_stop_is_not_undone_by_the_audio_queued_behind_the_ring() {
 /// cancel that took as long as the speech it was meant to cut.
 #[tokio::test]
 async fn cancelling_a_stream_does_not_wait_for_its_backlog() {
-    let Some(model) = loaded_model_with_limit(60) else {
+    let Some(model) = loaded_model_with_limit(60).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -727,7 +732,7 @@ async fn cancelling_a_stream_does_not_wait_for_its_backlog() {
 /// played interleaved.
 #[tokio::test]
 async fn a_new_utterance_is_not_interleaved_with_the_backlog_it_replaced() {
-    let Some(model) = loaded_model_with_limit(60) else {
+    let Some(model) = loaded_model_with_limit(60).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -766,7 +771,7 @@ async fn a_new_utterance_is_not_interleaved_with_the_backlog_it_replaced() {
 async fn marks_are_forwarded_to_the_stream() {
     use super_voice_daemon::tts::daemon::speech::SpeechEvent;
 
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -789,7 +794,7 @@ async fn marks_are_forwarded_to_the_stream() {
 
 #[tokio::test]
 async fn progress_reports_a_position_within_the_utterance() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -851,7 +856,7 @@ async fn drain_events(rx: &mut AnyReceiver) -> Vec<serde_json::Value> {
 /// speech without polling.
 #[tokio::test]
 async fn speaking_state_is_published_around_an_utterance() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -887,7 +892,7 @@ async fn speaking_state_is_published_around_an_utterance() {
 /// replaced it — otherwise the applet shows "not speaking" while speech plays.
 #[tokio::test]
 async fn a_superseded_utterance_does_not_clear_the_new_ones_state() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -927,7 +932,7 @@ async fn a_superseded_utterance_does_not_clear_the_new_ones_state() {
 /// drops a live visualizer to idle on it.
 #[tokio::test]
 async fn superseding_a_playing_utterance_does_not_report_a_stop() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -965,7 +970,7 @@ async fn superseding_a_playing_utterance_does_not_report_a_stop() {
 /// same way it used to render a microphone.
 #[tokio::test]
 async fn frequency_bands_are_published_from_playback() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -1006,7 +1011,7 @@ const ANALYSIS_WINDOW: usize = 1024;
 /// into many windows is covered by the unit tests.
 #[tokio::test]
 async fn frequency_bands_follow_playback_window_by_window() {
-    let Some(model) = loaded_model_with_limit(40) else {
+    let Some(model) = loaded_model_with_limit(40).await else {
         eprintln!("skipping: mock component not built");
         return;
     };
@@ -1052,7 +1057,7 @@ async fn frequency_bands_follow_playback_window_by_window() {
 
 #[tokio::test]
 async fn speech_progress_is_published_for_the_utterance() {
-    let Some(model) = loaded_model() else {
+    let Some(model) = loaded_model().await else {
         eprintln!("skipping: mock component not built");
         return;
     };

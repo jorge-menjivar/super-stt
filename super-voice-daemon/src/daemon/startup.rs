@@ -7,7 +7,9 @@
 use crate::config::DaemonConfig;
 use crate::daemon::device_management::PipelineStage;
 use crate::daemon::events::EventBus;
-use crate::daemon::types::{LoadedModel, SharedLoadedModel, SuperSTTDaemon, normalize_device};
+use crate::daemon::types::{
+    LoadTurn, LoadedModel, SharedLoadedModel, SuperSTTDaemon, normalize_device,
+};
 use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
 use crate::resource_management::ResourceManager;
@@ -49,7 +51,7 @@ impl DaemonComponents {
         let audio_processor = Arc::new(AudioProcessor::new());
 
         // Model slot starts empty; filled once the startup model loads.
-        let model: SharedLoadedModel = Arc::new(tokio::sync::RwLock::new(None));
+        let model: SharedLoadedModel = Arc::default();
 
         let download_manager = Arc::new(DownloadStateManager::new());
 
@@ -121,7 +123,7 @@ impl SuperSTTDaemon {
 
         let daemon = SuperSTTDaemon {
             model: components.model,
-            post_processor: Arc::new(tokio::sync::RwLock::new(None)),
+            post_processor: Arc::default(),
             audio_processor: components.audio_processor,
             shutdown_tx: components.shutdown_tx,
             dbus_manager: components.dbus_manager,
@@ -145,8 +147,6 @@ impl SuperSTTDaemon {
                 crate::output::notification::Notifier::desktop(),
             )),
             self_update: Arc::new(crate::self_update::checker()),
-            loading: Arc::new(crate::daemon::types::StageLoadGates::default()),
-            idle: Arc::default(),
             pending_recording: Arc::default(),
             secrets,
             tts,
@@ -192,8 +192,13 @@ impl SuperSTTDaemon {
         } else if let Some((name, source)) = self.pick_startup_model().await {
             let bg = self.clone();
             tokio::spawn(async move {
+                // A model picked before this load's turn replaces it.
+                let Some(turn) = bg.model.begin_load().await else {
+                    info!("Startup model {name} was replaced by a newer load");
+                    return;
+                };
                 if let Err(e) =
-                    Self::load_initial_model_and_broadcast(&bg, name.clone(), source).await
+                    Self::load_initial_model_and_broadcast(&bg, turn, name.clone(), source).await
                 {
                     warn!("Failed to load startup model {name}: {e}; daemon is idle");
                     bg.download_manager
@@ -321,8 +326,11 @@ impl SuperSTTDaemon {
         true
     }
 
+    /// Load `name` from `source` into the transcription slot on `turn`, and
+    /// announce it. Shared by the start-up load and the load on demand.
     pub(in crate::daemon) async fn load_initial_model_and_broadcast(
         daemon: &SuperSTTDaemon,
+        turn: LoadTurn<'_>,
         name: String,
         source: String,
     ) -> Result<()> {
@@ -336,6 +344,7 @@ impl SuperSTTDaemon {
             .map(ToString::to_string);
         let (instance, definition) = daemon
             .instantiate_backend(
+                &turn,
                 &name,
                 &source,
                 chosen.as_deref(),
@@ -355,11 +364,11 @@ impl SuperSTTDaemon {
         // `LoadedModel` — `ready` event consumers (e.g. the settings app's
         // current_device tracking) only update when `actual_device` is present.
         let actual_device = normalize_device(&instance.device());
-        daemon.idle.touch();
-        *daemon.model.write().await = Some(LoadedModel {
+        turn.install(LoadedModel {
             definition,
             instance,
-        });
+        })
+        .await;
 
         // Announce the active model the same way a user-initiated switch does
         // (`model_switched` + `ready`). The startup load formerly emitted only

@@ -668,14 +668,18 @@ async fn seed_model_on(
     };
     let info = ModelInfoData::new(name, source, true, true, Duration::from_secs(1));
     let reconfigured: SeenContexts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    *daemon.model.write().await = Some(LoadedModel::new(
-        definition,
-        Box::new(MockModel {
-            info,
-            reconfigured: std::sync::Arc::clone(&reconfigured),
-            device,
-        }),
-    ));
+    crate::tts::daemon::types::put_model(
+        &daemon.model,
+        LoadedModel::new(
+            definition,
+            Box::new(MockModel {
+                info,
+                reconfigured: std::sync::Arc::clone(&reconfigured),
+                device,
+            }),
+        ),
+    )
+    .await;
     reconfigured
 }
 
@@ -1200,7 +1204,7 @@ async fn a_switch_is_announced_from_where_the_model_runs() {
         .model
         .write()
         .await
-        .as_mut()
+        .get_mut()
         .expect("seeded")
         .definition
         .supported_devices = vec![
@@ -1469,7 +1473,7 @@ async fn set_model_device_on_the_device_in_use_reloads_nothing() {
         .model
         .write()
         .await
-        .as_mut()
+        .get_mut()
         .expect("seeded")
         .definition
         .supported_devices = vec![super_voice_registry_types::manifest::Device::Cpu];
@@ -2118,11 +2122,11 @@ async fn idle_unload_frees_the_model_and_keeps_it_selected() {
         .await
         .update_synthesis_model("kokoro-1".into(), source.into());
 
-    daemon.idle.rewind(Duration::from_secs(10));
+    daemon.model.backdate(Duration::from_secs(10));
     assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
     assert!(daemon.model.read().await.is_some());
 
-    daemon.idle.rewind(Duration::from_secs(60));
+    daemon.model.backdate(Duration::from_secs(60));
     assert!(daemon.unload_if_idle(Duration::from_secs(30)).await);
 
     assert!(daemon.model.read().await.is_none());
@@ -2130,28 +2134,6 @@ async fn idle_unload_frees_the_model_and_keeps_it_selected() {
         daemon.config.read().await.synthesis.preferred_model,
         "kokoro-1"
     );
-}
-
-/// Shutdown waits for an idle unload still stopping its backend: the model is
-/// out of its slot by then, so not waiting would exit with it running.
-#[tokio::test]
-async fn shutdown_waits_for_an_idle_unload_in_progress() {
-    use std::time::Duration;
-    let daemon = test_daemon().await;
-    let unloading = daemon.idle.unloading.lock().await;
-
-    let shutdown = tokio::spawn({
-        let daemon = daemon.clone();
-        async move { daemon.shutdown_unload().await }
-    });
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(!shutdown.is_finished(), "shutdown went ahead of the unload");
-
-    drop(unloading);
-    tokio::time::timeout(Duration::from_secs(1), shutdown)
-        .await
-        .expect("shutdown finishes once the unload has")
-        .expect("no panic");
 }
 
 /// Text that cannot be spoken is refused before a model is loaded for it, so
@@ -2166,8 +2148,9 @@ async fn speak_refuses_text_before_loading_a_model() {
         config.update_synthesis_model("kokoro-1".into(), source.into());
         config.idle_unload.after_secs = 30;
     }
-    // A load waits for this, so a refusal that returns at once never tried one.
-    let _loading = daemon.idle.loading.lock().await;
+    // A load on demand waits for this one, so a refusal that returns at once
+    // never tried one.
+    let _load = daemon.model.begin_load().await.expect("a turn");
 
     for text in [
         "",
@@ -2212,4 +2195,39 @@ async fn the_selected_model_is_loaded_on_demand_only_with_idle_unload_on() {
         .expect("the selected model");
     assert_eq!(definition.name, "kokoro-tiny");
     assert_eq!(definition.source, source);
+}
+
+/// An unload during a load waits for it, then clears the selection, rather
+/// than finding the slot empty and leaving the load to put the model back.
+#[tokio::test]
+async fn an_unload_during_a_load_waits_for_it_and_clears_the_selection() {
+    use std::time::Duration;
+    let daemon = test_daemon().await;
+    daemon
+        .config
+        .write()
+        .await
+        .update_synthesis_model("kokoro-1".into(), "github.com/super-tts/openai".into());
+    let slot = std::sync::Arc::clone(&daemon.model);
+    let load = slot.begin_load().await.expect("a turn");
+
+    let unload = tokio::spawn({
+        let daemon = daemon.clone();
+        async move { daemon.handle_unload_active_model().await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!unload.is_finished(), "answered before the load finished");
+
+    drop(load);
+    let response = unload.await.expect("no panic");
+    assert_eq!(response.status, "success");
+    assert!(
+        daemon
+            .config
+            .read()
+            .await
+            .synthesis
+            .preferred_model
+            .is_empty()
+    );
 }

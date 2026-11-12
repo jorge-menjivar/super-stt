@@ -22,7 +22,7 @@ impl SuperTTSDaemon {
     pub(crate) async fn ensure_model_loaded(&self) {
         // Before the slot is read: the idle check reads this under the slot's
         // write lock, so a request that got this far is never unloaded under.
-        self.idle.touch();
+        self.model.touch();
         if self.model.read().await.is_some()
             || self.config.read().await.idle_unload.after().is_none()
         {
@@ -30,7 +30,7 @@ impl SuperTTSDaemon {
         }
         let bg = self.clone();
         let _ = tokio::spawn(async move { bg.load_selected_model().await }).await;
-        self.idle.touch();
+        self.model.touch();
     }
 
     /// The model the next request loads when it finds none in memory: the
@@ -44,16 +44,23 @@ impl SuperTTSDaemon {
     }
 
     /// Load the selected model if it is not in memory, whatever the setting.
+    ///
+    /// Waits for any load or unload in flight first, and loads only if the
+    /// slot is still empty after it: see
+    /// [`ModelSlot::begin_load_if_empty`](super_engine_daemon::model_slot::ModelSlot::begin_load_if_empty).
+    /// The selection is read on the load's turn, so an unload that cleared
+    /// it meanwhile is seen.
     pub(crate) async fn load_selected_model(&self) {
-        let _loading = self.idle.loading.lock().await;
-        if self.model.read().await.is_some() {
+        let Some(turn) = self.model.begin_load_if_empty().await else {
             return;
-        }
+        };
         let Some((name, source)) = self.pick_startup_model().await else {
             return;
         };
         info!("Loading {name} on demand");
-        if let Err(e) = Self::load_initial_model_and_broadcast(self, name.clone(), source).await {
+        if let Err(e) =
+            Self::load_initial_model_and_broadcast(self, turn, name.clone(), source).await
+        {
             warn!("Failed to load {name} on demand: {e}");
             self.download_manager.clear_download(());
         }
@@ -62,42 +69,27 @@ impl SuperTTSDaemon {
     /// Unload the synthesis model if nothing has used it for `after`, keeping
     /// it selected. Returns whether it was unloaded.
     pub(crate) async fn unload_if_idle(&self, after: Duration) -> bool {
-        if self.speech.current().is_some() {
-            self.idle.touch();
+        if self.is_busy() {
+            self.model.touch();
             return false;
         }
-        let _unloading = self.idle.unloading.lock().await;
-        let taken = {
-            // Synthesis holds the read lock.
-            let Ok(mut slot) = self.model.try_write() else {
-                self.idle.touch();
-                return false;
-            };
-            if self.idle.idle_for() < after {
-                return false;
-            }
-            slot.take()
-        };
-        let Some(mut loaded) = taken else {
-            return false;
-        };
-        let name = loaded.definition.name.clone();
-        if let Err(e) = loaded.instance.shutdown().await {
-            warn!("backend shutdown failed: {e}");
-        }
-        drop(loaded);
-        info!(
-            "Unloaded {name} after {}s idle; it loads again on demand",
-            after.as_secs()
-        );
-        self.events
-            .publish_synthesis_status(DaemonStatusEvent::Ready {
-                model_loaded: false,
-                model_name: None,
-                actual_device: None,
-                preferred_device: None,
-            });
-        true
+        // Synthesis holds the slot's read lock, which the slot counts as a use.
+        self.model
+            .unload_if_idle(after, |loaded| {
+                info!(
+                    "Unloaded {} after {}s idle; it loads again on demand",
+                    loaded.definition.name,
+                    after.as_secs()
+                );
+                self.events
+                    .publish_synthesis_status(DaemonStatusEvent::Ready {
+                        model_loaded: false,
+                        model_name: None,
+                        actual_device: None,
+                        preferred_device: None,
+                    });
+            })
+            .await
     }
 
     /// Start the task that unloads the synthesis model when idle. It reads the

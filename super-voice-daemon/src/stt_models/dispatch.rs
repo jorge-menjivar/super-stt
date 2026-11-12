@@ -54,7 +54,7 @@ pub(crate) async fn dispatch_transcription(
     if is_online {
         // Online (API) models: await directly on the runtime.
         let mut guard = model.write().await;
-        let Some(loaded) = guard.as_mut() else {
+        let Some(loaded) = guard.get_mut() else {
             return Err(DispatchError::NotLoaded);
         };
         loaded
@@ -69,7 +69,7 @@ pub(crate) async fn dispatch_transcription(
         tokio::task::spawn_blocking(move || {
             let handle = tokio::runtime::Handle::current();
             let mut guard = model.blocking_write();
-            let Some(loaded) = guard.as_mut() else {
+            let Some(loaded) = guard.get_mut() else {
                 return Err(DispatchError::NotLoaded);
             };
             handle
@@ -109,7 +109,7 @@ pub(crate) async fn dispatch_post_process(
 
     if is_online {
         let mut guard = post_processor.write().await;
-        let Some(loaded) = guard.as_mut() else {
+        let Some(loaded) = guard.get_mut() else {
             return Err(DispatchError::NotLoaded);
         };
         loaded
@@ -122,7 +122,7 @@ pub(crate) async fn dispatch_post_process(
         tokio::task::spawn_blocking(move || {
             let handle = tokio::runtime::Handle::current();
             let mut guard = post_processor.blocking_write();
-            let Some(loaded) = guard.as_mut() else {
+            let Some(loaded) = guard.get_mut() else {
                 return Err(DispatchError::NotLoaded);
             };
             handle
@@ -213,7 +213,7 @@ mod tests {
         Arc<Mutex<Option<usize>>>,
     );
 
-    fn loaded(online: bool, outcome: Outcome) -> Probes {
+    async fn loaded(online: bool, outcome: Outcome) -> Probes {
         let seen_language = Arc::new(Mutex::new(None));
         let seen_audio_len = Arc::new(Mutex::new(None));
         let info = ModelInfoData::new(
@@ -247,16 +247,21 @@ mod tests {
             seen_language: Arc::clone(&seen_language),
             seen_audio_len: Arc::clone(&seen_audio_len),
         });
-        let model: SharedLoadedModel = Arc::new(tokio::sync::RwLock::new(Some(LoadedModel {
-            definition,
-            instance,
-        })));
+        let model: SharedLoadedModel = Arc::default();
+        crate::daemon::types::put_model(
+            &model,
+            LoadedModel {
+                definition,
+                instance,
+            },
+        )
+        .await;
         (model, seen_language, seen_audio_len)
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn online_model_returns_transcribed_text() {
-        let (model, _, _) = loaded(true, Outcome::Ok("hello".to_string()));
+        let (model, _, _) = loaded(true, Outcome::Ok("hello".to_string())).await;
         let out = dispatch_transcription(&model, vec![0.0; 16000], 16000, None).await;
         assert!(
             matches!(out, Ok(ref t) if t == "hello"),
@@ -267,7 +272,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn local_model_returns_transcribed_text() {
         // Exercises the spawn_blocking path used for non-online models.
-        let (model, _, _) = loaded(false, Outcome::Ok("world".to_string()));
+        let (model, _, _) = loaded(false, Outcome::Ok("world".to_string())).await;
         let out = dispatch_transcription(&model, vec![0.0; 16000], 16000, None).await;
         assert!(
             matches!(out, Ok(ref t) if t == "world"),
@@ -277,28 +282,28 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn online_backend_error_maps_to_failed() {
-        let (model, _, _) = loaded(true, Outcome::Err);
+        let (model, _, _) = loaded(true, Outcome::Err).await;
         let out = dispatch_transcription(&model, vec![0.0; 16000], 16000, None).await;
         assert!(matches!(out, Err(DispatchError::Failed(_))));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn local_backend_error_maps_to_failed() {
-        let (model, _, _) = loaded(false, Outcome::Err);
+        let (model, _, _) = loaded(false, Outcome::Err).await;
         let out = dispatch_transcription(&model, vec![0.0; 16000], 16000, None).await;
         assert!(matches!(out, Err(DispatchError::Failed(_))));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn no_model_loaded_maps_to_not_loaded() {
-        let model: SharedLoadedModel = Arc::new(tokio::sync::RwLock::new(None));
+        let model: SharedLoadedModel = Arc::default();
         let out = dispatch_transcription(&model, vec![0.0; 16000], 16000, None).await;
         assert!(matches!(out, Err(DispatchError::NotLoaded)));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn online_post_processor_returns_processed_text() {
-        let (model, _, _) = loaded(true, Outcome::Ok("clean".to_string()));
+        let (model, _, _) = loaded(true, Outcome::Ok("clean".to_string())).await;
         let out = dispatch_post_process(&model, "um hello".to_string(), None).await;
         assert!(
             matches!(out, Ok(ref t) if t == "clean:um hello"),
@@ -310,21 +315,21 @@ mod tests {
     /// not stall the runtime; it must return the same text as the online one.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn local_post_processor_returns_processed_text() {
-        let (model, _, _) = loaded(false, Outcome::Ok("clean".to_string()));
+        let (model, _, _) = loaded(false, Outcome::Ok("clean".to_string())).await;
         let out = dispatch_post_process(&model, "um hello".to_string(), None).await;
         assert!(matches!(out, Ok(ref t) if t == "clean:um hello"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn post_processor_error_maps_to_failed() {
-        let (model, _, _) = loaded(true, Outcome::Err);
+        let (model, _, _) = loaded(true, Outcome::Err).await;
         let out = dispatch_post_process(&model, "hi".to_string(), None).await;
         assert!(matches!(out, Err(DispatchError::Failed(_))));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn no_post_processor_loaded_maps_to_not_loaded() {
-        let model: SharedLoadedModel = Arc::new(tokio::sync::RwLock::new(None));
+        let model: SharedLoadedModel = Arc::default();
         let out = dispatch_post_process(&model, "hi".to_string(), None).await;
         assert!(matches!(out, Err(DispatchError::NotLoaded)));
     }
@@ -333,7 +338,7 @@ mod tests {
     /// tag has to reach it the same way it reaches the transcription backend.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn language_is_forwarded_to_the_post_processor() {
-        let (model, seen_lang, _) = loaded(true, Outcome::Ok("clean".to_string()));
+        let (model, seen_lang, _) = loaded(true, Outcome::Ok("clean".to_string())).await;
         let _ = dispatch_post_process(&model, "hola".to_string(), Some("es-MX".to_string())).await;
         assert_eq!(
             seen_lang.lock().unwrap().clone(),
@@ -343,7 +348,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn language_and_audio_are_forwarded_to_backend() {
-        let (model, seen_lang, seen_len) = loaded(true, Outcome::Ok("ok".to_string()));
+        let (model, seen_lang, seen_len) = loaded(true, Outcome::Ok("ok".to_string())).await;
         let _ =
             dispatch_transcription(&model, vec![0.0; 1234], 16000, Some("es-MX".to_string())).await;
         assert_eq!(

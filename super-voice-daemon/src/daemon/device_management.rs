@@ -554,15 +554,16 @@ impl SuperSTTDaemon {
                 model: name.clone(),
                 stage: PipelineStage::Transcription.position(),
             });
-        // Route through the shared graceful path so the backend is
-        // `shutdown()` outside the write lock rather than dropped under it — a
-        // subprocess `Drop` can block for seconds freeing GPU memory, which
-        // would stall every reader (Tier 3 #2).
-        self.unload_current_model().await;
+        // The model is taken out, and its backend stopped, once it is this
+        // load's turn. The turn holds the slot through the recovery below, so
+        // no other load lands in between.
+        let Some(turn) = self.model.begin_load().await else {
+            return super::model_management::superseded("device switch", &name);
+        };
 
         // Reload on the requested device, unless a shutdown arrives first.
         let load_result = tokio::select! {
-            result = self.load_model_with_target_device(&name, &source, device) => result,
+            result = self.load_model_with_target_device(&turn, &name, &source, device) => result,
             _ = shutdown_rx.recv() => {
                 warn!("Device switch cancelled due to shutdown");
                 return DaemonResponse::error("Device switch cancelled due to shutdown");
@@ -571,7 +572,7 @@ impl SuperSTTDaemon {
 
         match load_result {
             Ok((instance, definition)) => {
-                let actual_device = self.finalize_loaded_model(definition, instance).await;
+                let actual_device = self.finalize_loaded_model(turn, definition, instance).await;
                 self.store_model_device(&target, device).await;
                 info!(
                     "Device switch completed for {name}: {from} -> {device} (actual: {actual_device})"
@@ -591,7 +592,7 @@ impl SuperSTTDaemon {
                 .await
             }
             Err(e) => {
-                self.recover_transcription_device(&target, e, device, fallback)
+                self.recover_transcription_device(turn, &target, e, device, fallback)
                     .await
             }
         }
@@ -602,6 +603,7 @@ impl SuperSTTDaemon {
     /// so the setting needs no reverting.
     async fn recover_transcription_device(
         &self,
+        turn: crate::daemon::types::LoadTurn<'_>,
         target: &DeviceTarget,
         error: anyhow::Error,
         device: &str,
@@ -628,11 +630,11 @@ impl SuperSTTDaemon {
 
         warn!("Attempting to recover by reloading {name} on {fallback}, its setting");
         match self
-            .load_model_with_target_device(name, source, fallback)
+            .load_model_with_target_device(&turn, name, source, fallback)
             .await
         {
             Ok((instance, definition)) => {
-                let actual_device = self.finalize_loaded_model(definition, instance).await;
+                let actual_device = self.finalize_loaded_model(turn, definition, instance).await;
                 warn!(
                     "Recovery successful - {name} reloaded on {fallback} (actual: {actual_device})"
                 );

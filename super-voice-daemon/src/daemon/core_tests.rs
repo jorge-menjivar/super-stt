@@ -1152,13 +1152,17 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) ->
     };
     let info = ModelInfoData::new(name, source, true, true, Duration::from_secs(1));
     let reconfigured: SeenContexts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    *daemon.model.write().await = Some(LoadedModel {
-        definition,
-        instance: Box::new(MockTranscribe {
-            info,
-            reconfigured: std::sync::Arc::clone(&reconfigured),
-        }),
-    });
+    crate::daemon::types::put_model(
+        &daemon.model,
+        LoadedModel {
+            definition,
+            instance: Box::new(MockTranscribe {
+                info,
+                reconfigured: std::sync::Arc::clone(&reconfigured),
+            }),
+        },
+    )
+    .await;
     reconfigured
 }
 
@@ -1876,7 +1880,7 @@ async fn set_model_device_on_the_device_in_use_reloads_nothing() {
         .model
         .write()
         .await
-        .as_mut()
+        .get_mut()
         .unwrap()
         .definition
         .supported_devices = vec![super_voice_registry_types::manifest::Device::Cpu];
@@ -2752,15 +2756,19 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
         online,
         Duration::from_secs(1),
     );
-    *daemon.model.write().await = Some(LoadedModel {
-        definition,
-        instance: Box::new(ScriptedTranscribe {
-            info,
-            result,
-            reconfigured: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            device: "cpu",
-        }),
-    });
+    crate::daemon::types::put_model(
+        &daemon.model,
+        LoadedModel {
+            definition,
+            instance: Box::new(ScriptedTranscribe {
+                info,
+                result,
+                reconfigured: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                device: "cpu",
+            }),
+        },
+    )
+    .await;
 }
 
 /// Seed the daemon's `post_processor` slot with a fake, so an unload has
@@ -2791,7 +2799,7 @@ async fn seed_post_processor_on(
 ) -> SeenContexts {
     use super_voice_registry_types::manifest::ModelRole;
     let (loaded, reconfigured) = scripted_loaded(name, source, ModelRole::PostProcessor, device);
-    *daemon.post_processor.write().await = Some(loaded);
+    crate::daemon::types::put_model(&daemon.post_processor, loaded).await;
     reconfigured
 }
 
@@ -2805,7 +2813,7 @@ async fn seed_transcription_on(
 ) {
     use super_voice_registry_types::manifest::ModelRole;
     let (loaded, _) = scripted_loaded(name, source, ModelRole::Transcription, device);
-    *daemon.model.write().await = Some(loaded);
+    crate::daemon::types::put_model(&daemon.model, loaded).await;
 }
 
 /// A loaded [`ScriptedTranscribe`] serving `(source, name)` in `role`,
@@ -3091,7 +3099,7 @@ async fn idle_unload_frees_the_model_and_keeps_it_selected() {
         .await
         .update_preferred_model("whisper-1".into(), source.into());
 
-    daemon.idle.rewind(Duration::from_secs(60));
+    daemon.model.backdate(Duration::from_secs(60));
     assert!(daemon.unload_if_idle(Duration::from_secs(30)).await);
 
     assert!(daemon.model.read().await.is_none());
@@ -3106,10 +3114,10 @@ async fn idle_unload_leaves_a_model_in_use() {
     let daemon = test_daemon().await;
     seed_loaded_model(&daemon, "whisper-1", "github.com/super-stt/openai").await;
 
-    daemon.idle.rewind(Duration::from_secs(10));
+    daemon.model.backdate(Duration::from_secs(10));
     assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
 
-    daemon.idle.rewind(Duration::from_secs(60));
+    daemon.model.backdate(Duration::from_secs(60));
     *daemon.busy.write().await = true;
     assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
     *daemon.busy.write().await = false;
@@ -3125,7 +3133,7 @@ async fn set_idle_unload_counts_the_idle_time_from_the_change() {
     use std::time::Duration;
     let daemon = test_daemon().await;
     seed_loaded_model(&daemon, "whisper-1", "github.com/super-stt/openai").await;
-    daemon.idle.rewind(Duration::from_secs(600));
+    daemon.model.backdate(Duration::from_secs(600));
 
     let mut set_request = make_request("set_idle_unload");
     set_request.data = Some(serde_json::json!({ "after_secs": 300 }));
@@ -3145,11 +3153,16 @@ async fn a_loaded_model_starts_a_fresh_idle_time() {
     use std::time::Duration;
     let daemon = test_daemon().await;
     seed_loaded_model(&daemon, "whisper-1", "github.com/super-stt/openai").await;
-    let loaded = daemon.model.write().await.take().unwrap();
-    daemon.idle.rewind(Duration::from_secs(600));
+    let loaded = daemon
+        .unload_current_model()
+        .await
+        .and_then(|unloaded| unloaded.model)
+        .expect("the seeded model");
+    daemon.model.backdate(Duration::from_secs(600));
 
+    let turn = daemon.model.begin_load().await.expect("a turn");
     daemon
-        .finalize_loaded_model(loaded.definition, loaded.instance)
+        .finalize_loaded_model(turn, loaded.definition, loaded.instance)
         .await;
 
     assert!(!daemon.unload_if_idle(Duration::from_secs(30)).await);
@@ -3168,7 +3181,7 @@ async fn an_explicit_unload_switches_off_a_model_unloaded_for_being_idle() {
         config.update_preferred_model("whisper-1".into(), source.into());
         config.idle_unload.after_secs = 30;
     }
-    daemon.idle.rewind(Duration::from_secs(60));
+    daemon.model.backdate(Duration::from_secs(60));
     assert!(daemon.unload_if_idle(Duration::from_secs(30)).await);
 
     let response = daemon.handle_unload_active_model().await;
@@ -3236,9 +3249,10 @@ async fn start_pending_recording(
 #[tokio::test]
 async fn a_recording_waiting_for_its_model_can_be_cancelled() {
     let daemon = daemon_loading_on_demand().await;
-    // The lock every on-demand load takes: held, the load never finishes.
-    let idle = std::sync::Arc::clone(&daemon.idle);
-    let _held = idle.loading.lock().await;
+    // A load in flight, which every load on demand waits for: held, the load
+    // never finishes.
+    let slot = std::sync::Arc::clone(&daemon.model);
+    let _held = slot.begin_load().await.expect("a turn");
     let recording = start_pending_recording(&daemon).await;
     assert_eq!(daemon.handle_status().await.busy, Some(true));
 
@@ -3259,8 +3273,8 @@ async fn a_recording_waiting_for_its_model_can_be_cancelled() {
 #[tokio::test]
 async fn a_second_start_does_not_cancel_a_recording_waiting_for_its_model() {
     let daemon = daemon_loading_on_demand().await;
-    let idle = std::sync::Arc::clone(&daemon.idle);
-    let _held = idle.loading.lock().await;
+    let slot = std::sync::Arc::clone(&daemon.model);
+    let _held = slot.begin_load().await.expect("a turn");
     let recording = start_pending_recording(&daemon).await;
 
     let second = daemon.handle_command(make_request("record")).await;
@@ -3278,8 +3292,8 @@ async fn a_second_start_does_not_cancel_a_recording_waiting_for_its_model() {
 #[tokio::test]
 async fn a_recording_waiting_for_its_model_blocks_model_changes() {
     let daemon = daemon_loading_on_demand().await;
-    let idle = std::sync::Arc::clone(&daemon.idle);
-    let _held = idle.loading.lock().await;
+    let slot = std::sync::Arc::clone(&daemon.model);
+    let _held = slot.begin_load().await.expect("a turn");
     let recording = start_pending_recording(&daemon).await;
 
     let unload = daemon.handle_unload_active_model().await;
@@ -3315,24 +3329,48 @@ async fn a_stop_between_the_load_and_capture_cancels_the_recording() {
     assert!(!daemon.recording_is_pending());
 }
 
-/// Shutdown waits for an idle unload still stopping its backend: the model is
-/// out of its slot by then, so not waiting would exit with it running.
+/// An unload during a load waits for it, then switches the model off, rather
+/// than finding the slot empty and leaving the load to put it back.
 #[tokio::test]
-async fn shutdown_waits_for_an_idle_unload_in_progress() {
+async fn an_unload_during_a_load_waits_for_it_and_switches_the_model_off() {
     use std::time::Duration;
     let daemon = test_daemon().await;
-    let unloading = daemon.idle.unloading.lock().await;
+    daemon
+        .config
+        .write()
+        .await
+        .update_preferred_model("whisper-1".into(), "github.com/super-stt/openai".into());
+    let slot = std::sync::Arc::clone(&daemon.model);
+    let load = slot.begin_load().await.expect("a turn");
 
-    let shutdown = tokio::spawn({
+    let unload = tokio::spawn({
         let daemon = daemon.clone();
-        async move { daemon.shutdown_unload().await }
+        async move { daemon.handle_unload_active_model().await }
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(!shutdown.is_finished(), "shutdown went ahead of the unload");
+    assert!(!unload.is_finished(), "answered before the load finished");
+    assert!(daemon.config.read().await.transcription.is_active());
 
-    drop(unloading);
-    tokio::time::timeout(Duration::from_secs(1), shutdown)
+    drop(load);
+    let response = unload.await.expect("no panic");
+    assert_eq!(response.status, "success");
+    assert!(!daemon.config.read().await.transcription.is_active());
+}
+
+/// With models kept loaded, a model switched on but not in memory (its load
+/// failed) is switched off too: every start would otherwise retry it.
+#[tokio::test]
+async fn an_unload_switches_off_a_model_not_in_memory() {
+    let daemon = test_daemon().await;
+    daemon
+        .config
+        .write()
         .await
-        .expect("shutdown finishes once the unload has")
-        .expect("no panic");
+        .update_preferred_model("whisper-1".into(), "github.com/super-stt/openai".into());
+    assert!(daemon.config.read().await.idle_unload.after().is_none());
+
+    let response = daemon.handle_unload_active_model().await;
+
+    assert_eq!(response.status, "success");
+    assert!(!daemon.config.read().await.transcription.is_active());
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::device_management::PipelineStage;
-use crate::daemon::types::SuperSTTDaemon;
+use crate::daemon::types::{LoadTurn, SuperSTTDaemon};
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends;
 use crate::stt_models::transcribe::Transcribe;
@@ -111,9 +111,11 @@ impl SuperSTTDaemon {
         // model (if any) is from the requested backend, otherwise the daemon
         // is idle. Same-source re-selects don't disturb a loaded model.
         let prev_dir = self.active_backend.read().await.clone();
-        if prev_dir.as_deref() != Some(dir_name.as_str()) {
-            self.unload_current_model().await;
-        }
+        let _unloaded = if prev_dir.as_deref() == Some(dir_name.as_str()) {
+            None
+        } else {
+            self.unload_current_model().await
+        };
 
         *self.active_backend.write().await = Some(dir_name.clone());
         self.config
@@ -153,7 +155,7 @@ impl SuperSTTDaemon {
         if let Some(resp) = self.switch_guard().await {
             return resp;
         }
-        self.unload_current_model().await;
+        let _unloaded = self.unload_current_model().await;
         *self.active_backend.write().await = None;
         self.config.write().await.clear_active_backend();
         if let Err(e) = self.persist_config().await {
@@ -249,7 +251,10 @@ impl SuperSTTDaemon {
         }
 
         self.broadcast_model_loading_status(&model, PipelineStage::Transcription);
-        self.unload_current_model().await;
+        // Takes the current model out once it is this load's turn.
+        let Some(turn) = self.model.begin_load().await else {
+            return super::superseded("switch", &model);
+        };
         let chosen = self
             .config
             .read()
@@ -259,6 +264,7 @@ impl SuperSTTDaemon {
 
         match self
             .instantiate_backend(
+                &turn,
                 &model,
                 &backend_source,
                 chosen.as_deref(),
@@ -267,8 +273,14 @@ impl SuperSTTDaemon {
             .await
         {
             Ok((instance, definition)) => {
-                self.finalize_model_switch_success(model, backend_source, definition, instance)
-                    .await
+                self.finalize_model_switch_success(
+                    turn,
+                    model,
+                    backend_source,
+                    definition,
+                    instance,
+                )
+                .await
             }
             Err(e) => {
                 error!("Model switch failed: {e}");
@@ -279,12 +291,13 @@ impl SuperSTTDaemon {
 
     pub(super) async fn finalize_model_switch_success(
         &self,
+        turn: LoadTurn<'_>,
         model: String,
         source: String,
         definition: ModelDefinition,
         instance: Box<dyn Transcribe>,
     ) -> DaemonResponse {
-        let actual_device = self.finalize_loaded_model(definition, instance).await;
+        let actual_device = self.finalize_loaded_model(turn, definition, instance).await;
         {
             let mut config_guard = self.config.write().await;
             config_guard.update_preferred_model(model.clone(), source.clone());

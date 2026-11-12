@@ -269,8 +269,8 @@ impl SuperSTTDaemon {
     pub async fn handle_set_idle_unload(&self, after_secs: u64) -> DaemonResponse {
         // Counted from now, not from a last use that predates the setting, and
         // reset before the idle check can read the new time.
-        self.idle.touch();
-        self.tts.idle.touch();
+        self.model.touch();
+        self.tts.model.touch();
         let persist = self
             .set_config_field(|c| c.idle_unload.after_secs = after_secs)
             .await;
