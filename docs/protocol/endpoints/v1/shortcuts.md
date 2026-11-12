@@ -37,8 +37,10 @@ settings shows here at once.
 ### Through the portal
 
 The portal keeps a shortcut only while the daemon holds the session it is bound
-in. So the daemon keeps the ones the user added in its config, and binds them
-again at every start. It registers as the settings app, `super-voice-app`, so
+in. So the daemon keeps the ones the user added in its config, by desktop
+(`XDG_CURRENT_DESKTOP`), and binds them again at every start on that desktop.
+One added on another desktop is left for that one: binding it would have this
+desktop ask the user about it, unasked. It registers as the settings app, `super-voice-app`, so
 the desktop names Super Voice in its dialog and its shortcut settings.
 
 1. The desktop may ask the user before it binds one, in a dialog of its own,

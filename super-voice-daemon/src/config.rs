@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use super_voice_shared::models::contexts::DictationContext;
 use super_voice_shared::models::notification_method::NotificationMethod;
@@ -81,14 +81,36 @@ impl IdleUnloadConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShortcutsConfig {
     /// The shortcuts the user added through the desktop's `GlobalShortcuts`
-    /// portal, bound again at every start: the portal keeps them only while
-    /// the daemon holds them. An unparseable stored value degrades to none
-    /// rather than failing the whole config load.
+    /// portal, by desktop (`XDG_CURRENT_DESKTOP`), bound again at every start
+    /// there: the portal keeps them only while the daemon holds them.
+    ///
+    /// By desktop, because each keeps its own: one added on KDE Plasma is not
+    /// GNOME's, and binding it there would have GNOME ask the user about it
+    /// at the start, unasked. An unparseable stored value, like the single
+    /// list of before, degrades to none rather than failing the config load.
     #[serde(
         default,
         deserialize_with = "super_voice_shared::utils::serde_helpers::deserialize_or_default"
     )]
-    pub portal: Vec<ShortcutId>,
+    pub portal: BTreeMap<String, Vec<ShortcutId>>,
+}
+
+impl ShortcutsConfig {
+    /// The shortcuts added through the portal on `desktop`.
+    #[must_use]
+    pub fn portal_on(&self, desktop: &str) -> Vec<ShortcutId> {
+        self.portal.get(desktop).cloned().unwrap_or_default()
+    }
+
+    /// Keep `set` as the shortcuts added through the portal on `desktop`.
+    /// An empty one leaves the desktop out.
+    pub fn set_portal_on(&mut self, desktop: &str, set: Vec<ShortcutId>) {
+        if set.is_empty() {
+            self.portal.remove(desktop);
+        } else {
+            self.portal.insert(desktop.to_string(), set);
+        }
+    }
 }
 
 /// Self-update checking. Contract: docs/protocol/endpoints/v1/update.md

@@ -672,6 +672,37 @@ async fn saved_shortcuts_are_bound_again_at_start() {
     );
 }
 
+/// Shortcuts added on one desktop are that desktop's. A daemon starting on
+/// another binds none of them, so that desktop asks the user nothing, and
+/// they are kept for the first one.
+#[tokio::test]
+async fn shortcuts_added_on_one_desktop_are_not_bound_on_another() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let bus = Bus::start(home.path());
+    let (_portal, calls) = fake_portal(&bus).await;
+
+    let (first, token) = start("shortcuts-portal-on-kde", &bus, None).await;
+    let (status, body) = call(&first, &token, Method::POST, "/shortcuts/dictate").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let config = std::fs::read_to_string(config_file(&first.home().config)).expect("config");
+    drop(first);
+    let sessions_before = calls.lock().unwrap().sessions.len();
+
+    let (second, token) = start_on("GNOME", "shortcuts-portal-on-gnome", &bus, Some(&config)).await;
+    let (_, list) = call(&second, &token, Method::GET, "/shortcuts").await;
+    assert_eq!(states(&list)[0], row("dictate", "missing", "Super+Space"));
+    // The bind at a start runs in the background: give it its chance.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        calls.lock().unwrap().sessions.len(),
+        sessions_before,
+        "nothing is bound on GNOME, so GNOME asks nothing"
+    );
+    let config = std::fs::read_to_string(config_file(&second.home().config)).expect("config");
+    assert!(config.contains(r#""KDE""#), "{config}");
+    assert!(config.contains(r#""dictate""#), "{config}");
+}
+
 /// A shortcut the user removed in the desktop's settings while the daemon
 /// was off is not bound again at the next start: it is forgotten, and the
 /// page offers to add it. One the desktop still has is bound again.

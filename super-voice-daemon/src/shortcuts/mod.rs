@@ -385,6 +385,13 @@ fn desktop() -> Option<String> {
     std::env::var("XDG_CURRENT_DESKTOP").ok()
 }
 
+/// The desktop the daemon runs in, as the config files the shortcuts added
+/// on it under: `XDG_CURRENT_DESKTOP`, or nothing when it is unset.
+#[must_use]
+pub fn desktop_name() -> String {
+    desktop().unwrap_or_default()
+}
+
 /// Whether `XDG_CURRENT_DESKTOP`, a `:`-separated list, names `name`.
 fn names(desktop: Option<&str>, name: &str) -> bool {
     desktop.is_some_and(|desktop| desktop.split(':').any(|d| d.eq_ignore_ascii_case(name)))

@@ -61,7 +61,8 @@ impl SuperSTTDaemon {
     /// A bind replaces every shortcut, so one that fails would leave none:
     /// the ones held before are bound again then.
     async fn change_portal_shortcut(&self, id: ShortcutId, add: bool) -> Result<(), Error> {
-        let before = self.config.read().await.shortcuts.portal.clone();
+        let desktop = shortcuts::desktop_name();
+        let before = self.config.read().await.shortcuts.portal_on(&desktop);
         let wanted = shortcuts::with(&before, id, add);
         let changed = if add {
             self.shortcuts.bind_added(&wanted, id).await
@@ -82,7 +83,10 @@ impl SuperSTTDaemon {
             .filter(|s| bound.iter().any(|b| b.id == *s))
             .collect();
         let refused = add && !kept.contains(&id);
-        if let Err(e) = self.set_config_field(|c| c.shortcuts.portal = kept).await {
+        if let Err(e) = self
+            .set_config_field(|c| c.shortcuts.set_portal_on(&desktop, kept))
+            .await
+        {
             warn!("Shortcuts changed but config save failed: {e}");
         }
         if refused {
@@ -91,13 +95,15 @@ impl SuperSTTDaemon {
         Ok(())
     }
 
-    /// Bind the shortcuts the user added through the portal, as the daemon
-    /// starts. Nothing is asked of the desktop when there are none. One the
-    /// desktop no longer has, removed in its settings, is forgotten. The
+    /// Bind the shortcuts the user added through the portal on this desktop,
+    /// as the daemon starts. Nothing is asked of the desktop when there are
+    /// none, and ones added on another desktop are left for that one. One
+    /// the desktop no longer has, removed in its settings, is forgotten. The
     /// config is left as it is when the bind fails: the portal may just not
     /// be up yet, and the next start tries again.
     pub(crate) async fn bind_saved_shortcuts(&self) {
-        let saved = self.config.read().await.shortcuts.portal.clone();
+        let desktop = shortcuts::desktop_name();
+        let saved = self.config.read().await.shortcuts.portal_on(&desktop);
         if saved.is_empty() {
             return;
         }
@@ -115,7 +121,10 @@ impl SuperSTTDaemon {
                     "Bound {} saved shortcuts; the desktop no longer has the rest",
                     kept.len()
                 );
-                if let Err(e) = self.set_config_field(|c| c.shortcuts.portal = kept).await {
+                if let Err(e) = self
+                    .set_config_field(|c| c.shortcuts.set_portal_on(&desktop, kept))
+                    .await
+                {
                     warn!("Shortcuts forgotten but config save failed: {e}");
                 }
             }
