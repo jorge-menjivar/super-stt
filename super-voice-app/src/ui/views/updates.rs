@@ -106,7 +106,7 @@ fn version_section(state: &UpdateState) -> Element<'_, Message> {
         .title(crate::fl!("version"))
         .add(
             settings::item::builder(crate::fl!("current-version"))
-                .control(text::body(env!("CARGO_PKG_VERSION"))),
+                .control(text::body(concat!("v", env!("CARGO_PKG_VERSION")))),
         )
         .add(
             settings::item::builder(crate::fl!("latest-version"))
