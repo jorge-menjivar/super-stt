@@ -12814,7 +12814,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/VoiceModelSupport",
-                "description": "The loaded model's cloning capability; `None` when nothing is loaded."
+                "description": "The cloning capability of the model that speaks: the loaded one or,\nwhen models are unloaded on idle, the selected one. `None` when there\nis neither."
               },
               {
                 "type": "null"
