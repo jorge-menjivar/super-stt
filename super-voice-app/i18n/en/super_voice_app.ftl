@@ -1,7 +1,9 @@
 add-shortcut = Add shortcut
+added = Added
 app-title = Super Voice
 keyboard-shortcuts = Keyboard shortcuts
 shortcut-change-failed = Couldn't change the shortcut: { $error }
+shortcut-change-in-desktop = Change or remove it in your desktop's keyboard settings.
 shortcut-dictate = Dictate
 shortcut-dictate-description = Types what you say into the focused app.
 shortcut-elsewhere = Add it in your desktop's keyboard settings: { $command }
@@ -9,7 +11,6 @@ shortcut-missing = { $keys } is not set up.
 shortcut-read-aloud = Read aloud
 shortcut-read-aloud-description = Reads the selected or copied text aloud.
 shortcut-set-up = Set up in COSMIC's keyboard settings.
-shortcut-set-up-desktop = Set up in your desktop's keyboard settings.
 shortcut-taken = { $keys } is used by another shortcut. Bind another key to: { $command }
 shortcuts = Shortcuts
 shortcuts-load-failed = Couldn't read the shortcuts: { $error }

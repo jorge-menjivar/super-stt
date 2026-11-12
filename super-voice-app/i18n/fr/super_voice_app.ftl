@@ -1,7 +1,9 @@
 add-shortcut = Ajouter le raccourci
+added = Ajouté
 app-title = Super Voice
 keyboard-shortcuts = Raccourcis clavier
 shortcut-change-failed = Impossible de modifier le raccourci : { $error }
+shortcut-change-in-desktop = Modifiez-le ou retirez-le dans les paramètres clavier de votre bureau.
 shortcut-dictate = Dicter
 shortcut-dictate-description = Tape ce que vous dites dans l’application active.
 shortcut-elsewhere = Ajoutez-le dans les paramètres clavier de votre bureau : { $command }
@@ -9,7 +11,6 @@ shortcut-missing = { $keys } n’est pas configuré.
 shortcut-read-aloud = Lire à voix haute
 shortcut-read-aloud-description = Lit à voix haute le texte sélectionné ou copié.
 shortcut-set-up = Configuré dans les paramètres clavier de COSMIC.
-shortcut-set-up-desktop = Configuré dans les paramètres clavier de votre bureau.
 shortcut-taken = { $keys } est utilisé par un autre raccourci. Associez une autre touche à : { $command }
 shortcuts = Raccourcis
 shortcuts-load-failed = Impossible de lire les raccourcis : { $error }

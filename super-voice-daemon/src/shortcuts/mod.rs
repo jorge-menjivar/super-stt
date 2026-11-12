@@ -160,14 +160,17 @@ impl Shortcuts {
     pub async fn bind(&self, set: &[ShortcutId]) -> Result<Vec<Bound>, Error> {
         #[cfg(target_os = "linux")]
         {
-            let bound = self.bind_in_new_session(set).await;
-            // KDE keeps every shortcut ever bound in its settings, keys and
-            // all, since the portal cannot unbind one: it is told to forget
-            // the ones no session holds now.
-            if is_kde(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref()) {
-                portal::forget_unbound_on_kde();
+            let mut held = self.session.lock().await;
+            if let Some(old) = held.take() {
+                old.close().await;
             }
-            bound
+            if set.is_empty() {
+                return Ok(Vec::new());
+            }
+            let session = open_session().await?;
+            let bound = session.bind(set).await.map_err(Error::from)?;
+            *held = Some(session);
+            Ok(bound)
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -176,31 +179,90 @@ impl Shortcuts {
         }
     }
 
-    /// [`Shortcuts::bind`]'s portal work: close the session held, and bind
-    /// `set` in a new one unless it is empty.
-    #[cfg(target_os = "linux")]
-    async fn bind_in_new_session(&self, set: &[ShortcutId]) -> Result<Vec<Bound>, Error> {
-        let mut held = self.session.lock().await;
-        if let Some(old) = held.take() {
-            old.close().await;
-        }
-        if set.is_empty() {
-            return Ok(Vec::new());
-        }
-        // A connection of the session's own: the app id registered on it is
-        // the portal's first call there.
-        let conn = async { zbus::connection::Builder::session()?.build().await }
-            .await
-            .map_err(|e: zbus::Error| Error::Write(e.to_string()))?;
-        match portal::Session::bind(conn, set, run).await {
-            Ok((session, bound)) => {
-                *held = Some(session);
-                Ok(bound)
+    /// Bind the shortcuts `saved` at a start, but only the ones the desktop
+    /// still has: one the user removed in the desktop's settings is not bound
+    /// again, so the page offers to add it. Answers the ones kept. A desktop
+    /// that keeps nothing between sessions, as Hyprland, keeps them all.
+    ///
+    /// # Errors
+    ///
+    /// As [`Shortcuts::bind`].
+    // `allow`, not `expect`: clippy 1.98 files these under `unused_async_trait_impl`
+    // and later releases under `unused_async`, so either `expect` goes unfulfilled
+    // on some toolchain.
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(
+            clippy::unused_async,
+            clippy::unused_async_trait_impl,
+            reason = "the portal session it awaits is Linux's"
+        )
+    )]
+    pub async fn bind_saved(&self, saved: &[ShortcutId]) -> Result<Vec<ShortcutId>, Error> {
+        #[cfg(target_os = "linux")]
+        {
+            let mut held = self.session.lock().await;
+            if let Some(old) = held.take() {
+                old.close().await;
             }
-            Err(portal::BindError::Cancelled) => Err(Error::Refused),
-            Err(portal::BindError::Failed(e)) => Err(Error::Write(format!("{e:#}"))),
+            let session = open_session().await?;
+            let kept = if keeps_shortcuts(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref()) {
+                match session.list().await {
+                    Ok(listed) => still_kept(saved, &listed),
+                    Err(e) => {
+                        warn!("Could not ask which shortcuts the desktop kept: {e:#}");
+                        saved.to_vec()
+                    }
+                }
+            } else {
+                saved.to_vec()
+            };
+            if kept.is_empty() {
+                session.close().await;
+                return Ok(kept);
+            }
+            session.bind(&kept).await.map_err(Error::from)?;
+            *held = Some(session);
+            Ok(kept)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = saved;
+            Err(Error::Unsupported)
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+impl From<portal::BindError> for Error {
+    fn from(e: portal::BindError) -> Self {
+        match e {
+            portal::BindError::Cancelled => Self::Refused,
+            portal::BindError::Failed(e) => Self::Write(format!("{e:#}")),
+        }
+    }
+}
+
+/// A portal session on a connection of its own: the app id registered on it
+/// is the portal's first call there. Each press runs the shortcut's command.
+#[cfg(target_os = "linux")]
+async fn open_session() -> Result<portal::Session, Error> {
+    let conn = async { zbus::connection::Builder::session()?.build().await }
+        .await
+        .map_err(|e: zbus::Error| Error::Write(e.to_string()))?;
+    portal::Session::open(conn, run)
+        .await
+        .map_err(|e| Error::Write(format!("{e:#}")))
+}
+
+/// The ones of `saved` the desktop still lists.
+#[cfg(target_os = "linux")]
+fn still_kept(saved: &[ShortcutId], listed: &[Bound]) -> Vec<ShortcutId> {
+    saved
+        .iter()
+        .copied()
+        .filter(|id| listed.iter().any(|b| b.id == *id))
+        .collect()
 }
 
 /// [`Shortcuts::method`] on Linux: COSMIC by its name in
@@ -239,10 +301,11 @@ fn is_cosmic(desktop: Option<&str>) -> bool {
     names(desktop, "COSMIC")
 }
 
-/// Whether `XDG_CURRENT_DESKTOP` names KDE Plasma.
+/// Whether the desktop keeps the shortcuts an app bound once it closes its
+/// session. Hyprland keeps none: the user binds them in its config.
 #[cfg(target_os = "linux")]
-fn is_kde(desktop: Option<&str>) -> bool {
-    names(desktop, "KDE")
+fn keeps_shortcuts(desktop: Option<&str>) -> bool {
+    !names(desktop, "Hyprland")
 }
 
 /// The method for an `XDG_CURRENT_DESKTOP`, given whether the desktop offers
@@ -404,11 +467,25 @@ mod tests {
     /// whose own file comes first.
     #[cfg(target_os = "linux")]
     #[test]
-    fn kde_is_found_in_a_desktop_list() {
-        assert!(is_kde(Some("KDE")));
-        assert!(is_kde(Some("kde:wayland")));
-        assert!(!is_kde(Some("COSMIC")));
-        assert!(!is_kde(None));
+    fn only_hyprland_keeps_no_shortcuts() {
+        assert!(!keeps_shortcuts(Some("Hyprland")));
+        assert!(keeps_shortcuts(Some("KDE")));
+        assert!(keeps_shortcuts(Some("GNOME")));
+        assert!(keeps_shortcuts(None));
+    }
+
+    /// A saved shortcut the desktop no longer lists was removed in its
+    /// settings, and is not kept.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_shortcut_the_desktop_dropped_is_not_kept() {
+        use ShortcutId::{Dictate, ReadAloud};
+        let listed = [Bound {
+            id: ReadAloud,
+            keys: String::new(),
+        }];
+        assert_eq!(still_kept(&[Dictate, ReadAloud], &listed), [ReadAloud]);
+        assert_eq!(still_kept(&[Dictate], &[]), []);
     }
 
     #[cfg(target_os = "linux")]

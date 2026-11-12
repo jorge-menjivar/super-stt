@@ -28,33 +28,44 @@ fn name(id: ShortcutId) -> (String, String) {
     }
 }
 
-/// One shortcut's row: what it does and where it stands, with its keys and a
-/// Remove button once it is set up, or the button that adds it.
+/// One shortcut's row: what it does and where it stands, with its keys once
+/// it is set up and, on COSMIC, a Remove button, or the button that adds it.
 fn row_for(shortcut: &Shortcut, method: ShortcutMethod) -> Element<'static, Message> {
     let (title, does) = name(shortcut.id);
     let item = settings::item::builder(title);
     let keys = shortcut.keys.clone();
     let command = shortcut.command.clone();
     match shortcut.state {
-        ShortcutState::Installed => {
-            let where_ = match method {
-                ShortcutMethod::Cosmic => crate::fl!("shortcut-set-up"),
-                ShortcutMethod::Portal | ShortcutMethod::Manual => {
-                    crate::fl!("shortcut-set-up-desktop")
-                }
-            };
-            item.description(format!("{does} {where_}"))
-                .control(
-                    row![
-                        text::body(keys),
-                        button::standard(crate::fl!("remove"))
-                            .on_press(Message::Shortcuts(ShortcutsMessage::Remove(shortcut.id))),
-                    ]
-                    .spacing(12)
-                    .align_y(Alignment::Center),
-                )
-                .into()
-        }
+        // On COSMIC the daemon removes it from COSMIC's file. Through the
+        // portal it cannot: the portal has no unbind, and the desktop keeps
+        // it in its own settings, so that is where it is changed or removed.
+        ShortcutState::Installed if method == ShortcutMethod::Cosmic => item
+            .description(format!("{does} {}", crate::fl!("shortcut-set-up")))
+            .control(
+                row![
+                    text::body(keys),
+                    button::standard(crate::fl!("remove"))
+                        .on_press(Message::Shortcuts(ShortcutsMessage::Remove(shortcut.id))),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center),
+            )
+            .into(),
+        ShortcutState::Installed => item
+            .description(format!(
+                "{does} {}",
+                crate::fl!("shortcut-change-in-desktop")
+            ))
+            .control(
+                row![
+                    text::body(keys),
+                    // No `on_press`: shown, grayed out, as where it stands.
+                    button::standard(crate::fl!("added")),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center),
+            )
+            .into(),
         ShortcutState::Missing => {
             let state = crate::fl!("shortcut-missing", keys = keys);
             item.description(format!("{does} {state}"))

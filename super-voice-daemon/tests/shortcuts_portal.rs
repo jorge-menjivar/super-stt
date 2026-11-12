@@ -108,9 +108,10 @@ struct Calls {
     bound: HashMap<String, Vec<String>>,
     /// Answer a bind as the user saying no in the dialog.
     refuse: bool,
-    /// How many times KDE's shortcut service was told to forget the
-    /// shortcuts no session holds.
-    cleaned_up: usize,
+    /// The shortcuts the desktop keeps across sessions, as KDE Plasma and
+    /// GNOME do: each one ever bound, until the user removes it in the
+    /// desktop's settings.
+    kept: Vec<String>,
 }
 
 type Shared = Arc<Mutex<Calls>>;
@@ -246,6 +247,11 @@ impl GlobalShortcuts {
             calls.binds.push((session.clone(), asked));
             if !calls.refuse {
                 calls.bound.insert(session, ids.clone());
+                for id in &ids {
+                    if !calls.kept.contains(id) {
+                        calls.kept.push(id.clone());
+                    }
+                }
             }
             calls.refuse
         };
@@ -271,14 +277,16 @@ impl GlobalShortcuts {
             sender_part(&header),
             option(&options, "handle_token")
         );
-        let ids = self
-            .0
-            .lock()
-            .unwrap()
-            .bound
-            .get(session_handle.as_str())
-            .cloned()
-            .unwrap_or_default();
+        // A session lists what it bound, or, before it binds anything, what
+        // the desktop kept from sessions before it.
+        let ids = {
+            let calls = self.0.lock().unwrap();
+            calls
+                .bound
+                .get(session_handle.as_str())
+                .cloned()
+                .unwrap_or_else(|| calls.kept.clone())
+        };
         let mut results = HashMap::new();
         results.insert("shortcuts".to_string(), described(&ids));
         respond(conn, &header, request.clone(), 0, results).await;
@@ -315,37 +323,17 @@ impl FakeSession {
     }
 }
 
-/// KDE's shortcut service's object for Super Voice's shortcuts.
-struct KdeComponent(Shared);
-
-#[zbus::interface(name = "org.kde.kglobalaccel.Component")]
-impl KdeComponent {
-    #[zbus(name = "cleanUp")]
-    fn clean_up(&self) -> bool {
-        self.0.lock().unwrap().cleaned_up += 1;
-        true
-    }
-}
-
-/// The fake portal, serving on `bus` as the portal's own name, beside KDE's
-/// shortcut service, as on KDE Plasma.
+/// The fake portal, serving on `bus` as the portal's own name.
 async fn fake_portal(bus: &Bus) -> (zbus::Connection, Shared) {
     let calls = Shared::default();
     let conn = zbus::connection::Builder::address(bus.address.as_str())
         .expect("address")
         .name("org.freedesktop.portal.Desktop")
         .expect("name")
-        .name("org.kde.kglobalaccel")
-        .expect("kglobalaccel name")
         .serve_at(PORTAL_PATH, Registry(Arc::clone(&calls)))
         .expect("registry")
         .serve_at(PORTAL_PATH, GlobalShortcuts(Arc::clone(&calls)))
         .expect("global shortcuts")
-        .serve_at(
-            "/component/super_voice_app",
-            KdeComponent(Arc::clone(&calls)),
-        )
-        .expect("kglobalaccel component")
         .build()
         .await
         .expect("serve the fake portal");
@@ -500,18 +488,8 @@ async fn the_portal_binds_each_shortcut_added_and_drops_one_removed() {
     assert!(config.contains(r#""read_aloud""#), "{config}");
     assert!(!config.contains(r#""dictate""#), "{config}");
 
-    let cleaned_before = calls.lock().unwrap().cleaned_up;
     let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/read_aloud").await;
     assert_eq!(status, StatusCode::OK, "{list}");
-    // KDE keeps a removed shortcut in its settings unless told to forget it.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while calls.lock().unwrap().cleaned_up == cleaned_before {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "KDE was never told to forget the removed shortcut"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
     let calls = calls.lock().unwrap();
     assert_eq!(
         calls.closed.len(),
@@ -575,6 +553,49 @@ async fn saved_shortcuts_are_bound_again_at_start() {
     );
 }
 
+/// A shortcut the user removed in the desktop's settings while the daemon
+/// was off is not bound again at the next start: it is forgotten, and the
+/// page offers to add it. One the desktop still has is bound again.
+#[tokio::test]
+async fn a_shortcut_removed_in_the_desktop_is_offered_again() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let bus = Bus::start(home.path());
+    let (_portal, calls) = fake_portal(&bus).await;
+
+    let (first, token) = start("shortcuts-portal-removed", &bus, None).await;
+    for id in ["dictate", "read_aloud"] {
+        let (status, body) = call(&first, &token, Method::POST, &format!("/shortcuts/{id}")).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let config = std::fs::read_to_string(config_file(&first.home().config)).expect("config");
+    drop(first);
+    // The user removes dictation in the desktop's settings.
+    calls.lock().unwrap().kept.retain(|id| id != "dictate");
+    let binds_before = calls.lock().unwrap().binds.len();
+
+    let (second, token) = start("shortcuts-portal-removed-restart", &bus, Some(&config)).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while calls.lock().unwrap().binds.len() == binds_before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the daemon never bound the shortcut the desktop kept"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(last_bind(&calls), [pair("read_aloud", "LOGO+SHIFT+space")]);
+
+    let (_, list) = call(&second, &token, Method::GET, "/shortcuts").await;
+    assert_eq!(
+        states(&list),
+        [
+            row("dictate", "missing", "Super+Space"),
+            row("read_aloud", "installed", "Meta+Shift+Space")
+        ]
+    );
+    let config = std::fs::read_to_string(config_file(&second.home().config)).expect("config");
+    assert!(!config.contains(r#""dictate""#), "{config}");
+}
+
 /// A press reaches the session's caller as the shortcut's id, and only a
 /// press on its own session does.
 #[tokio::test]
@@ -584,12 +605,12 @@ async fn a_press_on_the_session_is_handed_on() {
     let (portal, calls) = fake_portal(&bus).await;
 
     let (pressed, mut presses) = tokio::sync::mpsc::unbounded_channel();
-    let (_session, bound) =
-        Session::bind(bus.connect().await, &[ShortcutId::ReadAloud], move |id| {
-            let _ = pressed.send(id);
-        })
-        .await
-        .expect("bind");
+    let session = Session::open(bus.connect().await, move |id| {
+        let _ = pressed.send(id);
+    })
+    .await
+    .expect("open");
+    let bound = session.bind(&[ShortcutId::ReadAloud]).await.expect("bind");
     assert_eq!(bound.len(), 1);
     let ours = calls.lock().unwrap().sessions[0].clone();
 

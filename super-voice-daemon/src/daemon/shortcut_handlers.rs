@@ -86,9 +86,10 @@ impl SuperSTTDaemon {
     }
 
     /// Bind the shortcuts the user added through the portal, as the daemon
-    /// starts. Nothing is asked of the desktop when there are none. The
-    /// config is left as it is, even when the bind fails: the portal may
-    /// just not be up yet, and the next start tries again.
+    /// starts. Nothing is asked of the desktop when there are none. One the
+    /// desktop no longer has, removed in its settings, is forgotten. The
+    /// config is left as it is when the bind fails: the portal may just not
+    /// be up yet, and the next start tries again.
     pub(crate) async fn bind_saved_shortcuts(&self) {
         let saved = self.config.read().await.shortcuts.portal.clone();
         if saved.is_empty() {
@@ -99,8 +100,19 @@ impl SuperSTTDaemon {
             info!("Shortcuts saved for the portal, but this desktop has none: not bound");
             return;
         }
-        match self.shortcuts.bind(&saved).await {
-            Ok(bound) => info!("Bound {} saved shortcuts", bound.len()),
+        match self.shortcuts.bind_saved(&saved).await {
+            Ok(kept) if kept == saved => info!("Bound {} saved shortcuts", kept.len()),
+            Ok(kept) => {
+                // Removed in the desktop's settings: forgotten here too, so
+                // the page offers to add them again.
+                info!(
+                    "Bound {} saved shortcuts; the desktop no longer has the rest",
+                    kept.len()
+                );
+                if let Err(e) = self.set_config_field(|c| c.shortcuts.portal = kept).await {
+                    warn!("Shortcuts forgotten but config save failed: {e}");
+                }
+            }
             Err(e) => warn!("Could not bind the saved shortcuts: {e:?}"),
         }
     }

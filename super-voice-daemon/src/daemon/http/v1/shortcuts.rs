@@ -129,7 +129,8 @@ Removes the shortcut, from whatever keys it is on. Removing one that is not set 
 changes nothing and succeeds. Answers the whole list, as `GET /shortcuts` does.
 
 On COSMIC, removing `dictate` hands Super+Space back to COSMIC's own binding for it, \
-switching the input source.",
+switching the input source. Through the portal, it only stops Super Voice binding it: \
+the desktop keeps it in its own settings until the user removes it there.",
     params(("id" = ShortcutId, Path, description = "`dictate` or `read_aloud`.")),
     security(("session_token" = ["settings"])),
     responses(
