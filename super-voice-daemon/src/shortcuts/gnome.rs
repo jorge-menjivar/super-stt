@@ -13,15 +13,25 @@
 //! GNOME grabs an app's keys when the app binds them, so they are taken
 //! first: freed after the bind, the press would still go nowhere.
 //!
+//! GNOME also keeps a record of each app's global shortcuts, which its
+//! Settings lists on the app's page under Apps, and the portal cannot take
+//! one out of it. So removing one, the daemon takes it out of the record
+//! itself ([`forget`]), as Settings' own "Remove All Shortcuts" does for all
+//! of them.
+//!
 //! GNOME's settings are read and written with `gsettings`, in the daemon's
 //! own session, so in the user's settings for that session.
 
+use super::portal::APP_ID;
 use anyhow::{Context, Result, bail};
 use log::debug;
 use super_voice_shared::models::shortcuts::ShortcutId;
 
 /// GNOME's keybindings.
 const SCHEMA: &str = "org.gnome.desktop.wm.keybindings";
+
+/// GNOME's record of one app's global shortcuts, under the app's id.
+const APP_SHORTCUTS_SCHEMA: &str = "org.gnome.settings-daemon.global-shortcuts.application";
 
 /// The GNOME binding that holds shortcut `id`'s keys, and those keys as GNOME
 /// writes them.
@@ -62,39 +72,140 @@ pub async fn give_back(id: ShortcutId) -> Result<()> {
     Ok(())
 }
 
+/// Take shortcut `id` out of GNOME's record of Super Voice's shortcuts, so
+/// it leaves GNOME's Settings, and adding it again asks again. Bind the rest
+/// first: this only changes the record. Answers whether GNOME had it.
+///
+/// # Errors
+///
+/// When `gsettings` cannot read or write the record.
+pub async fn forget(id: ShortcutId) -> Result<bool> {
+    let schema =
+        format!("{APP_SHORTCUTS_SCHEMA}:/org/gnome/settings-daemon/global-shortcuts/{APP_ID}/");
+    let text = gsettings(&["get", &schema, "shortcuts"]).await?;
+    let entries = parse_entries(&text)
+        .with_context(|| format!("GNOME's record of the shortcuts is not as expected: {text}"))?;
+    let rest: Vec<&str> = entries
+        .iter()
+        .filter(|(entry_id, _)| entry_id != id.as_wire_str())
+        .map(|(_, entry)| entry.as_str())
+        .collect();
+    if rest.len() == entries.len() {
+        return Ok(false);
+    }
+    if rest.is_empty() {
+        gsettings(&["reset", &schema, "shortcuts"]).await?;
+    } else {
+        gsettings(&[
+            "set",
+            &schema,
+            "shortcuts",
+            &format!("[{}]", rest.join(", ")),
+        ])
+        .await?;
+    }
+    debug!("GNOME: forgot shortcut {id}");
+    Ok(true)
+}
+
 /// The keys GNOME's binding `key` is on.
 async fn get(key: &str) -> Result<Vec<String>> {
-    let out = tokio::process::Command::new("gsettings")
-        .args(["get", SCHEMA, key])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .await
-        .context("Could not run gsettings")?;
-    if !out.status.success() {
-        bail!(
-            "gsettings get {SCHEMA} {key} failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
-    let text = String::from_utf8_lossy(&out.stdout);
+    let text = gsettings(&["get", SCHEMA, key]).await?;
     parse_list(&text).with_context(|| format!("{SCHEMA} {key} is not a list of keys: {text}"))
 }
 
 /// Put GNOME's binding `key` on `keys`.
 async fn set(key: &str, keys: &[String]) -> Result<()> {
+    gsettings(&["set", SCHEMA, key, &format_list(keys)]).await?;
+    Ok(())
+}
+
+/// Run `gsettings` with `args`, and answer what it prints.
+async fn gsettings(args: &[&str]) -> Result<String> {
     let out = tokio::process::Command::new("gsettings")
-        .args(["set", SCHEMA, key, &format_list(keys)])
+        .args(args)
         .stdin(std::process::Stdio::null())
         .output()
         .await
         .context("Could not run gsettings")?;
     if !out.status.success() {
         bail!(
-            "gsettings set {SCHEMA} {key} failed: {}",
+            "gsettings {} failed: {}",
+            args.join(" "),
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
-    Ok(())
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The entries of GNOME's record of an app's shortcuts, as `gsettings get`
+/// prints it, each with its id: `[('dictate', {'shortcuts': <['<Super>space']>,
+/// 'description': <'Dictate'>}), …]`, or `@a(sa{sv}) []` when it is empty.
+/// Each entry is kept as written, to be written back as it was.
+fn parse_entries(text: &str) -> Option<Vec<(String, String)>> {
+    let text = text.trim();
+    // An empty list is printed with its type: `@a(sa{sv}) []`.
+    let text = match text.strip_prefix('@') {
+        Some(typed) => typed.split_once(' ')?.1.trim(),
+        None => text,
+    };
+    let inner = text.strip_prefix('[')?.strip_suffix(']')?;
+    let mut entries = Vec::new();
+    let mut depth = 0_usize;
+    let mut start = 0;
+    let mut chars = inner.char_indices();
+    while let Some((at, c)) = chars.next() {
+        match c {
+            // A string is only ever inside an entry.
+            '\'' | '"' if depth == 0 => return None,
+            '\'' | '"' => {
+                // A string: skip it, escapes and all.
+                loop {
+                    match chars.next()?.1 {
+                        '\\' => {
+                            chars.next()?;
+                        }
+                        end if end == c => break,
+                        _ => {}
+                    }
+                }
+            }
+            '(' | '[' | '{' | '<' => {
+                if depth == 0 {
+                    if c != '(' {
+                        return None;
+                    }
+                    start = at;
+                }
+                depth += 1;
+            }
+            ')' | ']' | '}' | '>' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    let entry = &inner[start..=at];
+                    entries.push((first_string(entry)?, entry.to_string()));
+                }
+            }
+            ' ' | ',' if depth == 0 => {}
+            _ if depth == 0 => return None,
+            _ => {}
+        }
+    }
+    (depth == 0).then_some(entries)
+}
+
+/// The first string in `text`: an entry's id.
+fn first_string(text: &str) -> Option<String> {
+    let mut chars = text.chars().skip_while(|c| *c != '\'' && *c != '"');
+    let quote = chars.next()?;
+    let mut out = String::new();
+    loop {
+        match chars.next()? {
+            '\\' => out.push(chars.next()?),
+            c if c == quote => return Some(out),
+            c => out.push(c),
+        }
+    }
 }
 
 /// A list of strings as `gsettings get` prints one: `['<Super>space',
@@ -244,6 +355,27 @@ mod tests {
             with(&strings(&["<super>Space", "XF86Keyboard"]), "<Super>space"),
             None
         );
+    }
+
+    /// GNOME's record reads as its entries, each by its id and as written,
+    /// whatever the keys hold.
+    #[test]
+    fn gnomes_record_reads_as_its_entries() {
+        let dictate = "('dictate', {'shortcuts': <['<Super>space']>, 'description': <'Dictate'>})";
+        let read = "('read_aloud', {'shortcuts': <['<Shift><Super>space']>, 'description': <\"Read 'aloud'\">})";
+        let entries = parse_entries(&format!("[{dictate}, {read}]\n")).expect("parses");
+        assert_eq!(
+            entries,
+            [
+                ("dictate".to_string(), dictate.to_string()),
+                ("read_aloud".to_string(), read.to_string())
+            ]
+        );
+        assert_eq!(parse_entries("@a(sa{sv}) []\n"), Some(Vec::new()));
+        assert_eq!(parse_entries("[]"), Some(Vec::new()));
+        assert_eq!(parse_entries("[('dictate', {}"), None);
+        assert_eq!(parse_entries("['dictate']"), None);
+        assert_eq!(parse_entries("nothing"), None);
     }
 
     #[test]

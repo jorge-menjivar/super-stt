@@ -131,7 +131,9 @@ changes nothing and succeeds. Answers the whole list, as `GET /shortcuts` does.
 
 On COSMIC, removing `dictate` hands Super+Space back to COSMIC's own binding for it, \
 switching the input source. Through the portal on KDE Plasma, KDE's shortcut service is \
-told to forget it too, so it leaves KDE's settings. Through the portal elsewhere, it only \
+told to forget it too, so it leaves KDE's settings, and on GNOME it is taken out of \
+GNOME's record of the app's shortcuts, so it leaves GNOME's Settings. Through the portal \
+elsewhere, it only \
 stops Super Voice binding it: the desktop keeps it in its own settings until the user \
 removes it there, and `removable` is false.",
     params(("id" = ShortcutId, Path, description = "`dictate` or `read_aloud`.")),

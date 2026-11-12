@@ -20,11 +20,12 @@ How the daemon puts a shortcut on the desktop is the `method`:
 
 `removable` says whether `DELETE /shortcuts/{id}` takes a shortcut off the
 desktop, so a client offers to remove one. It is true on COSMIC, and through the
-portal on KDE Plasma. Through the portal elsewhere it is false: see below.
+portal on KDE Plasma and GNOME. Through the portal elsewhere it is false: see
+below.
 
 `desktop` is the desktop the daemon runs in, as `XDG_CURRENT_DESKTOP` names it,
 such as `GNOME`, `KDE` or `ubuntu:GNOME`, and empty when that is not set. A client
-can say by it where the user changes a shortcut the daemon cannot remove: GNOME
+can say by it where the user finds a shortcut in the desktop's settings: GNOME
 keeps an app's shortcuts on the app's page in its Settings, under Apps.
 
 Each shortcut's `state`:
@@ -63,7 +64,10 @@ the desktop names Super Voice in its dialog and its shortcut settings.
       so it leaves KDE's settings and frees its keys. KDE's own settings
       cannot remove a shortcut while the daemon holds it: they hide it until
       they reload, and it keeps working.
-   2. Elsewhere a shortcut is changed or removed in the desktop's settings,
+   2. On GNOME, `DELETE` also takes it out of GNOME's record of the app's
+      shortcuts, which its Settings lists under Apps, as Settings' own
+      "Remove All Shortcuts" does for all of them.
+   3. Elsewhere a shortcut is changed or removed in the desktop's settings,
       and `removable` is false. `DELETE` only stops Super Voice binding it.
 4. At each start the daemon binds the saved shortcuts again, and forgets one
    the user removed in the desktop's settings, so `GET /shortcuts` lists it
@@ -141,8 +145,9 @@ up changes nothing and succeeds. Answers the whole list.
 
 On COSMIC, removing `dictate` hands Super+Space back to COSMIC's own binding for
 it, switching the input source. Through the portal on KDE Plasma, KDE's shortcut
-service forgets it. Through the portal elsewhere, it only stops Super Voice
-binding it: the desktop keeps it until the user removes it in its own settings.
+service forgets it, and on GNOME it is taken out of GNOME's record of the app's
+shortcuts. Through the portal elsewhere, it only stops Super Voice binding it:
+the desktop keeps it until the user removes it in its own settings.
 
 **Errors:**
 

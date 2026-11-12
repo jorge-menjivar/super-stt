@@ -44,13 +44,18 @@ fn row_for(shortcut: &Shortcut, list: &ShortcutList) -> Element<'static, Message
     let keys = shortcut.keys.clone();
     let command = shortcut.command.clone();
     match shortcut.state {
-        // The daemon removes it from COSMIC's file, and has KDE Plasma's
-        // shortcut service forget it. Through the portal elsewhere it cannot:
-        // the portal has no unbind, and the desktop keeps it in its own
-        // settings, so that is where it is changed or removed.
+        // The daemon removes it from COSMIC's file, has KDE Plasma's
+        // shortcut service forget it, and takes it out of GNOME's record.
+        // Through the portal elsewhere it cannot: the portal has no unbind,
+        // and the desktop keeps it in its own settings, so that is where it
+        // is changed or removed.
         ShortcutState::Installed if list.removable => {
+            // GNOME keeps an app's shortcuts on the app's page in its
+            // Settings, not with its keyboard settings.
             let set_up = if list.method == ShortcutMethod::Cosmic {
                 crate::fl!("shortcut-set-up")
+            } else if is_gnome(&list.desktop) {
+                crate::fl!("shortcut-set-up-gnome")
             } else {
                 crate::fl!("shortcut-set-up-desktop")
             };
@@ -66,16 +71,10 @@ fn row_for(shortcut: &Shortcut, list: &ShortcutList) -> Element<'static, Message
                 )
                 .into()
         }
-        // GNOME keeps an app's shortcuts on the app's page in its Settings,
-        // not with its keyboard settings.
         ShortcutState::Installed => item
             .description(format!(
                 "{does} {}",
-                if is_gnome(&list.desktop) {
-                    crate::fl!("shortcut-change-in-gnome")
-                } else {
-                    crate::fl!("shortcut-change-in-desktop")
-                }
+                crate::fl!("shortcut-change-in-desktop")
             ))
             .control(
                 row![

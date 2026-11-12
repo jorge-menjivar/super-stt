@@ -110,8 +110,10 @@ impl Bus {
     }
 }
 
-/// A fake `gsettings` in `dir/bin`, which keeps each binding of GNOME's in
-/// a file of its own under `dir/gsettings`, starting from GNOME's defaults.
+/// A fake `gsettings` in `dir/bin`, which keeps each of GNOME's settings in
+/// a file of its own under `dir/gsettings`, by key, starting from GNOME's
+/// defaults for its input-source bindings. A key it has no file for reads as
+/// an empty record of an app's shortcuts.
 fn fake_gsettings(dir: &Path) {
     use std::os::unix::fs::PermissionsExt;
     let values = dir.join("gsettings");
@@ -132,8 +134,9 @@ fn fake_gsettings(dir: &Path) {
 # A fake gsettings: each key's value is a file of its own.
 dir='{}'
 case "$1" in
-get) cat "$dir/$3" ;;
+get) if [ -f "$dir/$3" ]; then cat "$dir/$3"; else echo '@a(sa{{sv}}) []'; fi ;;
 set) printf '%s\n' "$4" > "$dir/$3" ;;
+reset) rm -f "$dir/$3" ;;
 *) echo "fake gsettings: $*" >&2; exit 1 ;;
 esac
 "#,
@@ -690,19 +693,19 @@ async fn a_shortcut_the_user_turns_down_is_not_kept() {
     }
 }
 
-/// Off KDE, the daemon cannot take a shortcut off the desktop: the list says
-/// so, and removing one only stops Super Voice binding it.
+/// Where the daemon cannot take a shortcut off the desktop, as on Hyprland,
+/// the list says so, and removing one only stops Super Voice binding it.
 #[tokio::test]
-async fn off_kde_removing_is_left_to_the_desktop() {
+async fn on_hyprland_removing_is_left_to_the_desktop() {
     let home = tempfile::tempdir().expect("tempdir");
     let bus = Bus::start(home.path());
     let (_portal, calls) = fake_portal(&bus).await;
-    let (daemon, token) = start_on("GNOME", "shortcuts-portal-gnome", &bus, None).await;
+    let (daemon, token) = start_on("Hyprland", "shortcuts-portal-hyprland", &bus, None).await;
 
     let (status, list) = call(&daemon, &token, Method::POST, "/shortcuts/dictate").await;
     assert_eq!(status, StatusCode::OK, "{list}");
     assert_eq!(list["removable"], false, "{list}");
-    assert_eq!(list["desktop"], "GNOME", "{list}");
+    assert_eq!(list["desktop"], "Hyprland", "{list}");
 
     let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/dictate").await;
     assert_eq!(status, StatusCode::OK, "{list}");
@@ -710,6 +713,40 @@ async fn off_kde_removing_is_left_to_the_desktop() {
     let calls = calls.lock().unwrap();
     assert!(calls.forgotten.is_empty(), "{:?}", calls.forgotten);
     assert_eq!(calls.kept, ["dictate"], "the desktop keeps it");
+}
+
+/// On GNOME, removing a shortcut takes it out of GNOME's record of the app's
+/// shortcuts, which GNOME's Settings lists, and leaves the other there.
+/// Removing the last resets the record, as Settings' "Remove All Shortcuts"
+/// does.
+#[tokio::test]
+async fn on_gnome_removing_a_shortcut_takes_it_out_of_gnomes_record() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let bus = Bus::start(home.path());
+    let (_portal, _calls) = fake_portal(&bus).await;
+    let (daemon, token) = start_on("GNOME", "shortcuts-gnome-record", &bus, None).await;
+    for id in ["dictate", "read_aloud"] {
+        let (status, list) = call(&daemon, &token, Method::POST, &format!("/shortcuts/{id}")).await;
+        assert_eq!(status, StatusCode::OK, "{list}");
+        assert_eq!(list["removable"], true, "{list}");
+    }
+    // GNOME's record of them, as GNOME keeps it after the binds.
+    let dictate = "('dictate', {'shortcuts': <['<Super>space']>, 'description': <'Dictate'>})";
+    let read =
+        "('read_aloud', {'shortcuts': <['<Shift><Super>space']>, 'description': <'Read aloud'>})";
+    bus.set_gsettings("shortcuts", &format!("[{dictate}, {read}]"));
+
+    let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/dictate").await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(states(&list)[0], row("dictate", "missing", "Super+Space"));
+    assert_eq!(bus.gsettings("shortcuts"), format!("[{read}]"));
+
+    let (status, list) = call(&daemon, &token, Method::DELETE, "/shortcuts/read_aloud").await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(
+        !bus.dir.join("gsettings/shortcuts").exists(),
+        "the record is reset"
+    );
 }
 
 /// A daemon binds the shortcuts in its config as it starts, with no client

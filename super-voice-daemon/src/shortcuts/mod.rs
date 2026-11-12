@@ -12,8 +12,8 @@
 //!    ([`portal`]), and runs the same `voice` when it is pressed. The ones
 //!    the user added are in the config, and bound again at every start. The
 //!    portal cannot unbind one: on KDE Plasma, KDE's shortcut service is told
-//!    to forget it, and elsewhere the user removes it in the desktop's
-//!    settings. GNOME holds Super Voice's keys for input-source switching,
+//!    to forget it, on GNOME it is taken out of GNOME's record of the app's
+//!    shortcuts, and elsewhere the user removes it in the desktop's settings. GNOME holds Super Voice's keys for input-source switching,
 //!    so there the daemon takes them over first, as Dictate's entry does on
 //!    COSMIC ([`gnome`]).
 //! 3. Anything else: the user binds the command in the desktop's settings.
@@ -218,14 +218,16 @@ impl Shortcuts {
 
     /// [`Shortcuts::bind`] `set`, which the user just took `id` out of.
     ///
-    /// On KDE Plasma, KDE's shortcut service is told to forget `id` too, so
-    /// it leaves KDE's settings and frees its keys. Elsewhere the desktop
-    /// keeps it in its settings until the user removes it there.
+    /// The desktop is told to forget `id` too, so it leaves the desktop's
+    /// settings and frees its keys: on KDE Plasma by KDE's shortcut service,
+    /// and on GNOME by taking it out of GNOME's record of the app's
+    /// shortcuts. Elsewhere the desktop keeps it in its settings until the
+    /// user removes it there.
     ///
     /// # Errors
     ///
-    /// As [`Shortcuts::bind`], and [`Error::Write`] when KDE could not be
-    /// told to forget it.
+    /// As [`Shortcuts::bind`], and [`Error::Write`] when the desktop could
+    /// not be told to forget it.
     pub async fn bind_removed(
         &self,
         set: &[ShortcutId],
@@ -235,6 +237,8 @@ impl Shortcuts {
         #[cfg(target_os = "linux")]
         if on_kde() {
             forget_on_kde(id).await?;
+        } else if on_gnome() {
+            forget_on_gnome(id).await?;
         }
         #[cfg(not(target_os = "linux"))]
         let _ = id;
@@ -416,6 +420,20 @@ async fn forget_on_kde(id: ShortcutId) -> Result<(), Error> {
     }
 }
 
+/// Take shortcut `id` out of GNOME's record of the app's shortcuts.
+#[cfg(target_os = "linux")]
+async fn forget_on_gnome(id: ShortcutId) -> Result<(), Error> {
+    match gnome::forget(id).await {
+        Ok(had) => {
+            info!("GNOME forgot shortcut {id} (it had it: {had})");
+            Ok(())
+        }
+        Err(e) => Err(Error::Write(format!(
+            "could not have GNOME forget shortcut {id}: {e:#}"
+        ))),
+    }
+}
+
 /// The ones of `saved` the desktop still lists.
 #[cfg(target_os = "linux")]
 fn still_kept(saved: &[ShortcutId], listed: &[Bound]) -> Vec<ShortcutId> {
@@ -495,17 +513,23 @@ fn on_kde() -> bool {
 /// Whether the daemon runs on GNOME.
 #[cfg(target_os = "linux")]
 fn on_gnome() -> bool {
-    names(desktop().as_deref(), "GNOME")
+    is_gnome(desktop().as_deref())
+}
+
+/// Whether `XDG_CURRENT_DESKTOP` names GNOME.
+fn is_gnome(desktop: Option<&str>) -> bool {
+    names(desktop, "GNOME")
 }
 
 /// Whether `DELETE /shortcuts/{id}` takes a shortcut off the desktop by
-/// `method`: COSMIC's file the daemon writes itself, and KDE Plasma's
-/// shortcut service forgets one when asked. Through the portal elsewhere the
+/// `method`: COSMIC's file the daemon writes itself, KDE Plasma's shortcut
+/// service forgets one when asked, and GNOME's record of the app's shortcuts
+/// is a setting the daemon can change. Through the portal elsewhere the
 /// desktop keeps it until the user removes it in its own settings.
 fn removable(method: ShortcutMethod, desktop: &str) -> bool {
     match method {
         ShortcutMethod::Cosmic => true,
-        ShortcutMethod::Portal => is_kde(Some(desktop)),
+        ShortcutMethod::Portal => is_kde(Some(desktop)) || is_gnome(Some(desktop)),
         ShortcutMethod::Manual => false,
     }
 }
@@ -682,13 +706,14 @@ mod tests {
         assert!(!is_kde(None));
     }
 
-    /// The daemon takes a shortcut off COSMIC, and off KDE Plasma through
-    /// its shortcut service. Through the portal elsewhere it cannot.
+    /// The daemon takes a shortcut off COSMIC, off KDE Plasma through its
+    /// shortcut service, and off GNOME through its record of the app's
+    /// shortcuts. Through the portal elsewhere it cannot.
     #[test]
-    fn only_cosmic_and_kde_shortcuts_are_removable() {
+    fn cosmic_kde_and_gnome_shortcuts_are_removable() {
         assert!(removable(ShortcutMethod::Cosmic, "COSMIC"));
         assert!(removable(ShortcutMethod::Portal, "KDE"));
-        assert!(!removable(ShortcutMethod::Portal, "GNOME"));
+        assert!(removable(ShortcutMethod::Portal, "ubuntu:GNOME"));
         assert!(!removable(ShortcutMethod::Portal, "Hyprland"));
         assert!(!removable(ShortcutMethod::Manual, "KDE"));
     }
@@ -768,9 +793,9 @@ mod tests {
             id: ShortcutId::ReadAloud,
             keys: "Meta+Shift+Space".to_string(),
         }];
-        let list = list_from(ShortcutMethod::Portal, "GNOME", "", &bound);
+        let list = list_from(ShortcutMethod::Portal, "Hyprland", "", &bound);
         assert!(!list.removable);
-        assert_eq!(list.desktop, "GNOME");
+        assert_eq!(list.desktop, "Hyprland");
         let [dictate, read] = list.shortcuts.as_slice() else {
             panic!("two shortcuts: {list:?}");
         };

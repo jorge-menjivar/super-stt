@@ -94,14 +94,14 @@ pub struct ShortcutList {
     pub method: ShortcutMethod,
     /// Whether `DELETE /shortcuts/{id}` takes a shortcut off the desktop, so
     /// a client offers to remove one: on COSMIC, and through the portal on
-    /// KDE Plasma. Through the portal elsewhere it only stops Super Voice
-    /// binding it, and the desktop keeps it until the user removes it in its
-    /// own settings.
+    /// KDE Plasma and GNOME. Through the portal elsewhere it only stops Super
+    /// Voice binding it, and the desktop keeps it until the user removes it
+    /// in its own settings.
     pub removable: bool,
     /// The desktop the daemon runs in, as `XDG_CURRENT_DESKTOP` names it:
     /// `GNOME`, `KDE`, or a `:`-separated list such as `ubuntu:GNOME`. Empty
-    /// when it is not set. A client says by it where the user changes a
-    /// shortcut the daemon cannot remove.
+    /// when it is not set. A client says by it where the user finds a
+    /// shortcut in the desktop's settings.
     #[cfg_attr(feature = "openapi", schema(example = "GNOME"))]
     pub desktop: String,
     /// Every shortcut, in [`ShortcutId::ALL`]'s order.
