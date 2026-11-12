@@ -2024,6 +2024,142 @@
         ]
       }
     },
+    "/v1/settings/idle_unload": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read how long an unused model stays loaded (scope: settings)",
+        "description": "Answers with the idle time in seconds. `0` means models stay loaded.",
+        "operationId": "get_idle_unload",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdleUnloadState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Set how long an unused model stays loaded (scope: settings)",
+        "description": "With a value set, the transcription and synthesis models are unloaded after that long without use and loaded again by the next request that needs them, which waits for the load. `0` keeps models loaded, and loads any selected model that is not.",
+        "operationId": "set_idle_unload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetIdleUnloadBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdleUnloadState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/settings/language": {
       "get": {
         "tags": [
@@ -10107,6 +10243,27 @@
           }
         }
       },
+      "IdleUnloadState": {
+        "type": "object",
+        "description": "How long a model may sit unused before it is unloaded.",
+        "required": [
+          "status",
+          "idle_unload_after_secs"
+        ],
+        "properties": {
+          "idle_unload_after_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds; `0` keeps models loaded.",
+            "example": 300,
+            "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          }
+        }
+      },
       "IndexModel": {
         "allOf": [
           {
@@ -11298,6 +11455,21 @@
             "type": "string",
             "description": "An accelerator token from the stage's or model's device list — `cpu`,\n`cuda`, `vulkan`, or the generic `gpu`.",
             "example": "cuda"
+          }
+        }
+      },
+      "SetIdleUnloadBody": {
+        "type": "object",
+        "description": "Set how long an unused model stays loaded",
+        "required": [
+          "after_secs"
+        ],
+        "properties": {
+          "after_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds a model may sit unused before it is unloaded. `0` keeps models loaded.",
+            "minimum": 0
           }
         }
       },
