@@ -7,8 +7,7 @@ use serde_json::json;
 use super::fake_daemon::{FakeDaemon, Reply};
 use crate::daemon::client::v1::settings::{
     audio_theme, idle_unload, language, notification_method, preview_typing, read_method,
-    recording_stop_mode,
-    update_beta_optin, update_check_enabled, volume, write_method,
+    recording_stop_mode, update_beta_optin, update_check_enabled, volume, write_method,
 };
 use crate::state::AudioTheme;
 

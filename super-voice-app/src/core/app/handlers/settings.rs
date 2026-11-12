@@ -4,8 +4,7 @@ use crate::core::app::AppModel;
 use crate::daemon::client::v1::speak::speak_read_command;
 use crate::daemon::client::{
     set_idle_unload, set_notification_method, set_preview_typing, set_read_method,
-    set_recording_stop_mode,
-    set_write_method, test_write_method,
+    set_recording_stop_mode, set_write_method, test_write_method,
 };
 use crate::ui::messages::{
     IdleUnloadMessage, Message, NotificationMethodMessage, PreviewTypingMessage, ReadMethodMessage,

@@ -5,16 +5,14 @@
 
 use crate::daemon::client::{
     get_current_audio_theme, get_idle_unload, get_notification_method, get_preview_typing,
-    get_read_method,
-    get_recording_stop_mode, get_update_check_enabled, get_update_status, get_volume,
-    get_write_method, list_backends, ping_daemon,
+    get_read_method, get_recording_stop_mode, get_update_check_enabled, get_update_status,
+    get_volume, get_write_method, list_backends, ping_daemon,
 };
 use crate::state::AudioTheme;
 use crate::ui::messages::{
     BackendMessage, DaemonMessage, IdleUnloadMessage, Message, ModelsPageMessage,
     NotificationMethodMessage, PreviewTypingMessage, ReadMethodMessage, RecordingStopModeMessage,
-    UpdateMessage,
-    WriteMethodMessage,
+    UpdateMessage, WriteMethodMessage,
 };
 use cosmic::prelude::*;
 use log::warn;
