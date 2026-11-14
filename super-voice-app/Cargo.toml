@@ -22,7 +22,7 @@
     # where libcosmic itself is declared.
     log.workspace = true
     open.workspace = true
-    rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+    rfd = { version = "0.18.0", default-features = false, features = ["xdg-portal"] }
     rust-embed.workspace = true
     serde.workspace = true
     serde_json.workspace = true
