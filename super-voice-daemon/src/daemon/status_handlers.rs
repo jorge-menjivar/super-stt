@@ -89,15 +89,13 @@ impl SuperSTTDaemon {
         }
         .flatten();
 
-        let available_models = backend
-            .map(|b| {
-                b.models
-                    .iter()
-                    .filter(|d| d.product.role.is_post_processor() == post_processor)
-                    .map(|d| (d.name.clone(), d.source.clone()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let available_models = backend.map_or_default(|b| {
+            b.models
+                .iter()
+                .filter(|d| d.product.role.is_post_processor() == post_processor)
+                .map(|d| (d.name.clone(), d.source.clone()))
+                .collect::<Vec<_>>()
+        });
 
         info!(
             "Model list requested for stage {}, returning {} model(s)",

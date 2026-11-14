@@ -541,15 +541,13 @@ impl SuperSTTDaemon {
                 vulkan: None,
                 metal: None,
             });
-        let installed_accel = crate::registry::installed::read(backend_dir)
-            .map(|r| r.selected.accel)
-            .unwrap_or_default();
+        let installed_accel =
+            crate::registry::installed::read(backend_dir).map_or_default(|r| r.selected.accel);
         // The installed manifest names every build the release publishes, so
         // the frameworks need no network. One that does not parse offers what
         // is on disk.
         let builds = super_voice_registry_types::manifest::Manifest::load_installed(backend_dir)
-            .map(|m| m.assets.subprocess)
-            .unwrap_or_default();
+            .map_or_default(|m| m.assets.subprocess);
         InstallContext {
             frameworks: backend_frameworks(&host, &builds, &installed_accel),
             installed_accel,

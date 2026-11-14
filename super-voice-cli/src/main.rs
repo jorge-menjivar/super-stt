@@ -374,8 +374,7 @@ async fn cmd_stop(
 fn read_text(sub: &ArgMatches) -> Result<String> {
     let words: Vec<&str> = sub
         .get_many::<String>("text")
-        .map(|v| v.map(String::as_str).collect())
-        .unwrap_or_default();
+        .map_or_default(|v| v.map(String::as_str).collect());
     if !words.is_empty() {
         return Ok(words.join(" "));
     }

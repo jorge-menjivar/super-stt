@@ -15,7 +15,7 @@ pub(super) fn models_tab_switcher(app: &AppModel) -> Element<'_, Message> {
     let active = tabs.active();
     tab_row(tabs.iter().collect::<Vec<_>>().into_iter().map(|entity| {
         (
-            tabs.text(entity).map(ToOwned::to_owned).unwrap_or_default(),
+            tabs.text(entity).map_or_default(ToOwned::to_owned),
             entity == active,
             Message::ModelsPage(ModelsPageMessage::ModelsTabActivated(entity)),
         )

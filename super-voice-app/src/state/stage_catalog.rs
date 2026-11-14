@@ -57,8 +57,7 @@ impl StageCatalog {
     #[must_use]
     pub fn models(&self, stage: Stage, source: &str) -> Vec<String> {
         self.backend(stage, source)
-            .map(|b| b.models.iter().map(|m| m.name.clone()).collect())
-            .unwrap_or_default()
+            .map_or_default(|b| b.models.iter().map(|m| m.name.clone()).collect())
     }
 
     /// Record what a stage can be filled with.
