@@ -167,8 +167,7 @@ impl SuperSTTDaemon {
                     // but it names a transport, not an accelerator, so it is
                     // filtered before publication (see `BackendInfo::installed_accel`).
                     installed_accel: crate::registry::installed::read(&b.dir)
-                        .map(|r| r.selected.accel)
-                        .unwrap_or_default()
+                        .map_or_default(|r| r.selected.accel)
                         .into_iter()
                         .filter(|a| a != "wasm")
                         .collect(),

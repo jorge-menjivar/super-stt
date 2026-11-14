@@ -71,13 +71,12 @@ impl SuperTTSDaemon {
                     .iter()
                     .find(|b| backends::dir_name(b).as_deref() == Some(dir.as_str()))
             })
-            .map(|b| {
+            .map_or_default(|b| {
                 b.models
                     .iter()
                     .map(|d| (d.name.clone(), d.source.clone()))
                     .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+            });
 
         info!(
             "Available models requested, returning {} model(s) for the active backend",
